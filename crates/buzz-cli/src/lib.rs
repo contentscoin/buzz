@@ -2583,7 +2583,15 @@ mod tests {
         );
         assert_eq!(
             names(&cmd, "issues"),
-            vec!["assign", "create", "get", "list", "status", "unassign"]
+            vec![
+                "assign",
+                "create",
+                "get",
+                "list",
+                "status",
+                "transition",
+                "unassign"
+            ]
         );
         assert_eq!(names(&cmd, "media"), vec!["get"]);
         assert_eq!(names(&cmd, "upload"), vec!["file"]);
@@ -2612,7 +2620,7 @@ mod tests {
             ("dms", 4),
             ("emoji", 5),
             ("feed", 1),
-            ("issues", 6),
+            ("issues", 7),
             ("media", 1),
             ("messages", 8),
             ("pack", 2),
