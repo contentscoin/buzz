@@ -51,6 +51,8 @@ import { useStableSendToChannel } from "./useStableSendToChannel";
 import { useAnchoredScroll } from "./useAnchoredScroll";
 import { selectDeferredListRenderState } from "@/features/messages/lib/timelineSnapshot";
 import { selectThreadRowHighlight } from "@/features/messages/lib/threadReplyHighlight";
+import { useWorkReport } from "@/features/messages/useWorkReport";
+import { WorkReportCard } from "./WorkReportCard";
 
 type MessageThreadPanelProps = ThreadPanelLayoutProps & {
   channel: Channel | null;
@@ -223,6 +225,18 @@ export function MessageThreadPanel({
   >(null);
   const isOverlay = useIsThreadPanelOverlay();
   const threadHeadId = threadHead?.id ?? null;
+  const { data: workReport = null } = useWorkReport(
+    isHuddleTranscript ? null : channelId,
+    isHuddleTranscript ? null : threadHeadId,
+  );
+  const [conversationPreference, setConversationPreference] = React.useState<{
+    rootId: string;
+    visible: boolean;
+  } | null>(null);
+  const conversationVisible =
+    conversationPreference?.rootId === threadHeadId
+      ? conversationPreference.visible
+      : workReport === null;
   useEscapeKey(
     onClose,
     !isHuddleTranscript && (isOverlay || isSinglePanelView || isFocusMode),
@@ -525,6 +539,20 @@ export function MessageThreadPanel({
           hasConstrainedColumn ? { maxWidth: columnMaxWidthPx } : undefined
         }
       >
+        {workReport ? (
+          <div className={cn(THREAD_PANEL_MESSAGE_GUTTER_CLASS, "pb-3 pt-3")}>
+            <WorkReportCard
+              conversationVisible={conversationVisible}
+              onToggleConversation={() =>
+                setConversationPreference({
+                  rootId: threadHeadId ?? "",
+                  visible: !conversationVisible,
+                })
+              }
+              report={workReport}
+            />
+          </div>
+        ) : null}
         {isHuddleTranscript ? (
           <div className={cn(THREAD_PANEL_MESSAGE_GUTTER_CLASS, "pb-2 pt-4")}>
             <HuddleTranscriptIntro />
@@ -533,6 +561,7 @@ export function MessageThreadPanel({
           <div
             className={cn(THREAD_PANEL_MESSAGE_GUTTER_CLASS, "pb-1 pt-0")}
             data-testid="message-thread-head"
+            hidden={!conversationVisible}
           >
             <div className="rounded-2xl">
               <MessageThreadRow
@@ -593,6 +622,7 @@ export function MessageThreadPanel({
           <div
             className={cn(THREAD_PANEL_MESSAGE_GUTTER_CLASS, "pb-3 pt-2")}
             data-testid="message-thread-head-divider"
+            hidden={!conversationVisible}
           >
             <Separator className="bg-border/60" />
           </div>
@@ -601,6 +631,7 @@ export function MessageThreadPanel({
         <div
           className={cn(THREAD_PANEL_MESSAGE_GUTTER_CLASS, "pb-3 pt-0")}
           data-testid="message-thread-replies"
+          hidden={!conversationVisible}
         >
           <ThreadReplyRegion
             isPending={threadRepliesPending}
