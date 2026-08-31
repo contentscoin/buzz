@@ -16,7 +16,9 @@ permissions:
 jobs:
   build:
     name: Build Windows canary
-    if: github.repository == 'block/buzz'
+    # contentscoin/buzz is the managed deployment fork. Keep the canary
+    # restricted to the two trusted repositories and to main below.
+    if: github.repository == 'block/buzz' || github.repository == 'contentscoin/buzz'
     runs-on: windows-latest
     timeout-minutes: 60
     permissions:
