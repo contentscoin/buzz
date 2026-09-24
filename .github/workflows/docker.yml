@@ -539,7 +539,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9  # v6.1.0
         with:
-          images: ghcr.io/block/buzz-push-gateway
+          images: ghcr.io/${{ github.repository_owner }}/buzz-push-gateway
           labels: |
             org.opencontainers.image.title=Buzz Push Gateway
             org.opencontainers.image.description=Capability-gated APNs last hop for Buzz
@@ -552,9 +552,9 @@ jobs:
           file: ./Dockerfile.push-gateway
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=ghcr.io/block/buzz-push-gateway,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=registry,ref=ghcr.io/block/buzz-push-gateway-buildcache:${{ matrix.arch }}
-          cache-to: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && format('type=registry,ref=ghcr.io/block/buzz-push-gateway-buildcache:{0},mode=max,compression=zstd', matrix.arch) || '' }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/buzz-push-gateway,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/buzz-push-gateway-buildcache:${{ matrix.arch }}
+          cache-to: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && format('type=registry,ref=ghcr.io/{0}/buzz-push-gateway-buildcache:{1},mode=max,compression=zstd', github.repository_owner, matrix.arch) || '' }}
       - name: Export digest
         if: github.event_name != 'pull_request'
         env:
@@ -568,6 +568,39 @@ jobs:
           path: /tmp/gateway-digests/*
           if-no-files-found: error
           retention-days: 1
+
+  push-gateway-personal-dev:
+    name: Build personal development push gateway
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+      - name: Build personal development image without publishing
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: ./Dockerfile.push-gateway
+          platforms: linux/amd64
+          build-args: BUZZ_PUSH_CARGO_FEATURES=personal-dev-app-attest
+          load: true
+          tags: buzz-push-gateway:personal-dev-test
+          cache-from: type=gha,scope=push-gateway-personal-dev
+          cache-to: type=gha,scope=push-gateway-personal-dev,mode=max
+      - name: Verify runtime dependencies and startup
+        run: |
+          set +e
+          output=$(docker run --rm buzz-push-gateway:personal-dev-test 2>&1)
+          status=$?
+          set -e
+          test "$status" -eq 1
+          [[ "$output" == *'Missing("BUZZ_PUSH_GRANT_KEYS")'* ]]
 
   push-gateway-merge:
     name: Publish public push gateway image
@@ -599,7 +632,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9  # v6.1.0
         with:
-          images: ghcr.io/block/buzz-push-gateway
+          images: ghcr.io/${{ github.repository_owner }}/buzz-push-gateway
           tags: |
             type=ref,event=branch,enable=${{ github.event_name != 'workflow_dispatch' || inputs.version == '' }}
             type=sha,prefix=sha-,format=short,enable=${{ github.event_name != 'workflow_dispatch' || inputs.version == '' }}
@@ -613,7 +646,7 @@ jobs:
         run: |
           set -euo pipefail
           tags=(); while IFS= read -r tag; do [ -n "$tag" ] && tags+=("-t" "$tag"); done <<< "$META_TAGS"
-          digests=(); for digest in *; do digests+=("ghcr.io/block/buzz-push-gateway@sha256:${digest}"); done
+          digests=(); for digest in *; do digests+=("ghcr.io/${{ github.repository_owner }}/buzz-push-gateway@sha256:${digest}"); done
           docker buildx imagetools create "${tags[@]}" "${digests[@]}"
           first_tag=$(echo "$META_TAGS" | head -n1)
           digest=$(docker buildx imagetools inspect "$first_tag" --format '{{json .Manifest}}' | jq -r '.digest')
@@ -621,7 +654,7 @@ jobs:
       - name: Attest gateway image provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
         with:
-          subject-name: ghcr.io/block/buzz-push-gateway
+          subject-name: ghcr.io/${{ github.repository_owner }}/buzz-push-gateway
           subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true
       - name: Gateway publication summary
@@ -631,7 +664,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "### Published \`ghcr.io/block/buzz-push-gateway\`"
+            echo "### Published \`ghcr.io/${{ github.repository_owner }}/buzz-push-gateway\`"
             echo
             printf "**Digest:** \`%s\`\n" "$GATEWAY_DIGEST"
             echo
@@ -642,6 +675,6 @@ jobs:
             echo
             echo 'Verify provenance before deployment:'
             echo "\`\`\`"
-            printf 'gh attestation verify oci://ghcr.io/block/buzz-push-gateway@%s --owner block\n' "$GATEWAY_DIGEST"
+            printf 'gh attestation verify oci://ghcr.io/${{ github.repository_owner }}/buzz-push-gateway@%s --owner %s\n' "$GATEWAY_DIGEST" '${{ github.repository_owner }}'
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -382,6 +382,8 @@ class _MessageStyleSystemMessageContent extends StatelessWidget {
           child: _UserAvatar(
             profile: userCache[displayPubkey.toLowerCase()],
             pubkey: displayPubkey,
+            isAgent:
+                userCache[displayPubkey.toLowerCase()]?.ownerPubkey != null,
             size: messageAvatarSize,
           ),
         ),
@@ -611,8 +613,9 @@ class _ThreadSummaryRow extends ConsumerWidget {
                 TextSpan(
                   children: [
                     TextSpan(
-                      text:
-                          '${summary.replyCount} ${summary.replyCount == 1 ? 'reply' : 'replies'}',
+                      text: summary.isCountPending
+                          ? 'Replies'
+                          : '${summary.replyCount}${summary.isLowerBound ? '+' : ''} ${summary.replyCount == 1 ? 'reply' : 'replies'}',
                       style: replyPreviewTextStyle.copyWith(
                         color: context.colors.primary,
                       ),
