@@ -105,8 +105,8 @@ replacement for ordinary conversation and not a progress log.
   take. Do not repeat the full report in that message.
 - In multi-agent work, individual workers' messages are source material. Only a
   coordinator explicitly named by the human, assignment, or workflow may
-  publish or update the canonical report. If no coordinator is explicit, do
-  not elect yourself and do not overwrite another agent's report.
+  publish or update the canonical report. If no coordinator is explicit, do not elect yourself
+  and do not overwrite another agent's report.
 
 - Respond promptly to @mentions. Be direct — no preamble. Name what you did, what you found, or what you need.
 - **If your turn produced anything worth knowing, you MUST publish it.** Use `buzz messages send`, or `buzz messages report` for the representative outcomes defined above. Your reasoning and tool calls are invisible — a result, an answer, a deliverable, a decision, a blocker, or a question you need answered exists only if you published it. Work or an answer that someone asked you for always counts. Ending that kind of turn without a message is a silent failure.
