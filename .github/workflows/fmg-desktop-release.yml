@@ -147,6 +147,7 @@ jobs:
             target
             desktop/src-tauri/target
             !desktop/src-tauri/target/**/release/bundle
+            !desktop/src-tauri/target/**/release/bundle/**
           key: ${{ steps.rust_cache_key.outputs.key }}
 
       - name: Generate non-updating bundle config
@@ -170,7 +171,10 @@ jobs:
         shell: bash
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
-        run: cd desktop && pnpm tauri build --target "$TARGET" --bundles nsis --config src-tauri/tauri.fmg.conf.json
+        run: |
+          rm -rf "desktop/src-tauri/target/${TARGET}/release/bundle/nsis"
+          cd desktop
+          pnpm tauri build --target "$TARGET" --bundles nsis --config src-tauri/tauri.fmg.conf.json
 
       - name: Stage installer and release receipt
         id: artifact
@@ -180,9 +184,15 @@ jobs:
         run: |
           set -euo pipefail
           BUNDLE_DIR="desktop/src-tauri/target/${TARGET}/release/bundle/nsis"
-          EXE=$(find "$BUNDLE_DIR" -name '*.exe' -type f | head -1)
-          if [[ -z "$EXE" ]]; then
-            echo "::error::No NSIS installer found in $BUNDLE_DIR"
+          EXE="$BUNDLE_DIR/Buzz_${VERSION}_x64-setup.exe"
+          if [[ ! -f "$EXE" ]]; then
+            echo "::error::Expected NSIS installer not found: $EXE"
+            exit 1
+          fi
+          WINDOWS_EXE=$(cygpath -w "$EXE")
+          PRODUCT_VERSION=$(powershell.exe -NoProfile -Command "(Get-Item -LiteralPath '$WINDOWS_EXE').VersionInfo.ProductVersion" | tr -d '\r')
+          if [[ "$PRODUCT_VERSION" != "$VERSION" ]]; then
+            echo "::error::NSIS installer ProductVersion $PRODUCT_VERSION does not match $VERSION"
             exit 1
           fi
           mkdir -p dist
@@ -251,6 +261,7 @@ jobs:
             target
             desktop/src-tauri/target
             !desktop/src-tauri/target/**/release/bundle
+            !desktop/src-tauri/target/**/release/bundle/**
           key: ${{ steps.rust_cache_key.outputs.key }}
 
       - name: Save pnpm store cache
