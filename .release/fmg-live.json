@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "channel": "fmg-live",
+  "desktop": {
+    "version": "0.5.26-fmg.1",
+    "tag": "fmg-desktop-v0.5.26-fmg.1",
+    "product_name": "Buzz",
+    "identifier": "xyz.block.buzz.app",
+    "artifact": "windows-nsis-x86_64",
+    "signing": "unsigned",
+    "update_policy": "manual-non-updating"
+  },
+  "upstream": {
+    "tag": "desktop-v0.5.25",
+    "commit": "c8f73213089cbd5a0f1e675d3193558280d46e10"
+  },
+  "relay": {
+    "image": "ghcr.io/contentscoin/buzz",
+    "deployment_policy": "digest-pinned",
+    "public_origin": "https://buzz-dnb0.srv2006121.hstgr.cloud",
+    "websocket_url": "wss://buzz-dnb0.srv2006121.hstgr.cloud"
+  },
+  "features": {
+    "work_reports": {
+      "state": "enabled",
+      "surfaces": ["desktop", "relay", "cli", "sdk"],
+      "control": "compiled-in"
+    },
+    "task_graph": {
+      "state": "operator-preview",
+      "surfaces": ["cli", "sdk"],
+      "control": "issue-label",
+      "control_value": "graph"
+    },
+    "aside_browser": {
+      "state": "disabled-by-default",
+      "surfaces": ["acp"],
+      "control": "environment",
+      "control_name": "BUZZ_ACP_ASIDE_COMMAND",
+      "disabled_value": ""
+    },
+    "mobile_report_fallback": {
+      "state": "pending",
+      "surfaces": ["mobile"],
+      "control": "not-yet-shipped"
+    }
+  }
+}
