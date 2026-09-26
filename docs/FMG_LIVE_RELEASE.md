@@ -28,7 +28,7 @@ The release does not declare environment flags that the application ignores.
 | Work reports | Enabled | Compiled desktop, relay, CLI and SDK support |
 | Task graph | Operator preview | The issue must carry the `graph` label before `buzz issues transition` accepts it |
 | Aside browser | Off | `BUZZ_ACP_ASIDE_COMMAND` is empty; set it to the trusted Aside executable to opt in |
-| Mobile report fallback | Pending | Add to the release descriptor only after the mobile client consumes it |
+| Mobile report summary | Enabled for ACP agents | After every confirmed report, the agent sends a concise ordinary reply in the same thread |
 
 ## Build and publish the Windows app
 
@@ -71,8 +71,9 @@ live:
 - OpenClaw ACP reconnects and reports the expected community and channel.
 - Desktop can post and receive a normal message.
 - A signed work report appears as a result card on desktop.
-- Mobile can receive the corresponding conversation content. A dedicated
-  mobile work-report representation remains a separate release gate.
+- Mobile receives the status, core outcome and primary deliverable link as an
+  ordinary reply in the same thread. A dedicated mobile work-report card is a
+  later client enhancement.
 
 ## Rollback
 

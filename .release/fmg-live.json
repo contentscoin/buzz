@@ -40,9 +40,10 @@
       "disabled_value": ""
     },
     "mobile_report_fallback": {
-      "state": "pending",
-      "surfaces": ["mobile"],
-      "control": "not-yet-shipped"
+      "state": "enabled-for-agent-reports",
+      "surfaces": ["mobile", "acp"],
+      "control": "agent-prompt",
+      "delivery": "ordinary-thread-summary"
     }
   }
 }

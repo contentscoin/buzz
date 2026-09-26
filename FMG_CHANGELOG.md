@@ -9,6 +9,9 @@ Base: upstream `desktop-v0.5.25` (`c8f73213089cbd5a0f1e675d3193558280d46e10`).
 - Structured work reports for completed, blocked, review and decision outcomes, including desktop result cards and signed CLI/SDK publication.
 - Graph-mode task transitions with dependency, authorization, stale-state and cycle checks. The command is available only for issues carrying the `graph` label.
 - Optional Aside browser MCP injection for ACP sessions through `BUZZ_ACP_ASIDE_COMMAND`.
+- Mobile-compatible agent report summaries: after a confirmed structured work
+  report, ACP agents post a short ordinary reply in the same thread with the
+  status, core outcome and primary deliverable link.
 - A fork-safe Windows build lane and fork-owner GHCR image paths.
 
 ### Deployment
@@ -22,10 +25,12 @@ Base: upstream `desktop-v0.5.25` (`c8f73213089cbd5a0f1e675d3193558280d46e10`).
 - Work reports are compiled in and enabled.
 - Task graph remains an operator preview gated per issue by the `graph` label.
 - Aside remains off while `BUZZ_ACP_ASIDE_COMMAND` is empty.
-- Mobile report fallback remains pending until its mobile implementation lands in this release branch.
+- Mobile report summaries are enabled through the ACP agent contract and use
+  ordinary thread messages understood by the official mobile client.
 
 ### Known limits
 
 - Task graph has CLI and SDK support; it does not yet have a desktop board or transition controls.
 - Aside does not yet have a desktop settings screen.
-- The official mobile app does not render the desktop work-report card.
+- The official mobile app shows the concise ordinary summary rather than the
+  desktop work-report card.
