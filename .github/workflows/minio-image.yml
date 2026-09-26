@@ -26,9 +26,9 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: ghcr.io/block/buzz-minio
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/buzz-minio
   COMPOSE_FILE: docker-compose.yml:docker-compose.ci.yml
-  MINIO_CI_IMAGE: ghcr.io/block/buzz-minio:sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+  MINIO_CI_IMAGE: ghcr.io/${{ github.repository_owner }}/buzz-minio:sha-${{ github.sha }}-run-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   image:
@@ -51,6 +51,7 @@ jobs:
           load: true
           tags: ${{ env.MINIO_CI_IMAGE }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
+          build-args: BUZZ_SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
           # A maintenance dispatch must refresh apk packages even with a warm
           # layer cache. Normal image changes can still reuse cached layers.
           no-cache: ${{ github.event_name == 'workflow_dispatch' }}
@@ -62,14 +63,14 @@ jobs:
         if: always()
         run: docker compose down --volumes
       - name: Log in to GHCR
-        if: github.repository == 'block/buzz' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish tested image
-        if: github.repository == 'block/buzz' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
           docker push "$MINIO_CI_IMAGE"
           docker tag "$MINIO_CI_IMAGE" "$IMAGE_NAME:latest"

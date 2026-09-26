@@ -2,7 +2,9 @@
 # Upstream registries deny pulls; official release binaries remain available.
 FROM alpine:3.22.6@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 
-LABEL org.opencontainers.image.source="https://github.com/block/buzz" \
+ARG BUZZ_SOURCE_REPOSITORY=https://github.com/block/buzz
+
+LABEL org.opencontainers.image.source="${BUZZ_SOURCE_REPOSITORY}" \
       org.opencontainers.image.title="Buzz CI MinIO" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 
