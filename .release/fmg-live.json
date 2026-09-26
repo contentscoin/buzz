@@ -2,8 +2,8 @@
   "schema": 1,
   "channel": "fmg-live",
   "desktop": {
-    "version": "0.5.26-fmg.1",
-    "tag": "fmg-desktop-v0.5.26-fmg.1",
+    "version": "0.5.26-fmg.2",
+    "tag": "fmg-desktop-v0.5.26-fmg.2",
     "product_name": "Buzz",
     "identifier": "xyz.block.buzz.app",
     "artifact": "windows-nsis-x86_64",
@@ -47,13 +47,13 @@
     },
     "task_graph": {
       "state": "operator-preview",
-      "surfaces": ["cli", "sdk"],
+      "surfaces": ["desktop-read-only", "cli", "sdk"],
       "control": "issue-label",
       "control_value": "graph"
     },
     "aside_browser": {
       "state": "disabled-by-default",
-      "surfaces": ["acp"],
+      "surfaces": ["desktop-status", "acp"],
       "control": "environment",
       "control_name": "BUZZ_ACP_ASIDE_COMMAND",
       "disabled_value": ""

@@ -10,6 +10,7 @@ mod deep_link;
 mod egress_guard;
 mod event_sync;
 mod events;
+mod fmg;
 mod huddle;
 mod identity_storage;
 mod initial_window;
@@ -592,6 +593,7 @@ pub fn run() {
             search_users,
             get_presence,
             get_os_idle_seconds,
+            fmg::get_fmg_runtime_status,
             get_default_relay_url,
             auto_connect_default_relay_enabled,
             get_legacy_workspace_storage,
