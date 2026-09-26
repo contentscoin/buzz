@@ -1,22 +1,23 @@
 # FMG Buzz live release
 
 This runbook publishes FMG Buzz without changing the upstream release ledger.
-The release descriptor is [`.release/fmg-live.json`](../.release/fmg-live.json),
-and the initial live desktop version is `0.5.26-fmg.1`.
+The release descriptor is [`.release/fmg-live.json`](../.release/fmg-live.json).
+The initial live desktop version was `0.5.26-fmg.1`; the current desktop-only
+update is `0.5.26-fmg.2`.
 
 ## Release identity
 
 | Item | Value |
 | --- | --- |
 | Upstream base | `desktop-v0.5.25` / `c8f73213089cbd5a0f1e675d3193558280d46e10` |
-| Desktop version | `0.5.26-fmg.1` |
-| Desktop tag | `fmg-desktop-v0.5.26-fmg.1` |
+| Desktop version | `0.5.26-fmg.2` |
+| Desktop tag | `fmg-desktop-v0.5.26-fmg.2` |
 | Windows app identity | `Buzz` / `xyz.block.buzz.app` |
 | Relay image | `ghcr.io/contentscoin/buzz` pinned by digest |
 | Agent runtime | `sprig-v0.5.26-fmg.1` release asset pinned by SHA-256 |
 | Public relay | `wss://buzz-dnb0.srv2006121.hstgr.cloud` |
 
-`0.5.26-fmg.1` is greater than the installed `0.5.25-test.3`, so the NSIS
+`0.5.26-fmg.2` is greater than the installed `0.5.26-fmg.1`, so the NSIS
 installer follows the normal in-place upgrade path. Keeping the application
 identifier preserves the existing desktop community and identity storage.
 
@@ -39,13 +40,14 @@ The release does not declare environment flags that the application ignores.
 3. Run once with `publish=false`. Download the workflow artifact and install it
    over the existing Buzz installation. Record the candidate run ID and the
    installer SHA-256 printed in the workflow summary.
-4. Confirm the installed version is `0.5.26-fmg.1`, the existing communities
-   remain available, and the Hostinger community reconnects.
+4. Confirm the installed version is `0.5.26-fmg.2`, the **FMG 센터** entry is
+   visible, the existing communities remain available, and the Hostinger
+   community reconnects.
 5. Re-run the workflow on the same `main` commit with `publish=true`, supplying
    the recorded `candidate_run_id` and `candidate_sha256`. The publish job does
    not rebuild. It downloads that immutable Actions artifact, verifies its
    receipt, source commit and hash, then creates
-   `fmg-desktop-v0.5.26-fmg.1`.
+   `fmg-desktop-v0.5.26-fmg.2`.
 6. If the tag or release already exists, the workflow resolves the tag to its
    commit and byte-compares the existing assets. It succeeds only when they are
    identical; it never replaces an existing release asset.

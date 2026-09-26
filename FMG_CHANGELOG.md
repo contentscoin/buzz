@@ -1,5 +1,28 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.2
+
+Base: FMG live release `0.5.26-fmg.1`.
+
+### Added
+
+- An always-visible **FMG 센터** sidebar entry so the custom desktop build is
+  immediately distinguishable from the official Buzz client.
+- A live FMG dashboard for the active community, relay connection, discovered
+  relay agents and locally managed agent counts.
+- A recent work-results list backed by signed kind `40009` events, with direct
+  navigation to each source thread.
+- A read-only task-graph preview for issues carrying the `graph` label.
+- A non-sensitive Aside status probe that reports whether
+  `BUZZ_ACP_ASIDE_COMMAND` is configured without exposing its value.
+- Clear mobile-summary and operator-boundary copy so best-effort or external
+  state is not presented as confirmed runtime health.
+
+### Deployment
+
+- This is a desktop-only update. The Hostinger relay image and the pinned
+  `sprig-v0.5.26-fmg.1` agent runtime remain unchanged.
+
 ## 0.5.26-fmg.1
 
 Base: upstream `desktop-v0.5.25` (`c8f73213089cbd5a0f1e675d3193558280d46e10`).

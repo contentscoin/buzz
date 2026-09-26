@@ -42,6 +42,7 @@ export type AppSidebarProps = {
     | "home"
     | "channel"
     | "messages"
+    | "fmg"
     | "agents"
     | "workflows"
     | "pulse"
@@ -85,6 +86,7 @@ export type AppSidebarProps = {
   onRemoveCommunity: (id: string) => Promise<LeaveCommunityResult | undefined>;
   onCreateAgent: () => void;
   onSelectAgents: () => void;
+  onSelectFmg: () => void;
   onSelectProjects: () => void;
   onSelectPulse: () => void;
   onSelectWorkflows: () => void;

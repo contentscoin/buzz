@@ -93,6 +93,17 @@ export function useAppNavigation() {
     [commitNavigation],
   );
 
+  const goFmg = React.useCallback(
+    (behavior?: NavigationBehavior) =>
+      commitNavigation(
+        {
+          to: "/fmg",
+        },
+        behavior,
+      ),
+    [commitNavigation],
+  );
+
   const goPulse = React.useCallback(
     (behavior?: NavigationBehavior) =>
       commitNavigation(
@@ -462,6 +473,7 @@ export function useAppNavigation() {
     goChannel,
     goDuplicateWorkflow,
     goEditWorkflow,
+    goFmg,
     goForumPost,
     goHome,
     goNewMessage,

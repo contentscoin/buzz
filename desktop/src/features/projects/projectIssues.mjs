@@ -192,6 +192,7 @@ export function eventToProjectIssue(
   const comments = commentsForIssue(issueCommentEvents);
   const assignmentState = assignmentStateForIssue(issue, issueCommentEvents);
   const labels = getAllTags(issue, "t");
+  const dependencies = getAllTags(issue, "depends-on");
   const title =
     getTag(issue, "subject") || issue.content.split("\n")[0] || "Untitled task";
 
@@ -206,6 +207,7 @@ export function eventToProjectIssue(
     channelId: getTag(issue, "h") ?? null,
     originAgentName: getTag(issue, "buzz-origin-agent") ?? null,
     labels,
+    dependencies,
     category: projectTaskCategoryFromLabels(labels),
     recipients: getAllTags(issue, "p"),
     assignees: assignmentState.assignees,

@@ -29,6 +29,8 @@ export type ProjectIssue = {
   channelId: string | null;
   originAgentName: string | null;
   labels: string[];
+  /** Raw, non-empty `depends-on` tag values in relay order. */
+  dependencies: string[];
   category: ProjectTaskCategory;
   recipients: string[];
   assignees: string[];

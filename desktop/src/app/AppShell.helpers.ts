@@ -6,6 +6,7 @@ export type AppView =
   | "home"
   | "channel"
   | "messages"
+  | "fmg"
   | "agents"
   | "workflows"
   | "pulse"
@@ -237,6 +238,13 @@ export function deriveShellRoute(pathname: string): {
     return {
       selectedChannelId: null,
       selectedView: "agents",
+    };
+  }
+
+  if (pathname === "/fmg") {
+    return {
+      selectedChannelId: null,
+      selectedView: "fmg",
     };
   }
 

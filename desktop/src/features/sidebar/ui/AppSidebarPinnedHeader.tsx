@@ -1,4 +1,4 @@
-import { Activity, Bot, Folders, Inbox, Zap } from "lucide-react";
+import { Activity, Bot, Folders, Gauge, Inbox, Zap } from "lucide-react";
 
 import { TopbarSearch } from "@/features/search/ui/TopbarSearch";
 import { SidebarProjectsSection } from "@/features/sidebar/ui/SidebarProjectsSection";
@@ -18,6 +18,7 @@ type SidebarSelectedView =
   | "home"
   | "channel"
   | "messages"
+  | "fmg"
   | "agents"
   | "workflows"
   | "pulse"
@@ -42,6 +43,7 @@ type AppSidebarPinnedHeaderProps = {
 type AppSidebarPrimaryMenuProps = {
   homeBadgeCount: number;
   onSelectAgents: () => void;
+  onSelectFmg: () => void;
   onSelectHome: () => void;
   onSelectProjects: () => void;
   onSelectPulse: () => void;
@@ -92,6 +94,7 @@ export function AppSidebarPinnedHeader({
 export function AppSidebarPrimaryMenu({
   homeBadgeCount,
   onSelectAgents,
+  onSelectFmg,
   onSelectHome,
   onSelectProjects,
   onSelectPulse,
@@ -107,6 +110,26 @@ export function AppSidebarPrimaryMenu({
         data-testid="sidebar-primary-menu"
       >
         <SidebarMenu className="sidebar-primary-menu pb-2">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              aria-current={selectedView === "fmg" ? "page" : undefined}
+              className="data-[active=true]:font-normal"
+              data-testid="open-fmg-view"
+              isActive={selectedView === "fmg"}
+              onClick={onSelectFmg}
+              tooltip="FMG 센터"
+              type="button"
+            >
+              <Gauge className="h-4 w-4" />
+              <SidebarMenuLabel>FMG 센터</SidebarMenuLabel>
+            </SidebarMenuButton>
+            <SidebarMenuBadge
+              aria-hidden="true"
+              className="right-2 bg-primary/15 text-primary peer-data-[active=true]/menu-button:bg-sidebar-active-foreground/20 peer-data-[active=true]/menu-button:text-sidebar-active-foreground"
+            >
+              FMG
+            </SidebarMenuBadge>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               className="data-[active=true]:font-normal"
