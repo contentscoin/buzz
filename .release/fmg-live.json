@@ -32,10 +32,11 @@
   "rollback": {
     "relay_image": "ghcr.io/contentscoin/buzz@sha256:3a501f2f9828a597efb58cd62dc1174167e29511ce56a0b63cac7a19149147c7",
     "agent_runtime": {
-      "release": "sprig-rollback-e0705ff",
+      "release": "sprig-rollback-9f47e98",
       "asset": "sprig-x86_64-unknown-linux-musl.tar.gz",
-      "sha256": "c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a368054f70b60518e29",
-      "source_commit": "e0705ff114669c2bc73477a007aafe4be8726961"
+      "sha256": "c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a3687ca26e2a4579cd46",
+      "version": "0.1.0+git.9f47e98",
+      "source_commit": "9f47e983c6212d2ac2837e46b6c263081ffd53c3"
     }
   },
   "features": {

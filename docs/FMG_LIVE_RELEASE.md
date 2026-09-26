@@ -123,12 +123,14 @@ live:
 ## Rollback
 
 1. Change Hostinger back to the previously recorded image digest and redeploy.
-2. Restore the Sprig rollback URL and its recorded SHA-256 as one pair, then
-   recreate `buzz-openclaw-agent` if the agent runtime must be rolled back. The
-   preserved baseline is release `sprig-rollback-e0705ff`, asset
+2. Restore the Sprig rollback URL, SHA-256, version and source commit as one
+   set of `BUZZ_SPRIG_*` controls, then recreate `buzz-openclaw-agent` if the
+   agent runtime must be rolled back. The preserved baseline is release
+   `sprig-rollback-9f47e98`, asset
    `sprig-x86_64-unknown-linux-musl.tar.gz`, SHA-256
-   `c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a368054f70b60518e29`,
-   source `e0705ff114669c2bc73477a007aafe4be8726961`.
+   `c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a3687ca26e2a4579cd46`,
+   version `0.1.0+git.9f47e98`, source
+   `9f47e983c6212d2ac2837e46b6c263081ffd53c3`.
 3. Reinstall the previous saved desktop installer if the desktop must also be
    rolled back.
 4. Keep the existing volumes and identity material. A rollback changes binaries,
