@@ -10,8 +10,8 @@ Base: upstream `desktop-v0.5.25` (`c8f73213089cbd5a0f1e675d3193558280d46e10`).
 - Graph-mode task transitions with dependency, authorization, stale-state and cycle checks. The command is available only for issues carrying the `graph` label.
 - Optional Aside browser MCP injection for ACP sessions through `BUZZ_ACP_ASIDE_COMMAND`.
 - Mobile-compatible agent report summaries: after a confirmed structured work
-  report, ACP agents post a short ordinary reply in the same thread with the
-  status, core outcome and primary deliverable link.
+  report, the ACP policy instructs agents to attempt one short ordinary reply
+  in the same thread with the status, core outcome and primary deliverable link.
 - A fork-safe Windows build lane and fork-owner GHCR image paths.
 
 ### Deployment
@@ -19,13 +19,17 @@ Base: upstream `desktop-v0.5.25` (`c8f73213089cbd5a0f1e675d3193558280d46e10`).
 - Windows keeps the existing `Buzz` product name and `xyz.block.buzz.app` identifier, so this release upgrades the current installation and retains the existing local community data.
 - The Windows installer is unsigned and does not use the upstream auto-updater. Updates are installed manually from the FMG GitHub prerelease.
 - The relay is deployed from `ghcr.io/contentscoin/buzz` by immutable digest. Database, Redis, object-storage volumes and relay identity remain outside the image.
+- The Hostinger ACP agent is deployed from the versioned
+  `sprig-v0.5.26-fmg.1` release asset, verifies a separately recorded SHA-256
+  before extraction, and is recreated without replacing its identity volume or
+  OpenClaw gateway configuration.
 
 ### Rollout controls
 
 - Work reports are compiled in and enabled.
 - Task graph remains an operator preview gated per issue by the `graph` label.
 - Aside remains off while `BUZZ_ACP_ASIDE_COMMAND` is empty.
-- Mobile report summaries are enabled through the ACP agent contract and use
+- Mobile report summaries are a prompt-enforced ACP agent policy and use
   ordinary thread messages understood by the official mobile client.
 
 ### Known limits
@@ -34,3 +38,5 @@ Base: upstream `desktop-v0.5.25` (`c8f73213089cbd5a0f1e675d3193558280d46e10`).
 - Aside does not yet have a desktop settings screen.
 - The official mobile app shows the concise ordinary summary rather than the
   desktop work-report card.
+- Ordinary summary delivery is best effort because the behavior is enforced by
+  the agent prompt rather than a programmatic post-publish hook.

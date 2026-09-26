@@ -20,6 +20,24 @@
     "public_origin": "https://buzz-dnb0.srv2006121.hstgr.cloud",
     "websocket_url": "wss://buzz-dnb0.srv2006121.hstgr.cloud"
   },
+  "agent_runtime": {
+    "release": "sprig-v0.5.26-fmg.1",
+    "asset": "sprig-0.5.26-fmg.1-x86_64-unknown-linux-musl.tar.gz",
+    "deployment_policy": "versioned-release-sha256-pinned",
+    "hostinger_service": "buzz-openclaw-agent",
+    "integrity_control": "BUZZ_SPRIG_SHA256",
+    "source_control": "BUZZ_SPRIG_GIT_SHA",
+    "version_control": "BUZZ_SPRIG_VERSION"
+  },
+  "rollback": {
+    "relay_image": "ghcr.io/contentscoin/buzz@sha256:3a501f2f9828a597efb58cd62dc1174167e29511ce56a0b63cac7a19149147c7",
+    "agent_runtime": {
+      "release": "sprig-rollback-e0705ff",
+      "asset": "sprig-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a368054f70b60518e29",
+      "source_commit": "e0705ff114669c2bc73477a007aafe4be8726961"
+    }
+  },
   "features": {
     "work_reports": {
       "state": "enabled",
@@ -40,10 +58,10 @@
       "disabled_value": ""
     },
     "mobile_report_fallback": {
-      "state": "enabled-for-agent-reports",
+      "state": "agent-policy",
       "surfaces": ["mobile", "acp"],
       "control": "agent-prompt",
-      "delivery": "ordinary-thread-summary"
+      "delivery": "best-effort-ordinary-thread-summary"
     }
   }
 }

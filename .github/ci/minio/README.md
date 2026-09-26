@@ -1,6 +1,6 @@
 # Buzz CI MinIO
 
-`ghcr.io/block/buzz-minio:latest` contains MinIO and `mc` for the disposable
+`ghcr.io/contentscoin/buzz-minio:latest` contains MinIO and `mc` for the disposable
 Linux AMD64 CI runners. `docker-compose.ci.yml` selects it for both services;
 development and deployment defaults stay in `docker-compose.yml`.
 
@@ -9,9 +9,10 @@ dispatch. Pull requests build and smoke-test without publishing. On `main`, a
 successful smoke test publishes the same image as
 `sha-<full commit>-run-<run id>-<attempt>` and `latest`. The run-specific tag
 preserves each build, including package refreshes from the same source commit.
-Once consumers adopt the override, ordinary CI only pulls it; there is no build
-fallback or dependency on the publisher. `latest` deliberately floats, and
-Compose always pulls it. Docker's pull output records the resolved digest.
+Once consumers adopt the override, ordinary CI authenticates to GHCR with the
+repository `GITHUB_TOKEN` and only pulls it; there is no build fallback or
+dependency on the publisher. `latest` deliberately floats, and Compose always
+pulls it. Docker's pull output records the resolved digest.
 
 The Dockerfile uses the same upstream releases as the development services,
 with checksummed official GitHub release binaries and a digest-pinned Alpine
@@ -21,18 +22,19 @@ and [mc release](https://github.com/minio/mc/tree/RELEASE.2025-08-13T08-35-41Z).
 
 ## First publication
 
-The image must exist and be publicly pullable before the CI switch can pass.
-Use two separate PRs: Buzz only permits squash merges, so two commits in one
-PR cannot stage this rollout.
+The image must exist before the CI switch can pass. Keep the package private;
+consumer jobs need `packages: read` and must authenticate to `ghcr.io` with
+their repository `GITHUB_TOKEN` before Compose pulls it. Use two separate PRs:
+Buzz only permits squash merges, so two commits in one PR cannot stage this
+rollout.
 
 1. Merge the publisher-only PR containing `.github/ci/minio/`,
    `.github/workflows/minio-image.yml`, and the opt-in `docker-compose.ci.yml`.
    Ordinary CI does not select the override yet, so it does not need this image
    to validate the publisher PR. The merge triggers the first publication.
-2. After publication succeeds, an org/package admin must make **buzz-minio**
-   public in its GitHub package settings (new GHCR packages default to private,
-   even for public repositories). Verify an anonymous pull of
-   `ghcr.io/block/buzz-minio:latest`.
+2. After publication succeeds, verify an authenticated pull of
+   `ghcr.io/contentscoin/buzz-minio:latest` with a token that has package read
+   access. Do not rely on an anonymous pull.
 3. Rebase the separate consumer PR onto `main`, run its integration checks, and
    merge it. That PR selects the override in relay and mesh lifecycle CI.
 

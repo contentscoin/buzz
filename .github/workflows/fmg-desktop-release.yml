@@ -7,10 +7,18 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish the installer to the immutable FMG GitHub prerelease"
+        description: "Promote a previously verified candidate without rebuilding it"
         required: true
         type: boolean
         default: false
+      candidate_run_id:
+        description: "Candidate workflow run ID (required when publish=true)"
+        required: false
+        type: string
+      candidate_sha256:
+        description: "Verified installer SHA-256 (required when publish=true)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -21,12 +29,12 @@ concurrency:
 
 jobs:
   build:
-    name: Build FMG Windows desktop
-    if: github.repository == 'contentscoin/buzz'
+    name: Build FMG Windows candidate
+    if: github.repository == 'contentscoin/buzz' && inputs.publish == false
     runs-on: windows-latest
     timeout-minutes: 60
     permissions:
-      contents: write
+      contents: read
     env:
       TARGET: x86_64-pc-windows-msvc
     steps:
@@ -215,37 +223,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish immutable FMG GitHub prerelease
-        if: inputs.publish
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
-          VERSION: ${{ steps.release.outputs.version }}
-          INSTALLER: ${{ steps.artifact.outputs.installer }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            TARGET=$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)
-            if [[ "$TARGET" != "$GITHUB_SHA" ]]; then
-              echo "::error::Existing release $TAG targets $TARGET, not $GITHUB_SHA"
-              exit 1
-            fi
-          else
-            gh release create "$TAG" \
-              --target "$GITHUB_SHA" \
-              --title "FMG Buzz ${VERSION}" \
-              --notes-file FMG_CHANGELOG.md \
-              --prerelease \
-              --latest=false
-          fi
-          gh release upload "$TAG" \
-            "$INSTALLER" \
-            dist/fmg-release-receipt.json \
-            .release/fmg-live.json \
-            --clobber
-
-      - name: Release summary
+      - name: Candidate summary
         shell: bash
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -256,9 +234,11 @@ jobs:
             echo
             echo "Source: \`${GITHUB_SHA}\`"
             echo
+            echo "Candidate run ID: \`${GITHUB_RUN_ID}\`"
+            echo
             echo "Installer SHA-256: \`${INSTALLER_SHA256}\`"
             echo
-            echo "Published: \`${{ inputs.publish }}\`"
+            echo "Published: \`false\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save release Cargo cache
@@ -278,3 +258,250 @@ jobs:
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+  publish:
+    name: Publish verified FMG candidate
+    if: github.repository == 'contentscoin/buzz' && inputs.publish == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Require main
+        shell: bash
+        env:
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          if [[ "$SOURCE_REF" != "refs/heads/main" ]]; then
+            echo "::error::FMG releases must run from main; got $SOURCE_REF"
+            exit 1
+          fi
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Promote exact candidate artifact
+        id: promote
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.candidate_run_id }}
+          EXPECTED_SHA256: ${{ inputs.candidate_sha256 }}
+        run: |
+          set -euo pipefail
+
+          EXPECTED_SHA256="${EXPECTED_SHA256,,}"
+          if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::candidate_run_id must be a numeric workflow run ID"
+            exit 1
+          fi
+          if ! [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::candidate_sha256 must be a 64-character SHA-256"
+            exit 1
+          fi
+
+          VERSION=$(node -p "require('./.release/fmg-live.json').desktop.version")
+          TAG=$(node -p "require('./.release/fmg-live.json').desktop.tag")
+          UPSTREAM_SHA=$(node -p "require('./.release/fmg-live.json').upstream.commit")
+          PACKAGE_VERSION=$(node -p "require('./desktop/package.json').version")
+          TAURI_VERSION=$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-fmg\.[0-9]+$ ]]; then
+            echo "::error::Invalid FMG desktop version: $VERSION"
+            exit 1
+          fi
+          if [[ "$TAG" != "fmg-desktop-v${VERSION}" ]]; then
+            echo "::error::FMG release tag does not match version"
+            exit 1
+          fi
+          if [[ "$PACKAGE_VERSION" != "$VERSION" || "$TAURI_VERSION" != "$VERSION" ]]; then
+            echo "::error::Desktop manifests do not match FMG release version $VERSION"
+            exit 1
+          fi
+          if ! grep -Fxq "version = \"${VERSION}\"" desktop/src-tauri/Cargo.toml; then
+            echo "::error::desktop/src-tauri/Cargo.toml does not match $VERSION"
+            exit 1
+          fi
+          if ! grep -A2 -F 'name = "buzz-desktop"' desktop/src-tauri/Cargo.lock | grep -Fxq "version = \"${VERSION}\""; then
+            echo "::error::desktop/src-tauri/Cargo.lock does not match $VERSION"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD; then
+            echo "::error::FMG release is not based on $UPSTREAM_SHA"
+            exit 1
+          fi
+
+          WORKFLOW_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/fmg-desktop-release.yml" --jq .id)
+          RUN_JSON=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")
+          CANDIDATE_SHA=$(jq -r .head_sha <<<"$RUN_JSON")
+          if [[ $(jq -r .workflow_id <<<"$RUN_JSON") != "$WORKFLOW_ID" \
+            || $(jq -r .event <<<"$RUN_JSON") != "workflow_dispatch" \
+            || $(jq -r .head_branch <<<"$RUN_JSON") != "main" \
+            || $(jq -r .status <<<"$RUN_JSON") != "completed" \
+            || $(jq -r .conclusion <<<"$RUN_JSON") != "success" ]]; then
+            echo "::error::Candidate run is not a successful main-branch FMG Desktop Release run"
+            exit 1
+          fi
+          if [[ "$CANDIDATE_SHA" != "$GITHUB_SHA" ]]; then
+            echo "::error::Candidate source $CANDIDATE_SHA differs from current main $GITHUB_SHA; build a new candidate"
+            exit 1
+          fi
+
+          ARTIFACT="fmg-buzz-windows-${VERSION}-${CANDIDATE_SHA}"
+          ARTIFACTS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts")
+          COUNT=$(jq --arg name "$ARTIFACT" '[.artifacts[] | select(.name == $name and .expired == false)] | length' <<<"$ARTIFACTS")
+          if [[ "$COUNT" != "1" ]]; then
+            echo "::error::Expected exactly one unexpired artifact named $ARTIFACT"
+            exit 1
+          fi
+
+          mkdir candidate
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$ARTIFACT" \
+            --dir candidate
+
+          INSTALLER="candidate/dist/FMG-Buzz_${VERSION}_x64-setup.exe"
+          RECEIPT="candidate/dist/fmg-release-receipt.json"
+          MANIFEST="candidate/.release/fmg-live.json"
+          CHANGELOG="candidate/FMG_CHANGELOG.md"
+          for FILE in "$INSTALLER" "$RECEIPT" "$MANIFEST" "$CHANGELOG"; do
+            if [[ ! -f "$FILE" ]]; then
+              echo "::error::Candidate artifact is missing $FILE"
+              exit 1
+            fi
+          done
+
+          ACTUAL_SHA256=$(sha256sum "$INSTALLER" | cut -d' ' -f1)
+          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+            echo "::error::Candidate installer hash does not match the verified SHA-256"
+            exit 1
+          fi
+          if ! cmp -s "$MANIFEST" .release/fmg-live.json; then
+            echo "::error::Candidate release manifest differs from current main"
+            exit 1
+          fi
+          if ! cmp -s "$CHANGELOG" FMG_CHANGELOG.md; then
+            echo "::error::Candidate release notes differ from current main"
+            exit 1
+          fi
+
+          EXPECTED_RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+          jq -e \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg sha "$CANDIDATE_SHA" \
+            --arg run "$EXPECTED_RUN_URL" \
+            --arg file "$(basename "$INSTALLER")" \
+            --arg hash "$EXPECTED_SHA256" \
+            --arg version "$VERSION" \
+            '.schema == 1 and .source.repository == $repo and
+             .source.commit == $sha and .source.workflow_run == $run and
+             .desktop.version == $version and .installer.file == $file and
+             (.installer.sha256 | ascii_downcase) == $hash' \
+            "$RECEIPT" >/dev/null
+
+          if git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+            TAG_SHA=$(git rev-parse "${TAG}^{commit}")
+            if [[ "$TAG_SHA" != "$CANDIDATE_SHA" ]]; then
+              echo "::error::Existing tag $TAG targets $TAG_SHA, not $CANDIDATE_SHA"
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$CANDIDATE_SHA" >/dev/null
+            git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+            if [[ $(git rev-parse "${TAG}^{commit}") != "$CANDIDATE_SHA" ]]; then
+              echo "::error::Created tag $TAG did not resolve to the candidate commit"
+              exit 1
+            fi
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            RELEASE_JSON=$(gh release view "$TAG" --json tagName,name,body,isDraft,isPrerelease,assets,url)
+            EXPECTED_TITLE="FMG Buzz ${VERSION}"
+            EXPECTED_BODY=$(cat "$CHANGELOG")
+            if ! jq -e --arg tag "$TAG" --arg title "$EXPECTED_TITLE" --arg body "$EXPECTED_BODY" \
+              '.tagName == $tag and .name == $title and
+               (.body | gsub("\r\n"; "\n") | sub("\n+$"; "")) ==
+               ($body | gsub("\r\n"; "\n") | sub("\n+$"; "")) and
+               .isDraft == false and .isPrerelease == true' \
+              <<<"$RELEASE_JSON" >/dev/null; then
+              echo "::error::Existing release metadata does not match the immutable prerelease contract"
+              exit 1
+            fi
+            EXPECTED_ASSETS=$(printf '%s\n' \
+              "$(basename "$INSTALLER")" \
+              "$(basename "$RECEIPT")" \
+              "$(basename "$MANIFEST")" | sort)
+            ACTUAL_ASSETS=$(jq -r '.assets[].name' <<<"$RELEASE_JSON" | sort)
+            if [[ "$ACTUAL_ASSETS" != "$EXPECTED_ASSETS" ]]; then
+              echo "::error::Existing release assets differ from the immutable asset set"
+              exit 1
+            fi
+            mkdir existing
+            gh release download "$TAG" \
+              --dir existing \
+              --pattern "$(basename "$INSTALLER")" \
+              --pattern "$(basename "$RECEIPT")" \
+              --pattern "$(basename "$MANIFEST")"
+            if [[ $(sha256sum "existing/$(basename "$INSTALLER")" | cut -d' ' -f1) != "$EXPECTED_SHA256" \
+              || ! -f "existing/$(basename "$RECEIPT")" \
+              || ! -f "existing/$(basename "$MANIFEST")" ]]; then
+              echo "::error::Existing release asset content is incomplete or differs"
+              exit 1
+            fi
+            cmp -s "$RECEIPT" "existing/$(basename "$RECEIPT")" || {
+              echo "::error::Existing receipt differs from the verified candidate"
+              exit 1
+            }
+            cmp -s "$MANIFEST" "existing/$(basename "$MANIFEST")" || {
+              echo "::error::Existing manifest differs from the verified candidate"
+              exit 1
+            }
+          else
+            gh release create "$TAG" \
+              "$INSTALLER" \
+              "$RECEIPT" \
+              "$MANIFEST" \
+              --verify-tag \
+              --title "FMG Buzz ${VERSION}" \
+              --notes-file "$CHANGELOG" \
+              --prerelease \
+              --latest=false
+          fi
+
+          RELEASE_URL=$(gh release view "$TAG" --json url --jq .url)
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "source_sha=$CANDIDATE_SHA"
+            echo "installer_sha256=$EXPECTED_SHA256"
+            echo "release_url=$RELEASE_URL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Published release summary
+        shell: bash
+        env:
+          VERSION: ${{ steps.promote.outputs.version }}
+          TAG: ${{ steps.promote.outputs.tag }}
+          SOURCE_SHA: ${{ steps.promote.outputs.source_sha }}
+          INSTALLER_SHA256: ${{ steps.promote.outputs.installer_sha256 }}
+          RELEASE_URL: ${{ steps.promote.outputs.release_url }}
+        run: |
+          {
+            echo "### FMG Buzz ${VERSION} published"
+            echo
+            echo "Tag: \`${TAG}\`"
+            echo
+            echo "Source: \`${SOURCE_SHA}\`"
+            echo
+            echo "Candidate run ID: \`${{ inputs.candidate_run_id }}\`"
+            echo
+            echo "Installer SHA-256: \`${INSTALLER_SHA256}\`"
+            echo
+            echo "Release: ${RELEASE_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
