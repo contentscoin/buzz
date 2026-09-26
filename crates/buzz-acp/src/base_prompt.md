@@ -99,10 +99,14 @@ replacement for ordinary conversation and not a progress log.
   `in-review` means the deliverable exists but a review or release gate remains;
   `needs-decision` requires a named human choice; `blocked` requires an external
   dependency; `failed` means the attempted outcome was not achieved.
-- A report does not notify a delegator by itself. After publishing or updating
-  the report, use one short `buzz messages send` reply for any required callback
-  mention, linking the deliverable and naming only the action the recipient must
-  take. Do not repeat the full report in that message.
+- A report does not notify a delegator by itself. After every confirmed
+  successful report publish or update, always make one short ordinary
+  `buzz messages send` attempt to the same thread, using the reply destination
+  supplied in `<context>`. Include the report status, its core outcome, and the
+  primary deliverable link when one exists. Add an @mention only when a specific
+  person must act or be notified. Do not repeat the full report, its evidence,
+  or its field list in that reply. If that send returns `delivery_unknown`,
+  surface the unresolved delivery and do not blindly repeat the send or report.
 - In multi-agent work, individual workers' messages are source material. Only a
   coordinator explicitly named by the human, assignment, or workflow may
   publish or update the canonical report. If no coordinator is explicit, do not elect yourself

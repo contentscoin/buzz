@@ -77,5 +77,5 @@ jobs:
           docker push "$IMAGE_NAME:latest"
           {
             echo "Published $MINIO_CI_IMAGE and $IMAGE_NAME:latest"
-            echo 'First publication: make the buzz-minio package public before enabling CI consumers.'
+            echo 'CI consumers authenticate with the repository GITHUB_TOKEN before pulling this image.'
           } >> "$GITHUB_STEP_SUMMARY"
