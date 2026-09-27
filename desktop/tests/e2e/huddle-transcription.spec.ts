@@ -1744,9 +1744,7 @@ test("closes add-agent dialog when parent membership is already satisfied", asyn
   ).toHaveCount(0);
 });
 
-test("starts an available stopped agent before adding it to the huddle", async ({
-  page,
-}) => {
+test("adds an available stopped agent before starting it", async ({ page }) => {
   await installMockBridge(page, {
     addAgentToHuddleResult: {
       ephemeral_added: true,
@@ -1795,11 +1793,11 @@ test("starts an available stopped agent before adding it to the huddle", async (
           .map((entry) => entry.command),
       ),
     )
-    .toEqual(["start_managed_agent", "add_agent_to_huddle"]);
+    .toEqual(["add_agent_to_huddle", "start_managed_agent"]);
   await expect(dialog).toHaveCount(0);
 });
 
-test("stops an agent started solely for a failed huddle add", async ({
+test("does not start a local agent when its huddle add fails", async ({
   page,
 }) => {
   await installMockBridge(page, {
@@ -1830,20 +1828,14 @@ test("stops an agent started solely for a failed huddle add", async ({
       page.evaluate(() =>
         (window.__BUZZ_E2E_COMMAND_LOG__ ?? [])
           .filter((entry) =>
-            [
-              "start_managed_agent",
-              "add_agent_to_huddle",
-              "stop_managed_agent_runtime",
-            ].includes(entry.command),
+            ["start_managed_agent", "add_agent_to_huddle"].includes(
+              entry.command,
+            ),
           )
           .map((entry) => entry.command),
       ),
     )
-    .toEqual([
-      "start_managed_agent",
-      "add_agent_to_huddle",
-      "stop_managed_agent_runtime",
-    ]);
+    .toEqual(["add_agent_to_huddle"]);
 });
 
 test("does not deploy a provider agent when its huddle add fails", async ({
@@ -1878,11 +1870,9 @@ test("does not deploy a provider agent when its huddle add fails", async ({
       page.evaluate(() =>
         (window.__BUZZ_E2E_COMMAND_LOG__ ?? [])
           .filter((entry) =>
-            [
-              "start_managed_agent",
-              "add_agent_to_huddle",
-              "stop_managed_agent_runtime",
-            ].includes(entry.command),
+            ["start_managed_agent", "add_agent_to_huddle"].includes(
+              entry.command,
+            ),
           )
           .map((entry) => entry.command),
       ),

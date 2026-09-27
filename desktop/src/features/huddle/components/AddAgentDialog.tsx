@@ -5,7 +5,6 @@ import * as React from "react";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { ProfileAvatar } from "@/features/profile/ui/ProfileAvatar";
 import { useIdentityQuery } from "@/shared/api/hooks";
-import { stopManagedAgentRuntime } from "@/shared/api/tauriManagedAgents";
 import { Dialog } from "@/shared/ui/dialog";
 import { ChooserDialogContent } from "@/shared/ui/chooser-dialog-content";
 import type { ManagedAgentBackend } from "@/shared/api/types";
@@ -94,7 +93,7 @@ export function AddAgentDialog({
       : undefined;
     const expectedSignerPubkey =
       normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
-    if (needsStart && (!expectedRelayUrl || !expectedSignerPubkey)) {
+    if (!expectedRelayUrl || !expectedSignerPubkey) {
       setError(
         "Buzz is still connecting to this community. Try adding the agent again in a moment.",
       );
@@ -104,29 +103,12 @@ export function AddAgentDialog({
     setAdding(agent.pubkey);
     setError(null);
     setWarning(null);
-    let startedRuntimeScope: {
-      expectedRelayUrl: string;
-      expectedSignerPubkey: string;
-    } | null = null;
     try {
-      if (needsStart && isLocal) {
-        await invoke("start_managed_agent", {
-          pubkey: agent.pubkey,
-          expectedRelayUrl,
-          expectedSignerPubkey,
-        });
-        startedRuntimeScope = { expectedRelayUrl, expectedSignerPubkey };
-      }
-      if (!expectedRelayUrl || !expectedSignerPubkey) {
-        throw new Error(
-          "Buzz is still connecting to this community. Try adding the agent again in a moment.",
-        );
-      }
       const result = await onAdd(agent.pubkey, {
         expectedRelayUrl,
         expectedSignerPubkey,
       });
-      if (needsStart && !isLocal) {
+      if (needsStart) {
         try {
           await invoke("start_managed_agent", {
             pubkey: agent.pubkey,
@@ -153,33 +135,8 @@ export function AddAgentDialog({
         onClose();
       }
     } catch (e: unknown) {
-      let rollbackErrorMessage: string | null = null;
-      if (startedRuntimeScope) {
-        try {
-          await stopManagedAgentRuntime(
-            agent.pubkey,
-            startedRuntimeScope.expectedRelayUrl,
-            {
-              expectedSignerPubkey: startedRuntimeScope.expectedSignerPubkey,
-            },
-          );
-        } catch (rollbackError: unknown) {
-          rollbackErrorMessage =
-            rollbackError instanceof Error
-              ? rollbackError.message
-              : String(rollbackError);
-          console.error(
-            "Failed to stop agent after huddle add failed:",
-            rollbackError,
-          );
-        }
-      }
       const msg = e instanceof Error ? e.message : String(e);
-      setError(
-        rollbackErrorMessage
-          ? `Failed to add agent: ${msg}. The runtime started for this community could not be stopped: ${rollbackErrorMessage}. Stop it from Agent settings before retrying.`
-          : `Failed to add agent: ${msg}`,
-      );
+      setError(`Failed to add agent: ${msg}`);
       console.error("Failed to add agent to huddle:", e);
     } finally {
       setAdding(null);
