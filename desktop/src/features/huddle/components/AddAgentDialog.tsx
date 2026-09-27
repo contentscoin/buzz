@@ -5,6 +5,7 @@ import * as React from "react";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { ProfileAvatar } from "@/features/profile/ui/ProfileAvatar";
 import { useIdentityQuery } from "@/shared/api/hooks";
+import { stopManagedAgentRuntime } from "@/shared/api/tauriManagedAgents";
 import { Dialog } from "@/shared/ui/dialog";
 import { ChooserDialogContent } from "@/shared/ui/chooser-dialog-content";
 import type { ManagedAgentBackend } from "@/shared/api/types";
@@ -103,7 +104,10 @@ export function AddAgentDialog({
     setAdding(agent.pubkey);
     setError(null);
     setWarning(null);
-    let startedForAdd = false;
+    let startedRuntimeScope: {
+      expectedRelayUrl: string;
+      expectedSignerPubkey: string;
+    } | null = null;
     try {
       if (needsStart && isLocal) {
         await invoke("start_managed_agent", {
@@ -111,7 +115,7 @@ export function AddAgentDialog({
           expectedRelayUrl,
           expectedSignerPubkey,
         });
-        startedForAdd = true;
+        startedRuntimeScope = { expectedRelayUrl, expectedSignerPubkey };
       }
       if (!expectedRelayUrl || !expectedSignerPubkey) {
         throw new Error(
@@ -149,14 +153,21 @@ export function AddAgentDialog({
         onClose();
       }
     } catch (e: unknown) {
-      if (startedForAdd) {
+      let rollbackErrorMessage: string | null = null;
+      if (startedRuntimeScope) {
         try {
-          await invoke("stop_managed_agent", {
-            pubkey: agent.pubkey,
-            expectedRelayUrl,
-            expectedSignerPubkey,
-          });
+          await stopManagedAgentRuntime(
+            agent.pubkey,
+            startedRuntimeScope.expectedRelayUrl,
+            {
+              expectedSignerPubkey: startedRuntimeScope.expectedSignerPubkey,
+            },
+          );
         } catch (rollbackError: unknown) {
+          rollbackErrorMessage =
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(rollbackError);
           console.error(
             "Failed to stop agent after huddle add failed:",
             rollbackError,
@@ -164,7 +175,11 @@ export function AddAgentDialog({
         }
       }
       const msg = e instanceof Error ? e.message : String(e);
-      setError(`Failed to add agent: ${msg}`);
+      setError(
+        rollbackErrorMessage
+          ? `Failed to add agent: ${msg}. The runtime started for this community could not be stopped: ${rollbackErrorMessage}. Stop it from Agent settings before retrying.`
+          : `Failed to add agent: ${msg}`,
+      );
       console.error("Failed to add agent to huddle:", e);
     } finally {
       setAdding(null);

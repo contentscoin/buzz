@@ -1833,7 +1833,7 @@ test("stops an agent started solely for a failed huddle add", async ({
             [
               "start_managed_agent",
               "add_agent_to_huddle",
-              "stop_managed_agent",
+              "stop_managed_agent_runtime",
             ].includes(entry.command),
           )
           .map((entry) => entry.command),
@@ -1842,7 +1842,7 @@ test("stops an agent started solely for a failed huddle add", async ({
     .toEqual([
       "start_managed_agent",
       "add_agent_to_huddle",
-      "stop_managed_agent",
+      "stop_managed_agent_runtime",
     ]);
 });
 
@@ -1881,7 +1881,7 @@ test("does not deploy a provider agent when its huddle add fails", async ({
             [
               "start_managed_agent",
               "add_agent_to_huddle",
-              "stop_managed_agent",
+              "stop_managed_agent_runtime",
             ].includes(entry.command),
           )
           .map((entry) => entry.command),

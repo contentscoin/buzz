@@ -381,7 +381,7 @@ export function useManagedAgentActions() {
     ).length;
     if (failedRemovalCount > 0) {
       throw new Error(
-        `Agent deleted, but Buzz could not remove it from ${failedRemovalCount} channel${failedRemovalCount === 1 ? "" : "s"}. Refresh and retry the channel cleanup.`,
+        `Buzz could not remove the agent from ${failedRemovalCount} channel${failedRemovalCount === 1 ? "" : "s"}, so the agent was not deleted. Try again.`,
       );
     }
   }
@@ -395,6 +395,7 @@ export function useManagedAgentActions() {
       const channels = await getChannelsForAction();
       const result = await deleteManagedAgentWithRules({
         agent,
+        beforeDelete: () => removeAgentFromAllChannels(pubkey, scope),
         channels,
         deleteManagedAgent: deleteMutation.mutateAsync,
         getAvailability,
@@ -402,7 +403,6 @@ export function useManagedAgentActions() {
         scope,
       });
       if (result.cancelled) return;
-      await removeAgentFromAllChannels(pubkey, scope);
       if (logAgentPubkey === pubkey) {
         setLogAgentPubkey(null);
       }

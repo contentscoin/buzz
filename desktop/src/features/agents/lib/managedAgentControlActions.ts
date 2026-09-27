@@ -195,12 +195,14 @@ export async function deleteManagedAgentWithRules({
   deleteManagedAgent,
   preferredChannelId,
   getAvailability,
+  beforeDelete,
   relayAgents,
   scope,
   skipRemoteDeleteConfirm = false,
 }: {
   agent: ManagedAgent;
   deleteManagedAgent: DeleteManagedAgent;
+  beforeDelete?: () => Promise<void>;
   scope?: ManagedAgentCommandScope;
   skipRemoteDeleteConfirm?: boolean;
 } & ManagedAgentActionContext): Promise<ManagedAgentActionResult> {
@@ -270,6 +272,7 @@ export async function deleteManagedAgentWithRules({
 
   const isDeployedRemote =
     agent.backend.type === "provider" && agent.backendAgentId;
+  await beforeDelete?.();
   await deleteManagedAgent({
     pubkey: agent.pubkey,
     forceRemoteDelete: isDeployedRemote ? true : undefined,

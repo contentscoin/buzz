@@ -22,6 +22,14 @@ update is `0.5.26-fmg.4`.
 installer follows the normal in-place upgrade path. Keeping the application
 identifier preserves the existing desktop community and identity storage.
 
+### Release scope
+
+`0.5.26-fmg.4` changes only the Windows desktop app. Run the desktop candidate
+and publish procedure below, but do not redeploy the relay, OpenClaw service, or
+Sprig runtime for this version. The relay and agent-runtime procedures apply
+only when a future release descriptor assigns them a new immutable image digest
+or a new uniquely named runtime release.
+
 ## Implemented rollout controls
 
 The release does not declare environment flags that the application ignores.
@@ -67,7 +75,10 @@ The release does not declare environment flags that the application ignores.
 The workflow creates a non-updating, unsigned x64 NSIS installer. It does not
 promote the build into the upstream `buzz-desktop-latest` updater channel.
 
-## Build and deploy the relay
+## Build and deploy the relay (not part of 0.5.26-fmg.4)
+
+Skip this section for `0.5.26-fmg.4`. Use it only for a release that explicitly
+changes the relay image recorded in the release descriptor.
 
 1. Let the existing **Docker image** workflow complete for the same `main`
    commit. The fork-owned image path is selected with repository variable
@@ -80,24 +91,30 @@ promote the build into the upstream `buzz-desktop-latest` updater channel.
 5. Redeploy the project and record the running image digest with the desktop
    receipt. Do not use a mutable `main` or `latest` tag as the deployment record.
 
-## Build and deploy the ACP agent runtime
+## Build and deploy the ACP agent runtime (not part of 0.5.26-fmg.4)
 
 The Hostinger `buzz-openclaw-agent` service downloads `buzz-acp` from a Sprig
 release when the container starts. Replacing only the relay image does not
 update this agent runtime.
 
-1. Read the source commit from the verified desktop candidate receipt. Create
-   `sprig-v0.5.26-fmg.1` at that exact commit, then verify
-   `git rev-parse 'sprig-v0.5.26-fmg.1^{commit}'` prints the receipt commit.
-2. Let the **Sprig** tag workflow publish
-   `sprig-0.5.26-fmg.1-x86_64-unknown-linux-musl.tar.gz` and its SHA-256 file.
+Skip this section for `0.5.26-fmg.4`. `sprig-v0.5.26-fmg.1` is an existing
+immutable release and must not be recreated, moved, or replaced. A future agent
+runtime rollout must first record a new unique Sprig tag, asset, source commit,
+and SHA-256 in the release descriptor.
+
+1. Read the new Sprig tag and source commit from the release descriptor. Create
+   that previously unused tag at the recorded commit, then verify the tag
+   resolves to the same commit. Never derive the runtime commit from a
+   desktop-only candidate receipt.
+2. Let the **Sprig** tag workflow publish the uniquely named asset recorded in
+   the descriptor and its SHA-256 file.
    Download the immutable Actions artifact from that workflow, independently
    calculate the archive SHA-256, and record it as `BUZZ_SPRIG_SHA256`. Record
-   the receipt commit as `BUZZ_SPRIG_GIT_SHA` and `0.5.26-fmg.1` as
-   `BUZZ_SPRIG_VERSION` in Hostinger.
+   the descriptor's runtime source commit as `BUZZ_SPRIG_GIT_SHA` and its
+   runtime version as `BUZZ_SPRIG_VERSION` in Hostinger.
 3. In the Hostinger Compose command for `buzz-openclaw-agent`, replace the
-   rolling `sprig-latest/sprig-x86_64-unknown-linux-musl.tar.gz` URL with the
-   versioned `sprig-v0.5.26-fmg.1` asset URL. Keep its identity volume, owner,
+   rolling `sprig-latest/sprig-x86_64-unknown-linux-musl.tar.gz` URL with that
+   new versioned asset URL. Keep its identity volume, owner,
    OpenClaw gateway token and all other environment values unchanged. Add the
    three `BUZZ_SPRIG_*` controls from
    [`deploy/fmg/hostinger.env.example`](../deploy/fmg/hostinger.env.example).

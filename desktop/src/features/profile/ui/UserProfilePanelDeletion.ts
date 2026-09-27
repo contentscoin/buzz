@@ -18,7 +18,7 @@ import { getRelayAgentChannelIds } from "@/features/profile/ui/UserProfilePanelU
 
 type DeleteManagedAgentRulesContext = Omit<
   Parameters<typeof deleteManagedAgentWithRules>[0],
-  "agent"
+  "agent" | "beforeDelete"
 >;
 
 type DeleteProfileManagedAgentContext = DeleteManagedAgentRulesContext & {
@@ -92,7 +92,7 @@ export function useProfileAgentDeletion({
       ).length;
       if (failedRemovalCount > 0) {
         throw new Error(
-          `Agent deleted, but Buzz could not remove it from ${failedRemovalCount} channel${failedRemovalCount === 1 ? "" : "s"}. Refresh and retry the channel cleanup.`,
+          `Buzz could not remove the agent from ${failedRemovalCount} channel${failedRemovalCount === 1 ? "" : "s"}, so the agent was not deleted. Try again.`,
         );
       }
     },
@@ -158,11 +158,10 @@ export async function deleteProfileManagedAgent(
   const { removeAgentFromAllChannels, ...deleteContext } = context;
   const result = await deleteManagedAgentWithRules({
     agent,
+    beforeDelete: () =>
+      removeAgentFromAllChannels(agent.pubkey, deleteContext.scope),
     ...deleteContext,
   });
-  if (result.cancelled) return result;
-
-  await removeAgentFromAllChannels(agent.pubkey, deleteContext.scope);
   return result;
 }
 
