@@ -5,7 +5,10 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 
-import { clearActiveTurnsForAgent } from "@/features/agents/activeAgentTurnsStore";
+import {
+  activeAgentTurnsSignerMatches,
+  clearActiveTurnsForAgent,
+} from "@/features/agents/activeAgentTurnsStore";
 import {
   loadActiveCommunityId,
   loadCommunities,
@@ -121,11 +124,19 @@ export function useManagedAgentRuntimesQuery(options?: { enabled?: boolean }) {
 export function clearActiveTurnsForAgentOnStop(
   pubkey: string,
   relayUrl?: string | null,
+  expectedSignerPubkey?: string | null,
 ): void {
   const activeId = loadActiveCommunityId();
   if (!activeId) return;
   const activeCommunity = loadCommunities().find((c) => c.id === activeId);
   if (!activeCommunity) return;
+
+  if (
+    expectedSignerPubkey != null &&
+    !activeAgentTurnsSignerMatches(expectedSignerPubkey)
+  ) {
+    return;
+  }
 
   if (relayUrl != null) {
     // Pair-scoped: only clear when the stopped pair's relay matches the active
@@ -145,6 +156,14 @@ export function clearActiveTurnsForAgentOnStop(
   // the stop affects the active pair among others — clear.
 
   clearActiveTurnsForAgent(pubkey);
+}
+
+export function clearScopedActiveTurnsForAgentOnStop(
+  pubkey: string,
+  relayUrl: string,
+  expectedSignerPubkey: string,
+): void {
+  clearActiveTurnsForAgentOnStop(pubkey, relayUrl, expectedSignerPubkey);
 }
 
 /**
@@ -178,7 +197,7 @@ export async function restartManagedAgentPair(
   return start(pubkey, relayUrl);
 }
 
-export function useManagedAgentRuntimeAction() {
+export function useManagedAgentRuntimeAction(expectedSignerPubkey?: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -190,25 +209,44 @@ export function useManagedAgentRuntimeAction() {
       pubkey: string;
       relayUrl: string;
     }) => {
-      if (action === "stop") return stopManagedAgentRuntime(pubkey, relayUrl);
+      const signer = expectedSignerPubkey?.trim();
+      if (!signer) {
+        throw new Error(
+          "Buzz is still connecting to this identity. Try again in a moment.",
+        );
+      }
+      const options = { expectedSignerPubkey: signer };
+      if (action === "stop") {
+        return stopManagedAgentRuntime(pubkey, relayUrl, options).then(
+          (runtime) => {
+            clearScopedActiveTurnsForAgentOnStop(
+              runtime.pubkey,
+              runtime.relayUrl,
+              signer,
+            );
+            return runtime;
+          },
+        );
+      }
       if (action === "restart") {
         return restartManagedAgentPair(
           pubkey,
           relayUrl,
-          stopManagedAgentRuntime,
-          clearActiveTurnsForAgentOnStop,
-          startManagedAgentRuntime,
+          (targetPubkey, targetRelayUrl) =>
+            stopManagedAgentRuntime(targetPubkey, targetRelayUrl, options),
+          (targetPubkey, targetRelayUrl) =>
+            clearScopedActiveTurnsForAgentOnStop(
+              targetPubkey,
+              targetRelayUrl,
+              signer,
+            ),
+          (targetPubkey, targetRelayUrl) =>
+            startManagedAgentRuntime(targetPubkey, targetRelayUrl, options),
         );
       }
-      return startManagedAgentRuntime(pubkey, relayUrl);
+      return startManagedAgentRuntime(pubkey, relayUrl, options);
     },
-    onSuccess: (runtime, { action }) => {
-      // For stop-only: clear stale working badges immediately.  The restart
-      // path already clears at the stop-success boundary inside mutationFn.
-      if (action === "stop") {
-        clearActiveTurnsForAgentOnStop(runtime.pubkey, runtime.relayUrl);
-      }
-
+    onSuccess: (runtime) => {
       queryClient.setQueryData<ManagedAgentRuntimeStatus[]>(
         managedAgentRuntimesQueryKey,
         (current = []) => {

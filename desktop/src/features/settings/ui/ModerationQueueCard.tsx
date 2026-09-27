@@ -14,7 +14,9 @@ import {
   type ResolutionAction,
 } from "@/features/moderation/hooks";
 import { useMyRelayMembershipQuery } from "@/features/community-members/hooks";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { useUsersBatchQuery } from "@/features/profile/hooks";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import {
   deleteMessage,
   getEventById,
@@ -34,7 +36,11 @@ import {
   type SeverityTier,
 } from "@/features/settings/lib/moderationQueue";
 import { cn } from "@/shared/lib/cn";
-import { truncateNpub, truncatePubkey } from "@/shared/lib/pubkey";
+import {
+  normalizePubkey,
+  truncateNpub,
+  truncatePubkey,
+} from "@/shared/lib/pubkey";
 import { Button } from "@/shared/ui/button";
 import {
   DropdownMenu,
@@ -113,6 +119,10 @@ async function enforceResolution(
   group: ModerationQueueGroup,
   action: ResolutionAction,
   ban: (input: { pubkey: string; reason?: string }) => Promise<unknown>,
+  commandScope?: {
+    expectedRelayUrl: string;
+    expectedSignerPubkey: string;
+  },
 ): Promise<void> {
   switch (action) {
     case "delete":
@@ -126,9 +136,15 @@ async function enforceResolution(
     case "kick":
       // Gated to event targets with a channel (resolvableActions).
       if (group.channelId == null) throw new Error("Report has no channel.");
+      if (!commandScope) {
+        throw new Error(
+          "Buzz is still connecting to this community. Try the moderation action again in a moment.",
+        );
+      }
       await removeChannelMember(
         group.channelId,
         await resolveTargetAuthor(group),
+        commandScope,
       );
       return;
     case "escalate":
@@ -370,6 +386,8 @@ function QueueGroupCard({
 
 function QueueTab() {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const reportsQuery = useModerationReportsQuery({ status: "open" });
   const auditQuery = useModerationAuditQuery();
   const resolveMutation = useResolveReportMutation();
@@ -408,11 +426,25 @@ function QueueTab() {
       (report) => report.status === "open",
     );
     try {
+      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+      const expectedSignerPubkey =
+        normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+      const commandScope =
+        expectedRelayUrl && expectedSignerPubkey
+          ? { expectedRelayUrl, expectedSignerPubkey }
+          : undefined;
       // Enforce FIRST. The 9044 resolve DMs the reporter "reviewed and acted
       // on" — if enforcement fails we must not send that lie, and we leave the
       // report open (retryable, no orphan decision row). Only after the paired
       // 9040/9005/9001 lands do we resolve every open report about this target.
-      await enforceResolution(group, action, banMutation.mutateAsync);
+      await enforceResolution(
+        group,
+        action,
+        banMutation.mutateAsync,
+        commandScope,
+      );
       if (action === "kick" && group.channelId != null) {
         // The kick writes the roster directly (no member mutation); without
         // this, the kicked identity stays in the cached roster for the

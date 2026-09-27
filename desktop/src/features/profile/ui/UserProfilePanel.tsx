@@ -29,6 +29,7 @@ import {
   buildInstanceInputForDefinition,
   resolveStartRuntimeForDefinition,
 } from "@/features/agents/lib/instanceInputForDefinition";
+import type { ManagedAgentCommandScope } from "@/features/agents/lib/managedAgentControlActions";
 import { describeLogFile } from "@/features/agents/ui/agentUi";
 import { useAgentLifecycleActions } from "@/features/profile/ui/useAgentLifecycleActions";
 import {
@@ -37,6 +38,7 @@ import {
   type PersonaDialogState,
 } from "@/features/agents/ui/personaDialogState";
 import { useChannelsQuery } from "@/features/channels/hooks";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { useIdentityArchive } from "@/features/identity-archive/hooks";
 import { useAgentAvailabilityLookup } from "@/features/agents/lib/useAgentAvailability";
 import {
@@ -122,6 +124,17 @@ export function UserProfilePanel({
   transparentChrome = false,
 }: UserProfilePanelProps) {
   const { globalConfig } = useGlobalAgentConfig();
+  const { activeCommunity } = useCommunities();
+  const commandScope = React.useMemo<ManagedAgentCommandScope | null>(() => {
+    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(currentPubkey ?? "") || undefined;
+    return expectedRelayUrl && expectedSignerPubkey
+      ? { expectedRelayUrl, expectedSignerPubkey }
+      : null;
+  }, [activeCommunity?.relayUrl, currentPubkey]);
   const isOverlay = useIsThreadPanelOverlay();
   const isSplitLayout = layout === "split";
   useEscapeKey(onClose, isOverlay || isSinglePanelView);
@@ -410,6 +423,7 @@ export function UserProfilePanel({
   const { deleteManagedAgentRecord, deleteManagedAgentsForPersona } =
     useProfileAgentDeletion({
       channels: channelsQuery.data,
+      commandScope,
       deleteManagedAgent: deleteAgentMutation.mutateAsync,
       managedAgent,
       managedAgents: managedAgentsQuery.data,
@@ -419,6 +433,16 @@ export function UserProfilePanel({
 
   const createManagedAgentForPersona = React.useCallback(
     async (personaToStart: AgentPersona) => {
+      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+      const expectedSignerPubkey =
+        normalizePubkey(currentPubkey ?? "") || undefined;
+      if (!expectedRelayUrl || !expectedSignerPubkey) {
+        throw new Error(
+          "Buzz is still connecting to this community. Try creating the agent again in a moment.",
+        );
+      }
       const runtimes = await availableRuntimesForStart(availableRuntimesQuery);
       const { runtime, warnings } = resolveStartRuntimeForDefinition(
         personaToStart,
@@ -435,14 +459,21 @@ export function UserProfilePanel({
         runtime,
       );
 
-      const created = await createAgentMutation.mutateAsync(input);
+      const created = await createAgentMutation.mutateAsync({
+        ...input,
+        relayUrl: expectedRelayUrl,
+        expectedRelayUrl,
+        expectedSignerPubkey,
+      });
       void managedAgentsQuery.refetch();
       void relayAgentsQuery.refetch();
       return created;
     },
     [
       availableRuntimesQuery,
+      activeCommunity?.relayUrl,
       createAgentMutation.mutateAsync,
+      currentPubkey,
       globalConfig.preferred_runtime,
       managedAgentsQuery.refetch,
       relayAgentsQuery.refetch,
@@ -906,6 +937,7 @@ export function UserProfilePanel({
     <UserProfileEditAgentDialog
       agent={managedAgent}
       canEdit={canEditAgent}
+      commandScope={commandScope}
       initialFocus={editAgentFocus}
       onEditLinkedPersona={
         resolvedPersona && !resolvedPersona.isBuiltIn

@@ -1,12 +1,13 @@
 use buzz_sdk::{DeleteMessageOptions, DiffMeta, ThreadRef, VoteDirection};
 use nostr::PublicKey;
+use std::io::Read;
 use uuid::Uuid;
 
 use crate::client::{normalize_events, normalize_write_response, BuzzClient};
 use crate::error::CliError;
 use crate::validate::{
     infer_language, parse_event_id, parse_uuid, read_or_stdin, truncate_diff,
-    validate_content_size, validate_hex64, validate_uuid, MAX_DIFF_BYTES,
+    validate_content_size, validate_hex64, validate_uuid, MAX_CONTENT_BYTES, MAX_DIFF_BYTES,
 };
 use buzz_sdk::mentions::{
     extract_at_mentions_with_known, extract_nostr_uris, strip_code_regions, MENTION_CAP,
@@ -608,15 +609,67 @@ pub struct SendMessageParams {
     pub mentions: Vec<String>,
 }
 
-pub async fn cmd_send_message(
+const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+
+/// Read a message body without allowing a file or pipeline to allocate beyond
+/// the event content limit. One extra byte is enough to prove an oversized
+/// body; the BOM allowance keeps a maximum-size UTF-8 file valid after its
+/// marker is removed.
+fn read_bounded_message(reader: impl Read, source: &str) -> Result<String, CliError> {
+    let read_limit = MAX_CONTENT_BYTES + UTF8_BOM.len() + 1;
+    let mut bytes = Vec::with_capacity(read_limit);
+    reader
+        .take(read_limit as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| CliError::Other(format!("failed to read {source}: {error}")))?;
+
+    if bytes.starts_with(UTF8_BOM) {
+        bytes.drain(..UTF8_BOM.len());
+    }
+    if bytes.len() > MAX_CONTENT_BYTES {
+        return Err(CliError::Usage(format!(
+            "content exceeds maximum size (more than {MAX_CONTENT_BYTES} bytes)"
+        )));
+    }
+
+    String::from_utf8(bytes).map_err(|_| {
+        CliError::Usage(format!(
+            "{source} is not valid UTF-8; save the message as UTF-8 and try again"
+        ))
+    })
+}
+
+fn read_message_stdin() -> Result<String, CliError> {
+    let stdin = std::io::stdin();
+    read_bounded_message(stdin.lock(), "stdin")
+}
+
+fn read_message_file_or_stdin(path: &str) -> Result<String, CliError> {
+    if path == "-" {
+        return read_message_stdin();
+    }
+    let file = std::fs::File::open(path)
+        .map_err(|error| CliError::Usage(format!("failed to read {path:?}: {error}")))?;
+    read_bounded_message(file, "message file")
+}
+
+#[cfg(test)]
+async fn cmd_send_message(client: &BuzzClient, p: SendMessageParams) -> Result<(), CliError> {
+    cmd_send_message_with_input(client, p, true).await
+}
+
+async fn cmd_send_message_with_input(
     client: &BuzzClient,
     mut p: SendMessageParams,
+    resolve_stdin: bool,
 ) -> Result<(), CliError> {
     // Allow '-' to read content from stdin. This keeps callers from having to
     // jam shell-metacharacter-heavy text (backticks, $vars, etc.) through argv
     // quoting — the source of countless self-inflicted command-substitution
     // bugs for agent and human users alike.
-    p.content = read_or_stdin(&p.content)?;
+    if resolve_stdin && p.content == "-" {
+        p.content = read_message_stdin()?;
+    }
     validate_content_size(&p.content)?;
     if let Some(ref r) = p.reply_to {
         validate_hex64(r)?;
@@ -1075,13 +1128,26 @@ pub async fn dispatch(
         MessagesCmd::Send {
             channel,
             content,
+            content_file,
             kind,
             reply_to,
             broadcast,
             files,
             mentions,
         } => {
-            cmd_send_message(
+            let (content, resolve_stdin) = match (content, content_file) {
+                (Some(content), None) => (content, true),
+                (None, Some(path)) => {
+                    let content = read_message_file_or_stdin(&path)?;
+                    (content, false)
+                }
+                _ => {
+                    return Err(CliError::Usage(
+                        "exactly one of --content or --content-file is required".to_string(),
+                    ));
+                }
+            };
+            cmd_send_message_with_input(
                 client,
                 SendMessageParams {
                     channel_id: channel,
@@ -1092,6 +1158,7 @@ pub async fn dispatch(
                     files,
                     mentions,
                 },
+                resolve_stdin,
             )
             .await
         }

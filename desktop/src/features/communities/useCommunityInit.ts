@@ -36,6 +36,7 @@ import {
   resetActiveAgentTurnsStore,
   saveActiveAgentTurnsForCommunity,
   restoreActiveAgentTurnsForCommunity,
+  setActiveAgentTurnsSignerPubkey,
 } from "@/features/agents/activeAgentTurnsStore";
 import { resetAgentWorkingSignal } from "@/features/agents/agentWorkingSignal";
 import { resetAgentObserverStore } from "@/features/agents/observerRelayStore";
@@ -182,9 +183,13 @@ export function useCommunityInit(
 
     async function init() {
       if (!activeCommunity) {
+        setActiveAgentTurnsSignerPubkey(null);
         if (hasInitializedRef.current) {
           if (prevCommunityIdRef.current) {
-            saveActiveAgentTurnsForCommunity(prevCommunityIdRef.current);
+            saveActiveAgentTurnsForCommunity(
+              prevCommunityIdRef.current,
+              appliedPubkeyRef.current,
+            );
             prevCommunityIdRef.current = null;
           }
           try {
@@ -292,13 +297,17 @@ export function useCommunityInit(
         // Save the outgoing community's turn state before wiping the store so
         // timers survive a round-trip (A → B → A keeps A's elapsed time).
         if (prevCommunityIdRef.current) {
-          saveActiveAgentTurnsForCommunity(prevCommunityIdRef.current);
+          saveActiveAgentTurnsForCommunity(
+            prevCommunityIdRef.current,
+            appliedPubkeyRef.current,
+          );
           // Null out immediately so a rapid community switch (A→B→C before
           // B's applyCommunity resolves) doesn't re-save the now-empty
           // store under the outgoing community ID and delete its snapshot.
           prevCommunityIdRef.current = null;
         }
         try {
+          setActiveAgentTurnsSignerPubkey(null);
           await resetCommunityState({
             resetAvatarState:
               appliedRelayUrlRef.current !== activeCommunity.relayUrl ||
@@ -387,10 +396,16 @@ export function useCommunityInit(
         if (identityPubkey !== null) {
           initDraftStore(identityPubkey, activeCommunity.relayUrl);
         }
+        setActiveAgentTurnsSignerPubkey(identityPubkey);
         // Restore any turn state saved for this community (a prior A→B round-
         // trip). This runs after applyCommunity succeeds and before the app
         // renders so components see the restored timers on first render.
-        restoreActiveAgentTurnsForCommunity(activeCommunity.id);
+        if (identityPubkey !== null) {
+          restoreActiveAgentTurnsForCommunity(
+            activeCommunity.id,
+            identityPubkey,
+          );
+        }
         // From here this community's UI is what renders, so warnings from
         // detached agent wakes captured under this scope may deliver again.
         setDetachedToastScope({

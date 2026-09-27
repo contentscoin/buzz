@@ -220,6 +220,20 @@ export function usePersonaActions() {
           resolveCreateIntent(intent) === "definition_start"
             ? (backendIntent ?? null)
             : null;
+        const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+          ? activeCommunity.relayUrl
+          : undefined;
+        const expectedSignerPubkey = identityQuery.data?.pubkey?.trim()
+          ? identityQuery.data.pubkey
+          : undefined;
+        if (
+          resolveCreateIntent(intent) === "definition_start" &&
+          (!expectedRelayUrl || !expectedSignerPubkey)
+        ) {
+          throw new Error(
+            "Buzz is still connecting to this community. Try creating the agent again in a moment.",
+          );
+        }
 
         const avatarUrl = await resolveManagedAgentAvatarUrl(
           input.avatarUrl,
@@ -244,10 +258,16 @@ export function usePersonaActions() {
         );
 
         try {
-          const created = await createAgentMutation.mutateAsync(agentInput);
+          const created = await createAgentMutation.mutateAsync({
+            ...agentInput,
+            relayUrl: expectedRelayUrl,
+            expectedRelayUrl,
+            expectedSignerPubkey,
+          });
           await createdAgentAttachment.presentCreatedAgent(
             created,
             targetChannel,
+            { expectedRelayUrl, expectedSignerPubkey },
           );
           if (created.spawnError) {
             setPersonaErrorMessage(

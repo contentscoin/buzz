@@ -436,15 +436,28 @@ buzz agents archived"
 pub enum MessagesCmd {
     /// Send a message to a channel
     #[command(
-        after_help = "Examples:\n  buzz messages send --channel <UUID> --content \"hello\"\n  buzz messages send --channel <UUID> --content \"@alice check this\"\n  echo \"hello from stdin\" | buzz messages send --channel <UUID> --content -"
+        after_help = "Examples:\n  buzz messages send --channel <UUID> --content \"hello\"\n  buzz messages send --channel <UUID> --content \"@alice check this\"\n  echo \"hello from stdin\" | buzz messages send --channel <UUID> --content -\n  buzz messages send --channel <UUID> --content-file .\\message.md"
     )]
     Send {
         /// Channel UUID (from 'buzz channels list')
         #[arg(long)]
         channel: String,
         /// Message text — supports @mentions and markdown. Use '-' to read from stdin.
-        #[arg(long)]
-        content: String,
+        #[arg(
+            long,
+            required_unless_present = "content_file",
+            conflicts_with = "content_file"
+        )]
+        content: Option<String>,
+        /// Read UTF-8 message text from a file. Use '-' to read from stdin.
+        /// CRLF line endings are preserved; a leading UTF-8 BOM is removed.
+        #[arg(
+            long,
+            value_name = "PATH",
+            required_unless_present = "content",
+            conflicts_with = "content"
+        )]
+        content_file: Option<String>,
         /// Nostr event kind (default: channel default)
         #[arg(long)]
         kind: Option<u16>,
@@ -1345,7 +1358,9 @@ pub enum ReposCmd {
     /// The `buzz-channel` tag on the announcement is the git ACL: the relay
     /// authorizes clone/fetch/push by membership in the bound channel. A
     /// repo announced without it (e.g. by a vanilla NIP-34 client) returns
-    /// 404 for everyone until its author binds it here.
+    /// 404 for everyone until its author binds it here. A concurrent
+    /// announcement update exits with a conflict; rerun the command so it can
+    /// apply the binding to the new head without discarding other metadata.
     Bind {
         /// Repository identifier (d-tag).
         #[arg(long)]

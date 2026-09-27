@@ -20,7 +20,13 @@ import { IdentityInitialsAvatar } from "./IdentityInitialsAvatar";
 type AgentRuntimeAvatarControlProps = {
   activeTestId: string;
   avatarUrl?: string | null;
+  /** Visible text for a recoverable error action such as a one-time Retry. */
+  errorActionText?: string;
   errorLabel?: string | null;
+  errorActionLabel?: string;
+  errorActionPendingLabel?: string;
+  showErrorAction?: boolean;
+  isErrorActionPending?: boolean;
   errorTestId?: string;
   /** Lifecycle bookkeeping controls actions, not the availability dot. */
   isActive: boolean;
@@ -137,8 +143,13 @@ export function AgentRuntimeAvatarControl({
   activeTestId,
   avatarUrl,
   availability,
+  errorActionText,
+  errorActionLabel,
+  errorActionPendingLabel,
   errorLabel,
   errorTestId,
+  showErrorAction = false,
+  isErrorActionPending = false,
   isActive,
   isRestarting = false,
   isStarting,
@@ -159,7 +170,7 @@ export function AgentRuntimeAvatarControl({
         ? "Restart Agent"
         : "Start Agent";
   const actionText = isRestartAction ? "Restart" : "Start";
-  const isPending = isStarting || isRestarting;
+  const isPending = isStarting || isRestarting || isErrorActionPending;
   const availabilityLabel = availability
     ? getPresenceLabel(availability)
     : "Availability unknown";
@@ -169,21 +180,39 @@ export function AgentRuntimeAvatarControl({
   );
   // A present identity need not be a process this supervisor owns. Replace
   // Start (even a stale Restart/error badge) without inventing Stop authority.
+  const hasRecoveryAction =
+    showErrorAction || Boolean(errorActionText) || isErrorActionPending;
   const showStatusDot =
-    Boolean(startBlockReason) || (isActive && !isRestartAction);
-  const hasError = !isActive && !isPending && Boolean(errorLabel);
-  const errorActionLabel = `${label} has a runtime error. Open runtime details.`;
+    !hasRecoveryAction &&
+    (Boolean(startBlockReason) || (isActive && !isRestartAction));
+  const hasError =
+    !isPending &&
+    Boolean(errorLabel) &&
+    (!isActive || showErrorAction || Boolean(errorActionText));
+  const resolvedErrorActionLabel =
+    errorActionLabel ?? `${label} has a runtime error. Open runtime details.`;
+  const resolvedActionLabel = isErrorActionPending
+    ? (errorActionPendingLabel ?? `Retrying automatic restart for ${label}.`)
+    : hasError
+      ? resolvedErrorActionLabel
+      : actionLabel;
   const transition = shouldReduceMotion ? { duration: 0 } : MASK_TRANSITION;
   const actionBadge = isRestartAction
     ? RESTART_ACTION_BADGE
     : START_ACTION_BADGE;
+  const errorBadge = errorActionText ? RESTART_ACTION_BADGE : ERROR_BADGE;
   const badge = showStatusDot
     ? ACTIVE_BADGE
     : hasError
-      ? ERROR_BADGE
+      ? errorBadge
       : actionBadge;
-  const actionCutoutWidth =
-    showStatusDot || hasError ? undefined : actionBadge.cutoutWidth;
+  const actionCutoutWidth = showStatusDot
+    ? undefined
+    : hasError
+      ? errorActionText
+        ? errorBadge.cutoutWidth
+        : undefined
+      : actionBadge.cutoutWidth;
 
   return (
     <MaskedAvatarBadgeFrame
@@ -199,7 +228,7 @@ export function AgentRuntimeAvatarControl({
             />
           ) : (
             <button
-              aria-label={hasError ? errorActionLabel : actionLabel}
+              aria-label={resolvedActionLabel}
               className={cn(
                 "pointer-events-auto flex h-full w-full items-center justify-center rounded-full px-2.5 text-xs font-semibold leading-none transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-90",
                 hasError
@@ -208,7 +237,9 @@ export function AgentRuntimeAvatarControl({
                     ? "bg-transparent text-amber-800 hover:bg-amber-500/10 dark:text-amber-400"
                     : "bg-primary text-primary-foreground hover:bg-primary/90",
               )}
-              data-testid={hasError ? errorTestId : startTestId}
+              data-testid={
+                hasError || isErrorActionPending ? errorTestId : startTestId
+              }
               disabled={isPending}
               onClick={(event) => {
                 event.stopPropagation();
@@ -218,16 +249,23 @@ export function AgentRuntimeAvatarControl({
                 }
                 onStart();
               }}
-              title={hasError ? errorLabel || errorActionLabel : actionLabel}
+              title={
+                isErrorActionPending
+                  ? resolvedActionLabel
+                  : hasError
+                    ? errorLabel || resolvedErrorActionLabel
+                    : actionLabel
+              }
               type="button"
             >
               {isPending ? (
-                <Spinner
-                  aria-label={actionLabel}
-                  className="h-4 w-4 border-2"
-                />
+                <Spinner aria-hidden="true" className="h-4 w-4 border-2" />
               ) : hasError ? (
-                <CircleAlert className="h-4 w-4" />
+                errorActionText ? (
+                  errorActionText
+                ) : (
+                  <CircleAlert className="h-4 w-4" />
+                )
               ) : (
                 actionText
               )}

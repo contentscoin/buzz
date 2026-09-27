@@ -10,10 +10,10 @@ use crate::{
         find_managed_agent_mut, load_managed_agents, load_personas, load_teams,
         managed_agents_base_dir, normalize_agent_args, resolve_provider_binary,
         save_managed_agents, start_managed_agent_process, stop_managed_agent_process,
-        stop_managed_agent_workspace_pair, sync_managed_agent_processes, try_regenerate_nest,
-        validate_provider_config, BackendKind, CreateManagedAgentRequest,
-        CreateManagedAgentResponse, ManagedAgentRecord, ManagedAgentSummary, RelayMeshConfig,
-        DEFAULT_ACP_COMMAND, DEFAULT_AGENT_PARALLELISM, DEFAULT_AGENT_TURN_TIMEOUT_SECONDS,
+        sync_managed_agent_processes, try_regenerate_nest, validate_provider_config, BackendKind,
+        CreateManagedAgentRequest, CreateManagedAgentResponse, ManagedAgentRecord,
+        ManagedAgentSummary, RelayMeshConfig, DEFAULT_ACP_COMMAND, DEFAULT_AGENT_PARALLELISM,
+        DEFAULT_AGENT_TURN_TIMEOUT_SECONDS,
     },
     relay::relay_ws_url_with_override,
     util::now_iso,
@@ -343,6 +343,33 @@ pub async fn create_managed_agent(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CreateManagedAgentResponse, String> {
+    // Agent creation spans local persistence, profile publication and optional
+    // spawn/deploy awaits. Serialize it against workspace application so every
+    // phase consumes one relay and identity snapshot. The caller-captured
+    // values reject an action that reached this command after its originating
+    // UI context had already switched.
+    let workspace_apply_guard = state.workspace_apply_lock.lock().await;
+    let expected_relay_url = input
+        .expected_relay_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let expected_signer_pubkey = input
+        .expected_signer_pubkey
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let workspace_relay = crate::relay::bind_expected_relay_scope(
+        expected_relay_url.as_deref(),
+        relay_ws_url_with_override(&state),
+    )?;
+    let owner_keys = state.signing_keys()?;
+    let workspace_signer = crate::relay::bind_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        owner_keys.public_key().to_hex(),
+    )?;
     let name = input.name.trim().to_string();
     let requested_persona_id = input
         .persona_id
@@ -412,12 +439,23 @@ pub async fn create_managed_agent(
         // Store the relay override exactly as supplied (trimmed). An explicit
         // value pins the agent; empty stays empty and resolves to the active
         // workspace relay at read-time. Uniform for Local and Provider.
-        let resolved_relay_url = input
+        let requested_relay_url = input
             .relay_url
             .as_deref()
             .map(str::trim)
             .unwrap_or("")
             .to_string();
+        let resolved_relay_url = if expected_relay_url.is_some() {
+            if !requested_relay_url.is_empty() {
+                crate::relay::assert_expected_relay_scope(
+                    Some(workspace_relay.as_str()),
+                    &crate::relay::relay_http_base_url(&requested_relay_url),
+                )?;
+            }
+            workspace_relay.as_str().to_string()
+        } else {
+            requested_relay_url
+        };
 
         (keys, private_key_nsec, pubkey, resolved_relay_url, input)
     };
@@ -435,7 +473,6 @@ pub async fn create_managed_agent(
     // Agents authenticate via the auth tag in their kind:0 profile event.
     // No tokens are minted. Fail closed: bad auth tag → don't create agent.
     let auth_tag = {
-        let owner_keys = state.signing_keys()?;
         // Bridge nostr 0.37 → 0.36 (buzz-sdk) via hex round-trip.
         let compat_owner = nostr::Keys::parse(&owner_keys.secret_key().to_secret_hex())
             .map_err(|e| format!("failed to bridge owner keys: {e}"))?;
@@ -717,7 +754,16 @@ pub async fn create_managed_agent(
     // ── Phase 3b: local spawn (async preflight outside store lock) ───────────
     let mut spawn_error = None;
     let agent = if input.spawn_after_create && input.backend == BackendKind::Local {
-        match start_local_agent_with_preflight(&app, &state, &pubkey, true, None, None, None).await
+        match start_local_agent_with_preflight(
+            &app,
+            &state,
+            &pubkey,
+            true,
+            expected_relay_url.as_deref(),
+            expected_signer_pubkey.as_deref(),
+            None,
+        )
+        .await
         {
             Ok(agent) => agent,
             Err(error) => {
@@ -779,7 +825,16 @@ pub async fn create_managed_agent(
                 build_deploy_payload(&app, &state, rec)?
             };
             match deploy_to_provider(
-                &app, &state, &pubkey, id, config, agent_json, None, None, None, None,
+                &app,
+                &state,
+                &pubkey,
+                id,
+                config,
+                agent_json,
+                None,
+                expected_relay_url.as_deref(),
+                Some(workspace_signer.as_str()),
+                None,
             )
             .await
             {
@@ -813,6 +868,7 @@ pub async fn create_managed_agent(
         agent
     };
 
+    drop(workspace_apply_guard);
     Ok(CreateManagedAgentResponse {
         agent: final_agent,
         private_key_nsec,
@@ -1010,11 +1066,25 @@ pub async fn start_managed_agent(
 #[tauri::command]
 pub async fn stop_managed_agent(
     pubkey: String,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
     app: AppHandle,
 ) -> Result<ManagedAgentSummary, String> {
     use tauri::Manager;
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
+        // Bind one workspace-relay read to the caller's captured scope. The
+        // stop below consumes this exact value, so a community switch landing
+        // after validation cannot retarget the action to another pair with the
+        // same pubkey.
+        let workspace_relay = crate::relay::bind_expected_relay_scope(
+            expected_relay_url.as_deref(),
+            crate::relay::relay_ws_url_with_override(&state),
+        )?;
+        crate::relay::assert_expected_signer(
+            expected_signer_pubkey.as_deref(),
+            &workspace_owner_hex(&state)?,
+        )?;
         let _store_guard = state
             .managed_agents_store_lock
             .lock()
@@ -1045,7 +1115,12 @@ pub async fn stop_managed_agent(
             }
             // Pair-scoped: stops only the active workspace's pair; delete and
             // the config-restart flows still drain every pair.
-            stop_managed_agent_workspace_pair(&app, record, &mut runtimes)?;
+            crate::managed_agents::stop_managed_agent_bound_workspace_pair(
+                &app,
+                record,
+                &mut runtimes,
+                &workspace_relay,
+            )?;
         }
         save_managed_agents(&app, &records)?;
         let record = records

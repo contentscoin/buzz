@@ -1,13 +1,15 @@
 //! Shared git subprocess plumbing for the project commands.
 //!
-//! Runs the system `git` with an ephemeral, env-only auth configuration:
+//! Runs a compatible `git` with an ephemeral, env-only auth configuration:
 //! the identity nsec is handed to `git-credential-nostr` via environment
 //! variables so nothing key-related ever touches disk or global git config.
 
 use crate::{app_state::AppState, managed_agents::resolve_command};
 use nostr::{Keys, ToBech32};
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use url::Url;
 
@@ -16,6 +18,172 @@ use url::Url;
 /// `spawn_blocking` threads indefinitely.
 const LOCAL_GIT_TIMEOUT: Duration = Duration::from_secs(60);
 const REMOTE_GIT_TIMEOUT: Duration = Duration::from_secs(300);
+const MIN_NOSTR_GIT_VERSION: (u64, u64, u64) = (2, 46, 0);
+
+#[derive(Clone)]
+struct GitExecutable {
+    path: PathBuf,
+    source: &'static str,
+    version: (u64, u64, u64),
+}
+
+impl GitExecutable {
+    fn diagnostic_label(&self) -> String {
+        let (major, minor, patch) = self.version;
+        format!("Git {major}.{minor}.{patch} ({})", self.source)
+    }
+}
+
+#[derive(Clone)]
+struct GitCandidate {
+    path: PathBuf,
+    source: &'static str,
+}
+
+fn parse_git_version(output: &str) -> Option<(u64, u64, u64)> {
+    let version = output
+        .split_whitespace()
+        .find(|part| part.chars().next().is_some_and(|c| c.is_ascii_digit()))?;
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts
+        .next()?
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()?;
+    Some((major, minor, patch))
+}
+
+fn probe_git_candidate(candidate: GitCandidate) -> Result<GitExecutable, String> {
+    let auth = GitAuthConfig {
+        git_path: candidate.path.clone(),
+        git_diagnostic: format!("Git candidate ({})", candidate.source),
+        credential_helper: None,
+        nsec: String::new(),
+        allow_file_transport: false,
+    };
+    let stdout = run_git(&["--version"], None, &auth)
+        .map_err(|_| format!("{} version check failed", candidate.source))?;
+    let version = parse_git_version(&stdout)
+        .ok_or_else(|| format!("{} returned an unrecognized version", candidate.source))?;
+    Ok(GitExecutable {
+        path: candidate.path,
+        source: candidate.source,
+        version,
+    })
+}
+
+fn push_git_candidate(candidates: &mut Vec<GitCandidate>, path: PathBuf, source: &'static str) {
+    if path.is_file() && !candidates.iter().any(|candidate| candidate.path == path) {
+        candidates.push(GitCandidate { path, source });
+    }
+}
+
+fn app_local_executable(command: &str) -> Option<PathBuf> {
+    let executable_name = format!("{command}{}", std::env::consts::EXE_SUFFIX);
+    let path = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join(executable_name);
+    path.is_file().then_some(path)
+}
+
+fn packaged_managed_git() -> Option<PathBuf> {
+    let path = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join("resources")
+        .join("fmg-managed-git")
+        .join("cmd")
+        .join(format!("git{}", std::env::consts::EXE_SUFFIX));
+    path.is_file().then_some(path)
+}
+
+fn git_candidates() -> Vec<GitCandidate> {
+    let mut candidates = Vec::new();
+    let executable_name = format!("git{}", std::env::consts::EXE_SUFFIX);
+    // Use the packaged runtime directly for desktop project operations. The
+    // app-local `git.exe` remains a sidecar launcher for child tools, but
+    // selecting the real binary here lets timeout handling terminate Git
+    // itself instead of leaving a launcher child behind.
+    if let Some(path) = packaged_managed_git() {
+        push_git_candidate(&mut candidates, path, "managed-runtime");
+    }
+    if let Some(path) = app_local_executable("git") {
+        push_git_candidate(&mut candidates, path, "app-local");
+    }
+    if let Some(path) = resolve_command("git") {
+        push_git_candidate(&mut candidates, path, "resolved");
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            push_git_candidate(&mut candidates, directory.join(&executable_name), "PATH");
+        }
+    }
+    candidates
+}
+
+fn select_git_executable_uncached(require_nostr_auth: bool) -> Result<GitExecutable, String> {
+    let candidates = git_candidates();
+    if candidates.is_empty() {
+        return Err(
+            "Git was not found. Install Git and restart Buzz, or place a compatible Git executable next to the Buzz app."
+                .to_string(),
+        );
+    }
+
+    let mut diagnostics = Vec::new();
+    for candidate in candidates {
+        match probe_git_candidate(candidate) {
+            Ok(git) if !require_nostr_auth || git.version >= MIN_NOSTR_GIT_VERSION => {
+                let (major, minor, patch) = git.version;
+                tracing::info!(
+                    git_source = git.source,
+                    git_version = %format!("{major}.{minor}.{patch}"),
+                    "selected Git executable for project operations"
+                );
+                return Ok(git);
+            }
+            Ok(git) => {
+                let (major, minor, patch) = git.version;
+                diagnostics.push(format!(
+                    "{} Git {major}.{minor}.{patch} is too old",
+                    git.source
+                ));
+            }
+            Err(error) => diagnostics.push(error),
+        }
+    }
+
+    let requirement = if require_nostr_auth {
+        "Nostr-authenticated Buzz repositories require Git 2.46 or newer. "
+    } else {
+        ""
+    };
+    Err(format!(
+        "Buzz could not find a compatible Git executable. {requirement}Install or replace Git, then restart Buzz. Checked: {}.",
+        diagnostics.join("; ")
+    ))
+}
+
+fn select_git_executable(require_nostr_auth: bool) -> Result<GitExecutable, String> {
+    static NOSTR_GIT: OnceLock<GitExecutable> = OnceLock::new();
+    static BASIC_GIT: OnceLock<GitExecutable> = OnceLock::new();
+    let cache = if require_nostr_auth {
+        &NOSTR_GIT
+    } else {
+        &BASIC_GIT
+    };
+    if let Some(git) = cache.get() {
+        return Ok(git.clone());
+    }
+    let selected = select_git_executable_uncached(require_nostr_auth)?;
+    let _ = cache.set(selected.clone());
+    Ok(cache.get().cloned().unwrap_or(selected))
+}
 
 fn git_subcommand<'a>(args: &'a [&str]) -> Option<&'a str> {
     let mut index = 0;
@@ -46,6 +214,7 @@ fn git_needs_credentials(args: &[&str]) -> bool {
 
 pub(crate) struct GitAuthConfig {
     git_path: std::path::PathBuf,
+    git_diagnostic: String,
     credential_helper: Option<std::path::PathBuf>,
     nsec: String,
     allow_file_transport: bool,
@@ -84,7 +253,7 @@ pub(crate) fn run_git(
 
     let mut child = command
         .spawn()
-        .map_err(|error| format!("failed to run git: {error}"))?;
+        .map_err(|error| format!("failed to run {}: {error}", auth.git_diagnostic))?;
 
     // Drain the pipes on background threads so a chatty git process can't
     // deadlock on a full pipe while we poll for exit below.
@@ -103,14 +272,21 @@ pub(crate) fn run_git(
                     let _ = child.wait();
                     let _ = stdout_thread.join();
                     let _ = stderr_thread.join();
-                    return Err(format!("git timed out after {}s", timeout.as_secs()));
+                    return Err(format!(
+                        "{} timed out after {}s",
+                        auth.git_diagnostic,
+                        timeout.as_secs()
+                    ));
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("failed to wait for git: {error}"));
+                return Err(format!(
+                    "failed to wait for {}: {error}",
+                    auth.git_diagnostic
+                ));
             }
         }
     };
@@ -120,9 +296,9 @@ pub(crate) fn run_git(
     if !status.success() {
         let stderr = stderr.trim().to_string();
         return Err(if stderr.is_empty() {
-            format!("git exited with status {status}")
+            format!("{} exited with status {status}", auth.git_diagnostic)
         } else {
-            stderr
+            format!("{} failed: {stderr}", auth.git_diagnostic)
         });
     }
     Ok(stdout)
@@ -182,12 +358,17 @@ fn configure_git_auth(command: &mut Command, auth: &GitAuthConfig, needs_credent
     apply_git_config(command, &entries);
 }
 
-/// Format a path for git `credential.helper`.
+/// Format a path as an explicit shell command for git `credential.helper`.
 ///
-/// Git for Windows invokes helpers via MinGW bash, which treats `\` as
-/// escapes. Forward slashes work on every platform git supports.
+/// Git appends the credential operation and executes helpers through a shell.
+/// A bare absolute path is therefore split when an install or profile path
+/// contains spaces. The `!` form preserves a shell snippet; single-quoting it
+/// keeps the path one argument. Git for Windows invokes the snippet through
+/// MinGW sh, where forward slashes avoid backslash escaping.
 fn credential_helper_config_value(path: &std::path::Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    let quoted = normalized.replace('\'', "'\"'\"'");
+    format!("!'{quoted}'")
 }
 
 fn apply_git_config(command: &mut Command, entries: &[(&str, String)]) {
@@ -208,9 +389,10 @@ pub(crate) fn build_git_clone_auth_config(
     state: &AppState,
 ) -> Result<GitAuthConfig, String> {
     if validate_github_clone_url(clone_url).is_ok() {
+        let git = select_git_executable(false)?;
         return Ok(GitAuthConfig {
-            git_path: resolve_command("git")
-                .ok_or_else(|| "git was not found on PATH".to_string())?,
+            git_path: git.path.clone(),
+            git_diagnostic: git.diagnostic_label(),
             credential_helper: None,
             nsec: String::new(),
             allow_file_transport: false,
@@ -220,14 +402,33 @@ pub(crate) fn build_git_clone_auth_config(
 }
 
 pub(crate) fn build_git_auth_config_for_keys(keys: &Keys) -> Result<GitAuthConfig, String> {
-    let git_path = resolve_command("git").ok_or_else(|| "git was not found on PATH".to_string())?;
-    let credential_helper = resolve_command("git-credential-nostr");
+    build_git_auth_config_for_keys_with_requirement(keys, true)
+}
+
+fn build_git_auth_config_for_keys_with_requirement(
+    keys: &Keys,
+    require_nostr_auth: bool,
+) -> Result<GitAuthConfig, String> {
+    let git = select_git_executable(require_nostr_auth)?;
+    let credential_helper = match app_local_executable("git-credential-nostr")
+        .or_else(|| resolve_command("git-credential-nostr"))
+    {
+        Some(helper) => Some(helper),
+        None if require_nostr_auth => {
+            return Err(
+                "Buzz could not find git-credential-nostr. Reinstall Buzz or restore its bundled credential helper, then restart Buzz."
+                    .to_string(),
+            );
+        }
+        None => None,
+    };
     let nsec = keys
         .secret_key()
         .to_bech32()
         .map_err(|error| format!("encode identity key: {error}"))?;
     Ok(GitAuthConfig {
-        git_path,
+        git_path: git.path.clone(),
+        git_diagnostic: git.diagnostic_label(),
         credential_helper,
         nsec,
         allow_file_transport: false,
@@ -236,7 +437,7 @@ pub(crate) fn build_git_auth_config_for_keys(keys: &Keys) -> Result<GitAuthConfi
 
 #[cfg(test)]
 pub(crate) fn build_test_git_auth_config() -> Result<GitAuthConfig, String> {
-    let mut auth = build_git_auth_config_for_keys(&Keys::generate())?;
+    let mut auth = build_git_auth_config_for_keys_with_requirement(&Keys::generate(), false)?;
     auth.allow_file_transport = true;
     Ok(auth)
 }
@@ -399,12 +600,13 @@ mod tests {
     };
 
     #[test]
-    fn credential_helper_config_value_uses_forward_slashes() {
-        let path =
-            std::path::PathBuf::from(r"C:\Users\x\AppData\Local\Buzz\git-credential-nostr.exe");
+    fn credential_helper_config_value_shell_quotes_forward_slash_path() {
+        let path = std::path::PathBuf::from(
+            r"C:\Users\Buzz User\AppData\Local\Buzz\git-credential-nostr.exe",
+        );
         assert_eq!(
             credential_helper_config_value(&path),
-            "C:/Users/x/AppData/Local/Buzz/git-credential-nostr.exe",
+            "!'C:/Users/Buzz User/AppData/Local/Buzz/git-credential-nostr.exe'",
         );
     }
 

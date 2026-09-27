@@ -2,10 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { LoaderCircle } from "lucide-react";
 import * as React from "react";
 
+import { useCommunities } from "@/features/communities/useCommunities";
 import { ProfileAvatar } from "@/features/profile/ui/ProfileAvatar";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import { Dialog } from "@/shared/ui/dialog";
 import { ChooserDialogContent } from "@/shared/ui/chooser-dialog-content";
 import type { ManagedAgentBackend } from "@/shared/api/types";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 
 type ManagedAgentSummary = {
   pubkey: string;
@@ -24,7 +27,10 @@ type AgentAddResult = {
 type AddAgentDialogProps = {
   open: boolean;
   onClose: () => void;
-  onAdd: (pubkey: string) => Promise<AgentAddResult>;
+  onAdd: (
+    pubkey: string,
+    scope: { expectedRelayUrl: string; expectedSignerPubkey: string },
+  ) => Promise<AgentAddResult>;
   currentAgentPubkeys: string[];
 };
 
@@ -34,6 +40,8 @@ export function AddAgentDialog({
   onAdd,
   currentAgentPubkeys,
 }: AddAgentDialogProps) {
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const [agents, setAgents] = React.useState<ManagedAgentSummary[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [adding, setAdding] = React.useState<string | null>(null);
@@ -76,23 +84,37 @@ export function AddAgentDialog({
 
   async function handleAdd(agent: ManagedAgentSummary) {
     if (adding) return;
+    const isLocal = agent.backend.type === "local";
+    const needsStart = isLocal
+      ? agent.status !== "running"
+      : agent.status !== "deployed";
+    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+    if (!expectedRelayUrl || !expectedSignerPubkey) {
+      setError(
+        "Buzz is still connecting to this community. Try adding the agent again in a moment.",
+      );
+      return;
+    }
+
     setAdding(agent.pubkey);
     setError(null);
     setWarning(null);
-    let startedForAdd = false;
     try {
-      const isLocal = agent.backend.type === "local";
-      const needsStart = isLocal
-        ? agent.status !== "running"
-        : agent.status !== "deployed";
-      if (needsStart && isLocal) {
-        await invoke("start_managed_agent", { pubkey: agent.pubkey });
-        startedForAdd = true;
-      }
-      const result = await onAdd(agent.pubkey);
-      if (needsStart && !isLocal) {
+      const result = await onAdd(agent.pubkey, {
+        expectedRelayUrl,
+        expectedSignerPubkey,
+      });
+      if (needsStart) {
         try {
-          await invoke("start_managed_agent", { pubkey: agent.pubkey });
+          await invoke("start_managed_agent", {
+            pubkey: agent.pubkey,
+            expectedRelayUrl,
+            expectedSignerPubkey,
+          });
         } catch (startError: unknown) {
           const msg =
             startError instanceof Error
@@ -113,16 +135,6 @@ export function AddAgentDialog({
         onClose();
       }
     } catch (e: unknown) {
-      if (startedForAdd) {
-        try {
-          await invoke("stop_managed_agent", { pubkey: agent.pubkey });
-        } catch (rollbackError: unknown) {
-          console.error(
-            "Failed to stop agent after huddle add failed:",
-            rollbackError,
-          );
-        }
-      }
       const msg = e instanceof Error ? e.message : String(e);
       setError(`Failed to add agent: ${msg}`);
       console.error("Failed to add agent to huddle:", e);

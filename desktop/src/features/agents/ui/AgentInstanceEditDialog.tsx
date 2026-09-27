@@ -11,11 +11,13 @@ import {
   useAgentConfigSurface,
   useBakedBuildEnvKeysQuery,
   usePersonasQuery,
-  useStartManagedAgentMutation,
   useUpdateManagedAgentMutation,
 } from "@/features/agents/hooks";
 import { useAgentAccessOwnerOnlyQuery } from "@/features/agents/useAgentAccessOwnerOnly";
-import { isManagedAgentActive } from "@/features/agents/lib/managedAgentControlActions";
+import {
+  isManagedAgentActive,
+  type ManagedAgentCommandScope,
+} from "@/features/agents/lib/managedAgentControlActions";
 import type {
   ManagedAgent,
   RespondToMode,
@@ -93,9 +95,11 @@ import {
   runtimeDropdownAction,
   usePendingHarnessSelection,
 } from "./addCustomHarness";
+import { useStartManagedAgentToastAction } from "./useStartManagedAgentToastAction";
 
 export function AgentInstanceEditDialog({
   agent,
+  commandScope,
   initialFocus,
   open,
   onEditLinkedPersona,
@@ -103,6 +107,7 @@ export function AgentInstanceEditDialog({
   onUpdated,
 }: {
   agent: ManagedAgent;
+  commandScope?: ManagedAgentCommandScope | null;
   /** Optional field to scroll/focus when the dialog opens from a card deep-link. */
   initialFocus?: EditAgentFocusTarget;
   open: boolean;
@@ -112,7 +117,8 @@ export function AgentInstanceEditDialog({
   onUpdated?: (agent: ManagedAgent) => void;
 }) {
   const updateMutation = useUpdateManagedAgentMutation();
-  const startMutation = useStartManagedAgentMutation();
+  const startManagedAgentFromToast =
+    useStartManagedAgentToastAction(commandScope);
   const queryClient = useQueryClient();
   // Gate the full Save sequence, including standalone setters, with isSaving.
   const [isSaving, setIsSaving] = React.useState(false);
@@ -801,17 +807,8 @@ export function AgentInstanceEditDialog({
         toast(`${startedName} saved while stopped.`, {
           action: {
             label: "Start now",
-            onClick: () => {
-              startMutation.mutate(result.agent.pubkey, {
-                onSuccess: () => toast.success(`${startedName} started.`),
-                onError: (error) =>
-                  toast.error(
-                    error instanceof Error
-                      ? `${startedName} failed to start: ${error.message}`
-                      : `${startedName} failed to start.`,
-                  ),
-              });
-            },
+            onClick: () =>
+              startManagedAgentFromToast(result.agent.pubkey, startedName),
           },
         });
       }

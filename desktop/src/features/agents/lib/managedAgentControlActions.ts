@@ -8,8 +8,25 @@ type DeleteManagedAgentInput = {
   forceRemoteDelete?: boolean;
 };
 
-type StartManagedAgent = (pubkey: string) => Promise<unknown>;
-type StopManagedAgent = (pubkey: string) => Promise<unknown>;
+export type ManagedAgentCommandScope = {
+  expectedRelayUrl: string;
+  expectedSignerPubkey: string;
+};
+
+export type StartManagedAgentCommand = (
+  pubkey: string,
+  options?: {
+    expectedRelayUrl?: string;
+    expectedSignerPubkey?: string;
+  },
+) => Promise<unknown>;
+export type StopManagedAgentCommand = (
+  pubkey: string,
+  options?: {
+    expectedRelayUrl?: string;
+    expectedSignerPubkey?: string;
+  },
+) => Promise<unknown>;
 type DeleteManagedAgent = (input: DeleteManagedAgentInput) => Promise<unknown>;
 
 type ManagedAgentChannelContext = {
@@ -74,36 +91,52 @@ export function resolveManagedAgentChannelId(
 
 export async function startManagedAgentWithRules({
   agent,
+  scope,
   startManagedAgent,
 }: {
   agent: ManagedAgent;
-  startManagedAgent: StartManagedAgent;
+  scope?: ManagedAgentCommandScope;
+  startManagedAgent: StartManagedAgentCommand;
 }) {
   // Relay-mesh agents are no longer blocked here: the backend start preflight
   // (ensure_relay_mesh_for_record) re-resolves a live serve target and dials
   // it, failing with an actionable error when no peer serves the model.
-  await startManagedAgent(agent.pubkey);
+  if (scope) {
+    await startManagedAgent(agent.pubkey, scope);
+  } else {
+    await startManagedAgent(agent.pubkey);
+  }
 }
 
 export async function respawnManagedAgentWithRules({
   agent,
+  scope,
   startManagedAgent,
   stopManagedAgent,
   onStopped,
 }: {
   agent: ManagedAgent;
-  startManagedAgent: StartManagedAgent;
-  stopManagedAgent: StopManagedAgent;
+  scope?: ManagedAgentCommandScope;
+  startManagedAgent: StartManagedAgentCommand;
+  stopManagedAgent: StopManagedAgentCommand;
   /** Called after a successful stop and before start begins — use this to
    * clear stale working badges at the right boundary. */
   onStopped?: () => void;
 }) {
   if (agent.backend.type === "local" && isManagedAgentActive(agent)) {
-    await stopManagedAgent(agent.pubkey);
+    if (scope) {
+      await stopManagedAgent(agent.pubkey, scope);
+    } else {
+      await stopManagedAgent(agent.pubkey);
+    }
     onStopped?.();
   }
 
-  await startManagedAgent(agent.pubkey);
+  if (scope) {
+    await startManagedAgent(agent.pubkey, scope);
+  } else {
+    await startManagedAgent(agent.pubkey);
+  }
 }
 
 export async function stopManagedAgentWithRules({
@@ -111,10 +144,12 @@ export async function stopManagedAgentWithRules({
   channels,
   preferredChannelId,
   relayAgents,
+  scope,
   stopManagedAgent,
 }: {
   agent: ManagedAgent;
-  stopManagedAgent: StopManagedAgent;
+  scope?: ManagedAgentCommandScope;
+  stopManagedAgent: StopManagedAgentCommand;
 } & ManagedAgentChannelContext): Promise<ManagedAgentActionResult> {
   if (agent.backend.type === "provider") {
     const channelId = resolveManagedAgentChannelId(agent, {
@@ -126,16 +161,31 @@ export async function stopManagedAgentWithRules({
       throw new Error("Cannot stop: agent is not in any channel");
     }
 
-    await sendChannelMessage(channelId, "!shutdown", undefined, undefined, [
-      agent.pubkey,
-    ]);
+    await sendChannelMessage(
+      channelId,
+      "!shutdown",
+      undefined,
+      undefined,
+      [agent.pubkey],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      scope?.expectedRelayUrl,
+      scope?.expectedSignerPubkey,
+    );
     return {
       noticeMessage:
         "Shutdown requested. This does not confirm the agent has stopped.",
     };
   }
 
-  await stopManagedAgent(agent.pubkey);
+  if (scope) {
+    await stopManagedAgent(agent.pubkey, scope);
+  } else {
+    await stopManagedAgent(agent.pubkey);
+  }
   return {};
 }
 
@@ -145,11 +195,15 @@ export async function deleteManagedAgentWithRules({
   deleteManagedAgent,
   preferredChannelId,
   getAvailability,
+  beforeDelete,
   relayAgents,
+  scope,
   skipRemoteDeleteConfirm = false,
 }: {
   agent: ManagedAgent;
   deleteManagedAgent: DeleteManagedAgent;
+  beforeDelete?: () => Promise<void>;
+  scope?: ManagedAgentCommandScope;
   skipRemoteDeleteConfirm?: boolean;
 } & ManagedAgentActionContext): Promise<ManagedAgentActionResult> {
   if (agent.backend.type === "provider" && agent.backendAgentId) {
@@ -164,9 +218,20 @@ export async function deleteManagedAgentWithRules({
       // Only established Offline preserves the intentional no-request path.
       // Unknown is not evidence that shutdown can safely be skipped.
       if (availability !== "offline") {
-        await sendChannelMessage(channelId, "!shutdown", undefined, undefined, [
-          agent.pubkey,
-        ]);
+        await sendChannelMessage(
+          channelId,
+          "!shutdown",
+          undefined,
+          undefined,
+          [agent.pubkey],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          scope?.expectedRelayUrl,
+          scope?.expectedSignerPubkey,
+        );
 
         if (!skipRemoteDeleteConfirm) {
           const confirmed = window.confirm(
@@ -207,6 +272,7 @@ export async function deleteManagedAgentWithRules({
 
   const isDeployedRemote =
     agent.backend.type === "provider" && agent.backendAgentId;
+  await beforeDelete?.();
   await deleteManagedAgent({
     pubkey: agent.pubkey,
     forceRemoteDelete: isDeployedRemote ? true : undefined,

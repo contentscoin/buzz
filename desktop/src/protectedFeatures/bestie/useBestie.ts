@@ -75,7 +75,7 @@ export function useBestie() {
   const runtimesQuery = useManagedAgentRuntimesQuery({
     enabled: scope !== null,
   });
-  const runtimeAction = useManagedAgentRuntimeAction();
+  const runtimeAction = useManagedAgentRuntimeAction(ownerPubkey);
   const assignedAgent = findAssignedLocalAgent(
     managedAgentsQuery.data ?? [],
     assignmentQuery.data,

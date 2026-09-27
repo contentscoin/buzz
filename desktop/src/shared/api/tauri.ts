@@ -354,8 +354,17 @@ export async function addChannelMembers(
 export async function removeChannelMember(
   channelId: string,
   pubkey: string,
+  options?: {
+    expectedRelayUrl?: string;
+    expectedSignerPubkey?: string;
+  },
 ): Promise<void> {
-  await invokeTauri("remove_channel_member", { channelId, pubkey });
+  await invokeTauri("remove_channel_member", {
+    channelId,
+    pubkey,
+    expectedRelayUrl: options?.expectedRelayUrl ?? null,
+    expectedSignerPubkey: options?.expectedSignerPubkey ?? null,
+  });
 }
 
 export async function changeChannelMemberRole(
@@ -737,6 +746,8 @@ export async function createManagedAgent(input: CreateManagedAgentInput) {
         personaId: input.personaId,
         teamId: input.teamId,
         relayUrl: input.relayUrl,
+        expectedRelayUrl: input.expectedRelayUrl,
+        expectedSignerPubkey: input.expectedSignerPubkey,
         acpCommand: input.acpCommand,
         agentCommand: input.agentCommand,
         harnessOverride: input.harnessOverride ?? false,

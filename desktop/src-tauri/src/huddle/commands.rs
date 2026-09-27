@@ -149,8 +149,18 @@ pub async fn remove_agent_from_huddle(
 #[tauri::command]
 pub async fn add_agent_to_huddle(
     agent_pubkey: String,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<agents::AgentAddResult, String> {
+    let _workspace_guard = state.workspace_apply_lock.lock().await;
+    let relay_base = crate::relay::relay_api_base_url_with_override(&state);
+    crate::relay::assert_expected_relay_scope(expected_relay_url.as_deref(), &relay_base)?;
+    let signing_keys = state.signing_keys()?;
+    crate::relay::assert_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        &signing_keys.public_key().to_hex(),
+    )?;
     validate_pubkey_hex(&agent_pubkey)?;
 
     let (eph_id, parent_id, huddle_generation) = {
@@ -184,7 +194,15 @@ pub async fn add_agent_to_huddle(
     let parent_uuid = Uuid::parse_str(&parent_id).map_err(|e| e.to_string())?;
 
     // Returns Err only if the ephemeral add fails — parent failure is in the result.
-    let result = agents::add_agent_to_huddle(eph_uuid, parent_uuid, &agent_pubkey, &state).await?;
+    let result = agents::add_agent_to_huddle(
+        eph_uuid,
+        parent_uuid,
+        &agent_pubkey,
+        &state,
+        &relay_base,
+        &signing_keys,
+    )
+    .await?;
 
     // Ephemeral add succeeded — register it only if this is still the huddle
     // that initiated the relay operation.

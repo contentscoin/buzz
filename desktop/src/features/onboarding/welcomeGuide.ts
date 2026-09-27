@@ -183,6 +183,8 @@ async function ensureWelcomeTeamPersonasActive() {
 async function ensureWelcomeTeamMembership(
   channelId: string,
   agents: WelcomeTeamAgents,
+  expectedRelayUrl?: string | null,
+  expectedSignerPubkey?: string | null,
 ) {
   const members = await getChannelMembers(channelId).catch(() => []);
   const memberPubkeys = new Set(
@@ -199,6 +201,8 @@ async function ensureWelcomeTeamMembership(
     channelId,
     pubkeys: missingAgents.map((agent) => agent.pubkey),
     role: "bot",
+    expectedRelayUrl: expectedRelayUrl ?? undefined,
+    expectedSignerPubkey: expectedSignerPubkey ?? undefined,
   });
   const unexpectedError = result.errors.find(
     ({ error }) => !error.toLowerCase().includes("already"),
@@ -214,6 +218,7 @@ export async function buildWelcomeStarterCreateInput(
   runtimes: readonly AcpRuntime[],
   preferredRuntimeId: string | null,
   relayUrl?: string | null,
+  signerPubkey?: string | null,
 ): Promise<CreateManagedAgentInput> {
   const { runtime } = resolveStartRuntimeForDefinition(
     persona,
@@ -225,6 +230,8 @@ export async function buildWelcomeStarterCreateInput(
     name: starter.name,
     teamId: WELCOME_TEAM_ID,
     relayUrl: relayUrl ?? undefined,
+    expectedRelayUrl: relayUrl ?? undefined,
+    expectedSignerPubkey: signerPubkey ?? undefined,
     spawnAfterCreate: false,
     startOnAppLaunch: false,
     respondTo: "owner-only",
@@ -322,6 +329,7 @@ export function welcomeTeammateAccessUpdate(
 async function provisionWelcomeTeam(
   channelId: string,
   relayUrl?: string | null,
+  signerPubkey?: string | null,
 ): Promise<WelcomeTeamAgents> {
   const existingAgents = await listManagedAgents();
   await ensureWelcomeTeamPersonasActive();
@@ -351,6 +359,7 @@ async function provisionWelcomeTeam(
       runtimes,
       globalConfig.preferred_runtime,
       relayUrl,
+      signerPubkey,
     );
     const existing = pickWelcomeTeamStarterAgentForRelay(
       existingAgents,
@@ -388,21 +397,29 @@ async function provisionWelcomeTeam(
       welcomeAgents[index] = updated.agent;
     }
   }
-  await ensureWelcomeTeamMembership(channelId, welcomeAgents);
+  await ensureWelcomeTeamMembership(
+    channelId,
+    welcomeAgents,
+    relayUrl,
+    signerPubkey,
+  );
   return welcomeAgents;
 }
 
 export function ensureWelcomeTeam(
   channelId: string,
   relayUrl?: string | null,
+  signerPubkey?: string | null,
 ): Promise<WelcomeTeamAgents> {
-  const key = `${normalizeRelayUrl(relayUrl) ?? ""}:${channelId}`;
+  const key = `${normalizeRelayUrl(relayUrl) ?? ""}:${normalizePubkey(signerPubkey ?? "")}:${channelId}`;
   const current = welcomeTeamPromises.get(key);
   if (current) return current;
 
-  const promise = provisionWelcomeTeam(channelId, relayUrl).finally(() =>
-    welcomeTeamPromises.delete(key),
-  );
+  const promise = provisionWelcomeTeam(
+    channelId,
+    relayUrl,
+    signerPubkey,
+  ).finally(() => welcomeTeamPromises.delete(key));
   welcomeTeamPromises.set(key, promise);
   return promise;
 }

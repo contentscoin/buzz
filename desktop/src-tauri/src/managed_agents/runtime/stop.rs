@@ -111,23 +111,30 @@ fn stop_legacy_scalar_pid<R: tauri::Runtime>(
     Ok(())
 }
 
-/// Stop the runtime pair this record resolves to for the active workspace
-/// (explicit relay pin, else the active workspace relay) — the pair-scoped
-/// counterpart of [`stop_managed_agent_process`], which drains every pair.
+/// Stop only the runtime pair addressed by a caller-validated workspace relay.
 ///
-/// Community-scoped surfaces (profile panel, Agents tab, auto-restart) stop
-/// through here so stopping an agent in one community never tears down its
-/// pairs in other communities. Clears the matching agent session cache
-/// (pair-scoped when a pair key resolves). When no pair is tracked for this
-/// workspace, only legacy scalar-PID cleanup runs.
-pub fn stop_managed_agent_workspace_pair(
+/// The bound relay is the same value that passed the caller's scope check, so
+/// a community switch after that check cannot retarget the stop to another
+/// pair that happens to use the same agent public key.
+pub fn stop_managed_agent_bound_workspace_pair(
     app: &AppHandle,
     record: &mut ManagedAgentRecord,
     runtimes: &mut HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>,
+    workspace_relay: &crate::relay::ScopedWorkspaceRelay,
+) -> Result<(), String> {
+    let pair_key = super::bound_runtime_key(record, workspace_relay)?;
+    stop_managed_agent_resolved_workspace_pair(app, record, runtimes, Some(pair_key))
+}
+
+fn stop_managed_agent_resolved_workspace_pair(
+    app: &AppHandle,
+    record: &mut ManagedAgentRecord,
+    runtimes: &mut HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>,
+    pair_key: Option<ManagedAgentRuntimeKey>,
 ) -> Result<(), String> {
     use tauri::Manager;
     let state = app.state::<crate::app_state::AppState>();
-    match super::workspace_pair_key(app, record) {
+    match pair_key {
         Some(pair_key) if runtimes.contains_key(&pair_key) => {
             stop_managed_agent_pair(app, record, runtimes, &pair_key)?;
             state.clear_agent_session_cache(&pair_key);
@@ -214,9 +221,9 @@ mod tests {
 
     #[test]
     fn pair_scoped_selection_targets_only_the_exact_pair() {
-        // stop_managed_agent_workspace_pair resolves one key and removes only
-        // that map entry: the same agent's pair on another relay and other
-        // agents' pairs must survive a pair-scoped stop.
+        // The bound pair stop resolves one key and removes only that map entry:
+        // the same agent's pair on another relay and other agents' pairs must
+        // survive a pair-scoped stop.
         let agent = "aa".repeat(32);
         let other = "bb".repeat(32);
         let viewed = ManagedAgentRuntimeKey::new(&agent, "wss://one.example").unwrap();

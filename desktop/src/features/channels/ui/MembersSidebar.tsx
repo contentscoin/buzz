@@ -559,6 +559,9 @@ export function MembersSidebar({
       return;
     }
 
+    const expectedRelayUrl = relayUrl?.trim() ? relayUrl : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
     setAddingMemberPubkeys((prev) => new Set(prev).add(user.pubkey));
 
     try {
@@ -576,6 +579,8 @@ export function MembersSidebar({
           await attachManagedAgentToChannel(channelId, {
             agent: managedAgent,
             ensureRunning: true,
+            expectedRelayUrl,
+            expectedSignerPubkey,
           });
           await invalidateChannelState(queryClient, channelId);
         } catch (error) {

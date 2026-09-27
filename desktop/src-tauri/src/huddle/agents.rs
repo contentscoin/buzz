@@ -18,11 +18,8 @@ use uuid::Uuid;
 use crate::{
     app_state::AppState,
     events,
-    huddle::relay_api::{
-        fetch_channel_members, fetch_channel_members_with_roles, validate_pubkey_hex,
-        MAX_HUDDLE_AGENTS,
-    },
-    relay::submit_event,
+    huddle::relay_api::{validate_pubkey_hex, MAX_HUDDLE_AGENTS},
+    relay::{query_relay_at_with_keys, submit_event_at_with_keys},
 };
 
 use super::{pipeline::start_auto_enabled_transcription, HuddlePhase};
@@ -96,32 +93,42 @@ pub async fn add_agent_to_huddle(
     parent_channel_id: Uuid,
     agent_pubkey: &str,
     state: &AppState,
+    relay_base: &str,
+    signing_keys: &nostr::Keys,
 ) -> Result<AgentAddResult, String> {
     // 1. Add agent to ephemeral channel (required — fail hard on rejection).
     let add_eph = events::build_add_member(ephemeral_channel_id, agent_pubkey, Some("bot"))?;
-    submit_event(add_eph, state).await?;
+    submit_event_at_with_keys(add_eph, state, relay_base, signing_keys).await?;
 
     // 2. Preserve any active parent membership, regardless of role. Rewriting
     //    an existing DM member as `bot` is both unnecessary and forbidden for
     //    non-admins. Otherwise add the agent so it has full context.
     //    Best-effort: capture a real error but don't propagate it.
     let parent_channel_id_string = parent_channel_id.to_string();
-    let parent_already_contains_agent =
-        fetch_channel_members_with_roles(&parent_channel_id_string, state)
-            .await
-            .is_ok_and(|members| contains_member(&members, agent_pubkey));
+    let parent_already_contains_agent = fetch_channel_members_with_roles_at(
+        &parent_channel_id_string,
+        state,
+        relay_base,
+        signing_keys,
+    )
+    .await
+    .is_ok_and(|members| contains_member(&members, agent_pubkey));
 
     let (parent_added, parent_error) = if parent_already_contains_agent {
         (true, None)
     } else {
         let add_parent = events::build_add_member(parent_channel_id, agent_pubkey, Some("bot"))?;
-        match submit_event(add_parent, state).await {
+        match submit_event_at_with_keys(add_parent, state, relay_base, signing_keys).await {
             Ok(_) => (true, None),
             Err(e) => {
-                let active_after_error =
-                    fetch_channel_members_with_roles(&parent_channel_id_string, state)
-                        .await
-                        .is_ok_and(|members| contains_member(&members, agent_pubkey));
+                let active_after_error = fetch_channel_members_with_roles_at(
+                    &parent_channel_id_string,
+                    state,
+                    relay_base,
+                    signing_keys,
+                )
+                .await
+                .is_ok_and(|members| contains_member(&members, agent_pubkey));
                 if active_after_error {
                     (true, None)
                 } else {
@@ -149,6 +156,8 @@ pub(crate) async fn sync_agents_for_active_huddle(
     channel_id: &str,
     agent_pubkeys: Vec<String>,
     state: &AppState,
+    relay_base: &str,
+    signing_keys: &nostr::Keys,
 ) -> Result<AgentHuddleSyncResult, String> {
     let mut seen = HashSet::new();
     let mut requested = Vec::new();
@@ -204,9 +213,15 @@ pub(crate) async fn sync_agents_for_active_huddle(
 
     // Membership reads can lag a just-accepted write, so merge the relay view
     // with local state instead of allowing a stale snapshot to remove agents.
-    let fresh_agents = fetch_channel_members(&ephemeral_channel_id, Some("bot"), state)
-        .await
-        .unwrap_or_default();
+    let fresh_agents = fetch_channel_members_at(
+        &ephemeral_channel_id,
+        Some("bot"),
+        state,
+        relay_base,
+        signing_keys,
+    )
+    .await
+    .unwrap_or_default();
     let mut known_agents = HashSet::new();
     let mut merged_agents = Vec::new();
     for pubkey in state_agents.into_iter().chain(fresh_agents) {
@@ -232,7 +247,15 @@ pub(crate) async fn sync_agents_for_active_huddle(
     let parent_uuid = Uuid::parse_str(&parent_channel_id).map_err(|e| e.to_string())?;
     let mut added = Vec::new();
     for pubkey in missing {
-        add_agent_to_huddle(ephemeral_uuid, parent_uuid, &pubkey, state).await?;
+        add_agent_to_huddle(
+            ephemeral_uuid,
+            parent_uuid,
+            &pubkey,
+            state,
+            relay_base,
+            signing_keys,
+        )
+        .await?;
         merged_agents.push(pubkey.clone());
         added.push(pubkey);
     }
@@ -284,9 +307,89 @@ pub(crate) async fn sync_agents_for_active_huddle(
 pub async fn sync_agents_to_active_huddle(
     channel_id: String,
     agent_pubkeys: Vec<String>,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<AgentHuddleSyncResult, String> {
-    sync_agents_for_active_huddle(&channel_id, agent_pubkeys, &state).await
+    let _workspace_guard = state.workspace_apply_lock.lock().await;
+    let relay_base = crate::relay::relay_api_base_url_with_override(&state);
+    crate::relay::assert_expected_relay_scope(expected_relay_url.as_deref(), &relay_base)?;
+    let signing_keys = state.signing_keys()?;
+    crate::relay::assert_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        &signing_keys.public_key().to_hex(),
+    )?;
+    sync_agents_for_active_huddle(
+        &channel_id,
+        agent_pubkeys,
+        &state,
+        &relay_base,
+        &signing_keys,
+    )
+    .await
+}
+
+async fn fetch_channel_members_with_roles_at(
+    channel_id: &str,
+    state: &AppState,
+    relay_base: &str,
+    signing_keys: &nostr::Keys,
+) -> Result<Vec<(String, Option<String>)>, String> {
+    let filter = serde_json::json!({
+        "kinds": [39002],
+        "#d": [channel_id],
+        "limit": 1,
+    });
+    let events = query_relay_at_with_keys(
+        state,
+        relay_base,
+        std::slice::from_ref(&filter),
+        signing_keys,
+        None,
+    )
+    .await
+    .map_err(|error| {
+        eprintln!("buzz-desktop: fetch channel members failed: {error}");
+        error
+    })?;
+
+    let Some(event) = events.first() else {
+        return Ok(Vec::new());
+    };
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut members = Vec::new();
+    for tag in event.tags.iter() {
+        let slice = tag.as_slice();
+        if slice.first().map(String::as_str) != Some("p") {
+            continue;
+        }
+        let Some(pubkey) = slice.get(1) else {
+            continue;
+        };
+        if pubkey.is_empty() || !seen.insert(pubkey.clone()) {
+            continue;
+        }
+        let role = slice.get(3).filter(|role| !role.is_empty()).cloned();
+        members.push((pubkey.clone(), role));
+    }
+    Ok(members)
+}
+
+async fn fetch_channel_members_at(
+    channel_id: &str,
+    role_filter: Option<&str>,
+    state: &AppState,
+    relay_base: &str,
+    signing_keys: &nostr::Keys,
+) -> Result<Vec<String>, String> {
+    let all =
+        fetch_channel_members_with_roles_at(channel_id, state, relay_base, signing_keys).await?;
+    Ok(all
+        .into_iter()
+        .filter(|(_, role)| role_filter.is_none_or(|filter| role.as_deref() == Some(filter)))
+        .map(|(pubkey, _)| pubkey)
+        .collect())
 }
 
 fn contains_member(members: &[(String, Option<String>)], pubkey: &str) -> bool {

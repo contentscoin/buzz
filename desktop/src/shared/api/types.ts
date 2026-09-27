@@ -397,6 +397,10 @@ export type CreateManagedAgentInput = {
   /** Team this instance was deployed from; controls runtime team instructions. */
   teamId?: string;
   relayUrl?: string;
+  /** Active community captured when creation began. */
+  expectedRelayUrl?: string;
+  /** Active signing identity captured with `expectedRelayUrl`. */
+  expectedSignerPubkey?: string;
   acpCommand?: string;
   agentCommand?: string;
   /**

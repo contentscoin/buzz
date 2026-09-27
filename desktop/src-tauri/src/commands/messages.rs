@@ -18,8 +18,8 @@ use crate::{
     },
     nostr_convert,
     relay::{
-        assert_expected_relay_scope, assert_expected_signer, query_relay, submit_event,
-        submit_event_at_created_at, submit_event_with_keys_created_at,
+        assert_expected_relay_scope, assert_expected_signer, query_relay, query_relay_at_with_keys,
+        submit_event, submit_event_at_created_at, submit_event_with_keys_created_at,
     },
 };
 
@@ -551,6 +551,8 @@ fn event_has_client_marker(event: &Event, marker: &str) -> bool {
 
 async fn find_managed_agent_channel_message_by_marker(
     state: &AppState,
+    relay_base: &str,
+    signing_keys: &Keys,
     agent_pubkey: Option<&str>,
     channel_id: &str,
     marker: &str,
@@ -575,7 +577,8 @@ async fn find_managed_agent_channel_message_by_marker(
             filter["until"] = serde_json::json!(until);
         }
 
-        let events = query_relay(state, &[filter]).await?;
+        let events =
+            query_relay_at_with_keys(state, relay_base, &[filter], signing_keys, None).await?;
         if let Some(existing) = events
             .iter()
             .find(|event| event_has_client_marker(event, marker))
@@ -618,8 +621,18 @@ pub async fn has_managed_agent_channel_message_marker(
     marker: String,
     agent_pubkey: Option<String>,
     marker_scope: Option<String>,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
+    let _workspace_guard = state.workspace_apply_lock.lock().await;
+    let relay_base = crate::relay::relay_api_base_url_with_override(&state);
+    assert_expected_relay_scope(expected_relay_url.as_deref(), &relay_base)?;
+    let signing_keys = state.signing_keys()?;
+    assert_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        &signing_keys.public_key().to_hex(),
+    )?;
     uuid::Uuid::parse_str(&channel_id)
         .map_err(|_| format!("invalid channel UUID: {channel_id}"))?;
     let marker = marker.trim();
@@ -632,9 +645,16 @@ pub async fn has_managed_agent_channel_message_marker(
         .filter(|value| !value.is_empty());
 
     let marker_author = marker_author_for_scope(marker_scope.as_deref(), agent_pubkey)?;
-    find_managed_agent_channel_message_by_marker(&state, marker_author, &channel_id, marker)
-        .await
-        .map(|event| event.is_some())
+    find_managed_agent_channel_message_by_marker(
+        &state,
+        &relay_base,
+        &signing_keys,
+        marker_author,
+        &channel_id,
+        marker,
+    )
+    .await
+    .map(|event| event.is_some())
 }
 
 fn stored_managed_agent_auth_tag(auth_tag: Option<&str>) -> Option<String> {
@@ -659,15 +679,14 @@ fn legacy_managed_agent_auth_tag(
 
 fn managed_agent_submission_auth_tag(
     record: &ManagedAgentRecord,
-    state: &AppState,
+    owner_keys: &Keys,
     agent_pubkey: &PublicKey,
 ) -> Result<Option<String>, String> {
     if let Some(auth_tag) = stored_managed_agent_auth_tag(record.auth_tag.as_deref()) {
         return Ok(Some(auth_tag));
     }
 
-    let owner_keys = state.keys.lock().map_err(|error| error.to_string())?;
-    legacy_managed_agent_auth_tag(&owner_keys, agent_pubkey)
+    legacy_managed_agent_auth_tag(owner_keys, agent_pubkey)
 }
 
 fn build_managed_agent_channel_message(
@@ -704,9 +723,22 @@ pub async fn send_managed_agent_channel_message(
     mention_pubkeys: Option<Vec<String>>,
     parent_event_id: Option<String>,
     additional_markers: Option<Vec<String>>,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SendChannelMessageResponse, String> {
+    // Keep the active workspace stable for every relay query and the final
+    // managed-agent publication. The expected values were captured by the UI
+    // before its first await, so a community or identity switch fails closed.
+    let _workspace_guard = state.workspace_apply_lock.lock().await;
+    let relay_base = crate::relay::relay_api_base_url_with_override(&state);
+    assert_expected_relay_scope(expected_relay_url.as_deref(), &relay_base)?;
+    let owner_keys = state.signing_keys()?;
+    assert_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        &owner_keys.public_key().to_hex(),
+    )?;
     let channel_uuid = uuid::Uuid::parse_str(&channel_id)
         .map_err(|_| format!("invalid channel UUID: {channel_id}"))?;
     let trimmed = content.trim();
@@ -739,26 +771,19 @@ pub async fn send_managed_agent_channel_message(
         ));
     }
     let submission_auth_tag =
-        managed_agent_submission_auth_tag(&record, &state, &keys.public_key())?;
+        managed_agent_submission_auth_tag(&record, &owner_keys, &keys.public_key())?;
     let thread_ref = match parent_event_id.as_deref() {
-        Some(parent_id) => Some(
-            // Same active-relay resolution as before — this path has no
-            // caller-captured tenant scope (yet), so resolve the override
-            // here and read through it with the active identity.
-            resolve_thread_ref(
-                parent_id,
-                &state,
-                &crate::relay::relay_api_base_url_with_override(&state),
-                None,
-            )
-            .await?,
-        ),
+        Some(parent_id) => {
+            Some(resolve_thread_ref(parent_id, &state, &relay_base, Some(&owner_keys)).await?)
+        }
         None => None,
     };
 
     if let Some(marker) = marker.as_deref() {
         if let Some(existing) = find_managed_agent_channel_message_by_marker(
             &state,
+            &relay_base,
+            &owner_keys,
             marker_author_for_scope(marker_scope.as_deref(), Some(&record.pubkey))?,
             &channel_id,
             marker,

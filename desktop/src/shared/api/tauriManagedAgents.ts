@@ -35,9 +35,20 @@ export async function startManagedAgent(
   return fromRawManagedAgent(response);
 }
 
-export async function stopManagedAgent(pubkey: string): Promise<ManagedAgent> {
+export async function stopManagedAgent(
+  pubkey: string,
+  options?: {
+    /** Tenant scope captured before the caller's first await. The backend
+     * validates and binds this relay before stopping a runtime pair. */
+    expectedRelayUrl?: string;
+    /** Signing identity captured with the relay scope. */
+    expectedSignerPubkey?: string;
+  },
+): Promise<ManagedAgent> {
   const response = await invokeTauri<RawManagedAgent>("stop_managed_agent", {
     pubkey,
+    expectedRelayUrl: options?.expectedRelayUrl ?? null,
+    expectedSignerPubkey: options?.expectedSignerPubkey ?? null,
   });
   return fromRawManagedAgent(response);
 }
@@ -81,22 +92,37 @@ export async function listManagedAgentRuntimes(): Promise<
 export async function startManagedAgentRuntime(
   pubkey: string,
   relayUrl: string,
+  options?: { expectedSignerPubkey?: string },
 ): Promise<ManagedAgentRuntimeStatus> {
-  return invokeTauri("start_managed_agent_runtime", { pubkey, relayUrl });
+  return invokeTauri("start_managed_agent_runtime", {
+    pubkey,
+    relayUrl,
+    expectedSignerPubkey: options?.expectedSignerPubkey ?? null,
+  });
 }
 
 export async function stopManagedAgentRuntime(
   pubkey: string,
   relayUrl: string,
+  options?: { expectedSignerPubkey?: string },
 ): Promise<ManagedAgentRuntimeStatus> {
-  return invokeTauri("stop_managed_agent_runtime", { pubkey, relayUrl });
+  return invokeTauri("stop_managed_agent_runtime", {
+    pubkey,
+    relayUrl,
+    expectedSignerPubkey: options?.expectedSignerPubkey ?? null,
+  });
 }
 
 export async function restartManagedAgentRuntime(
   pubkey: string,
   relayUrl: string,
+  options?: { expectedSignerPubkey?: string },
 ): Promise<ManagedAgentRuntimeStatus> {
-  return invokeTauri("restart_managed_agent_runtime", { pubkey, relayUrl });
+  return invokeTauri("restart_managed_agent_runtime", {
+    pubkey,
+    relayUrl,
+    expectedSignerPubkey: options?.expectedSignerPubkey ?? null,
+  });
 }
 
 export async function putManagedAgentRuntimeLifecycle(

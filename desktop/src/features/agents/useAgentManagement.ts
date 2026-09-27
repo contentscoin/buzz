@@ -26,7 +26,10 @@ import {
 import { useCreatedAgentChannelAttachment } from "./useCreatedAgentChannelAttachment";
 import { classifyAgentManagementOrigin } from "./agentManagementBuffer";
 import { useChannelsQuery } from "@/features/channels/hooks";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { resolveManagedAgentAvatarUrl } from "./ui/managedAgentAvatar";
+import { useIdentityQuery } from "@/shared/api/hooks";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import type { AgentCreateIntent } from "./ui/agentCreateIntent";
 import { editPersonaDialogState } from "./ui/personaDialogState";
 import type {
@@ -36,6 +39,8 @@ import type {
 
 export function useAgentManagement() {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const personasQuery = usePersonasQuery();
   const managedAgentsQuery = useManagedAgentsQuery();
   const channelsQuery = useChannelsQuery();
@@ -163,6 +168,19 @@ export function useAgentManagement() {
     setError(null);
     try {
       assertAgentCanActFromOrigin(request.request.channelId);
+      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+      const expectedSignerPubkey =
+        normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+      if (
+        intent === "definition_start" &&
+        (!expectedRelayUrl || !expectedSignerPubkey)
+      ) {
+        throw new Error(
+          "Buzz is still connecting to this community. Try creating the agent again in a moment.",
+        );
+      }
       const runtimes = await availableRuntimesForStart(runtimesQuery);
       const runtime = runtimes.find(
         (candidate) => candidate.id === input.runtime,
@@ -182,22 +200,32 @@ export function useAgentManagement() {
       });
 
       if (intent === "definition_start") {
-        const created = await createAgentMutation.mutateAsync(
-          await buildInstanceInputForDefinition(
+        const created = await createAgentMutation.mutateAsync({
+          ...(await buildInstanceInputForDefinition(
             persona,
             runtime,
             undefined,
             backendIntent ?? undefined,
-          ),
-        );
+          )),
+          relayUrl: expectedRelayUrl,
+          expectedRelayUrl,
+          expectedSignerPubkey,
+        });
         if (created.spawnError) throw new Error(created.spawnError);
         const targetChannel = (channelsQuery.data ?? []).find(
           (channel) => channel.id === request.request.channelId,
         );
-        await createdAgentAttachment.presentCreatedAgent(created, {
-          id: request.request.channelId,
-          name: targetChannel?.name ?? "this channel",
-        });
+        await createdAgentAttachment.presentCreatedAgent(
+          created,
+          {
+            id: request.request.channelId,
+            name: targetChannel?.name ?? "this channel",
+          },
+          {
+            expectedRelayUrl,
+            expectedSignerPubkey,
+          },
+        );
       }
 
       await Promise.all([

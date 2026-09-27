@@ -1,6 +1,12 @@
 import { toast } from "sonner";
 
-import { attachManagedAgentToChannel } from "./channelAgents";
+import { useCommunities } from "@/features/communities/useCommunities";
+import { useIdentityQuery } from "@/shared/api/hooks";
+import { normalizePubkey } from "@/shared/lib/pubkey";
+import {
+  attachManagedAgentToChannel,
+  type ManagedAgentStartScopeInput,
+} from "./channelAgents";
 import type { Channel, CreateManagedAgentResponse } from "@/shared/api/types";
 
 type TargetChannel = Pick<Channel, "id" | "name">;
@@ -8,11 +14,13 @@ type TargetChannel = Pick<Channel, "id" | "name">;
 async function attach(
   created: CreateManagedAgentResponse,
   targetChannel: TargetChannel,
+  scope: ManagedAgentStartScopeInput,
 ) {
   const attached = await attachManagedAgentToChannel(targetChannel.id, {
     agent: created.agent,
     role: "bot",
     ensureRunning: true,
+    ...scope,
   });
   created.agent = attached.agent;
 }
@@ -20,6 +28,7 @@ async function attach(
 function showAttachmentFailure(
   created: CreateManagedAgentResponse,
   targetChannel: TargetChannel,
+  scope: ManagedAgentStartScopeInput,
   cause: unknown,
   toastId?: string | number,
 ) {
@@ -35,7 +44,7 @@ function showAttachmentFailure(
           description: `Adding ${created.agent.name} to #${targetChannel.name}…`,
           id,
         });
-        void attach(created, targetChannel).then(
+        void attach(created, targetChannel, scope).then(
           () => {
             toast.success("Agent created", {
               description: `Added ${created.agent.name} to #${targetChannel.name}`,
@@ -43,7 +52,13 @@ function showAttachmentFailure(
             });
           },
           (retryCause: unknown) => {
-            showAttachmentFailure(created, targetChannel, retryCause, id);
+            showAttachmentFailure(
+              created,
+              targetChannel,
+              scope,
+              retryCause,
+              id,
+            );
           },
         );
       },
@@ -53,20 +68,34 @@ function showAttachmentFailure(
 
 /** Keeps creation successful when its optional channel attachment fails. */
 export function useCreatedAgentChannelAttachment() {
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+
   async function presentCreatedAgent(
     created: CreateManagedAgentResponse,
     targetChannel?: TargetChannel | null,
+    capturedScope?: ManagedAgentStartScopeInput,
   ) {
     if (created.spawnError || !targetChannel) {
       toast.success("Agent created");
       return;
     }
 
+    const scope: ManagedAgentStartScopeInput = {
+      expectedRelayUrl:
+        capturedScope?.expectedRelayUrl ??
+        (activeCommunity?.relayUrl?.trim()
+          ? activeCommunity.relayUrl
+          : undefined),
+      expectedSignerPubkey:
+        capturedScope?.expectedSignerPubkey ??
+        (normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined),
+    };
     try {
-      await attach(created, targetChannel);
+      await attach(created, targetChannel, scope);
       toast.success("Agent created");
     } catch (cause) {
-      showAttachmentFailure(created, targetChannel, cause);
+      showAttachmentFailure(created, targetChannel, scope, cause);
     }
   }
 

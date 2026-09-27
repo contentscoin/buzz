@@ -75,7 +75,8 @@ export function projectRepoUnavailableReason(
   if (
     /\b(?:401|403)\b|authenticat|authoriz|permission denied|access denied/.test(
       message,
-    )
+    ) ||
+    /could not read username|terminal prompts? disabled/.test(message)
   ) {
     return "authentication";
   }

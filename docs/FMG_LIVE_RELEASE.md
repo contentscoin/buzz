@@ -3,23 +3,32 @@
 This runbook publishes FMG Buzz without changing the upstream release ledger.
 The release descriptor is [`.release/fmg-live.json`](../.release/fmg-live.json).
 The initial live desktop version was `0.5.26-fmg.1`; the current desktop-only
-update is `0.5.26-fmg.3`.
+update is `0.5.26-fmg.4`.
 
 ## Release identity
 
 | Item | Value |
 | --- | --- |
 | Upstream base | `desktop-v0.5.25` / `c8f73213089cbd5a0f1e675d3193558280d46e10` |
-| Desktop version | `0.5.26-fmg.3` |
-| Desktop tag | `fmg-desktop-v0.5.26-fmg.3` |
+| Desktop version | `0.5.26-fmg.4` |
+| Desktop tag | `fmg-desktop-v0.5.26-fmg.4` |
 | Windows app identity | `Buzz` / `xyz.block.buzz.app` |
+| Managed Git | Git for Windows MinGit `2.55.0.5`, pinned by SHA-256 in `scripts/windows-managed-git.json` |
 | Relay image | `ghcr.io/contentscoin/buzz` pinned by digest |
 | Agent runtime | `sprig-v0.5.26-fmg.1` release asset pinned by SHA-256 |
 | Public relay | `wss://buzz-dnb0.srv2006121.hstgr.cloud` |
 
-`0.5.26-fmg.3` is greater than the installed `0.5.26-fmg.2`, so the NSIS
+`0.5.26-fmg.4` is greater than the installed `0.5.26-fmg.3`, so the NSIS
 installer follows the normal in-place upgrade path. Keeping the application
 identifier preserves the existing desktop community and identity storage.
+
+### Release scope
+
+`0.5.26-fmg.4` changes only the Windows desktop app. Run the desktop candidate
+and publish procedure below, but do not redeploy the relay, OpenClaw service, or
+Sprig runtime for this version. The relay and agent-runtime procedures apply
+only when a future release descriptor assigns them a new immutable image digest
+or a new uniquely named runtime release.
 
 ## Implemented rollout controls
 
@@ -28,7 +37,7 @@ The release does not declare environment flags that the application ignores.
 | Feature | Live state | Actual control |
 | --- | --- | --- |
 | Work reports | Enabled | Compiled desktop, relay, CLI and SDK support |
-| Task graph | Operator preview | The issue must carry the `graph` label before `buzz issues transition` accepts it |
+| Task graph | Operator preview | Desktop shows a read-only graph preview; the issue must carry the `graph` label before the CLI accepts a transition |
 | Aside browser | Off | `BUZZ_ACP_ASIDE_COMMAND` is empty; set it to the trusted Aside executable to opt in |
 | Mobile report summary | ACP agent policy | After a confirmed report, the agent is instructed to attempt one concise ordinary reply in the same thread |
 
@@ -40,16 +49,25 @@ The release does not declare environment flags that the application ignores.
 3. Run once with `publish=false`. Download the workflow artifact and install it
    over the existing Buzz installation. Record the candidate run ID and the
    installer SHA-256 printed in the workflow summary.
-4. Confirm the installed version is `0.5.26-fmg.3`, the **FMG 센터** entry is
+4. Confirm the installed version is `0.5.26-fmg.4`, the **FMG 센터** entry is
    visible, the existing communities remain available, and the Hostinger
    community reconnects. In **Settings → Agents**, confirm Codex offers
    `GPT-6 Sol` and `GPT-6 Luna`, Claude offers `Claude Opus 5.5`, and both
-   runtimes report Ready after **Check again**.
+   runtimes report Ready after **Check again**. Open a Hostinger-backed project
+   repository and confirm its files load through the bundled Git runtime.
+   Confirm the installation contains
+   `resources/fmg-managed-git/cmd/git.exe`,
+   `resources/fmg-managed-git/LICENSE.txt`, and
+   `resources/fmg-managed-git/etc/package-versions.txt`; running the installed
+   `git.exe --version` must report `2.55.0.windows.5`. In **Tasks**, switch
+   between **List** and **Board** and open a card. In **FMG
+   센터**, confirm a `graph` task shows its dependency state in the read-only
+   preview.
 5. Re-run the workflow on the same `main` commit with `publish=true`, supplying
    the recorded `candidate_run_id` and `candidate_sha256`. The publish job does
    not rebuild. It downloads that immutable Actions artifact, verifies its
    receipt, source commit and hash, then creates
-   `fmg-desktop-v0.5.26-fmg.3`.
+   `fmg-desktop-v0.5.26-fmg.4`.
 6. If the tag or release already exists, the workflow resolves the tag to its
    commit and byte-compares the existing assets. It succeeds only when they are
    identical; it never replaces an existing release asset.
@@ -57,7 +75,10 @@ The release does not declare environment flags that the application ignores.
 The workflow creates a non-updating, unsigned x64 NSIS installer. It does not
 promote the build into the upstream `buzz-desktop-latest` updater channel.
 
-## Build and deploy the relay
+## Build and deploy the relay (not part of 0.5.26-fmg.4)
+
+Skip this section for `0.5.26-fmg.4`. Use it only for a release that explicitly
+changes the relay image recorded in the release descriptor.
 
 1. Let the existing **Docker image** workflow complete for the same `main`
    commit. The fork-owned image path is selected with repository variable
@@ -70,24 +91,30 @@ promote the build into the upstream `buzz-desktop-latest` updater channel.
 5. Redeploy the project and record the running image digest with the desktop
    receipt. Do not use a mutable `main` or `latest` tag as the deployment record.
 
-## Build and deploy the ACP agent runtime
+## Build and deploy the ACP agent runtime (not part of 0.5.26-fmg.4)
 
 The Hostinger `buzz-openclaw-agent` service downloads `buzz-acp` from a Sprig
 release when the container starts. Replacing only the relay image does not
 update this agent runtime.
 
-1. Read the source commit from the verified desktop candidate receipt. Create
-   `sprig-v0.5.26-fmg.1` at that exact commit, then verify
-   `git rev-parse 'sprig-v0.5.26-fmg.1^{commit}'` prints the receipt commit.
-2. Let the **Sprig** tag workflow publish
-   `sprig-0.5.26-fmg.1-x86_64-unknown-linux-musl.tar.gz` and its SHA-256 file.
+Skip this section for `0.5.26-fmg.4`. `sprig-v0.5.26-fmg.1` is an existing
+immutable release and must not be recreated, moved, or replaced. A future agent
+runtime rollout must first record a new unique Sprig tag, asset, source commit,
+and SHA-256 in the release descriptor.
+
+1. Read the new Sprig tag and source commit from the release descriptor. Create
+   that previously unused tag at the recorded commit, then verify the tag
+   resolves to the same commit. Never derive the runtime commit from a
+   desktop-only candidate receipt.
+2. Let the **Sprig** tag workflow publish the uniquely named asset recorded in
+   the descriptor and its SHA-256 file.
    Download the immutable Actions artifact from that workflow, independently
    calculate the archive SHA-256, and record it as `BUZZ_SPRIG_SHA256`. Record
-   the receipt commit as `BUZZ_SPRIG_GIT_SHA` and `0.5.26-fmg.1` as
-   `BUZZ_SPRIG_VERSION` in Hostinger.
+   the descriptor's runtime source commit as `BUZZ_SPRIG_GIT_SHA` and its
+   runtime version as `BUZZ_SPRIG_VERSION` in Hostinger.
 3. In the Hostinger Compose command for `buzz-openclaw-agent`, replace the
-   rolling `sprig-latest/sprig-x86_64-unknown-linux-musl.tar.gz` URL with the
-   versioned `sprig-v0.5.26-fmg.1` asset URL. Keep its identity volume, owner,
+   rolling `sprig-latest/sprig-x86_64-unknown-linux-musl.tar.gz` URL with that
+   new versioned asset URL. Keep its identity volume, owner,
    OpenClaw gateway token and all other environment values unchanged. Add the
    three `BUZZ_SPRIG_*` controls from
    [`deploy/fmg/hostinger.env.example`](../deploy/fmg/hostinger.env.example).

@@ -12,11 +12,14 @@ import {
 import {
   respawnManagedAgentWithRules,
   isManagedAgentActive,
+  type ManagedAgentCommandScope,
+  type StartManagedAgentCommand,
   startManagedAgentWithRules,
+  type StopManagedAgentCommand,
   stopManagedAgentWithRules,
 } from "@/features/agents/lib/managedAgentControlActions";
 import {
-  clearActiveTurnsForAgentOnStop,
+  clearScopedActiveTurnsForAgentOnStop,
   useManagedAgentRuntimeAction,
 } from "@/features/agents/managedAgentRuntimeHooks";
 import { managedAgentPairAction } from "@/features/agents/managedAgentRuntimeStatus";
@@ -30,6 +33,7 @@ import type {
   ManagedAgent,
   ManagedAgentRuntimeStatus,
 } from "@/shared/api/types";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 
 type UseMembersSidebarActionsOptions = {
   channelId: string | null;
@@ -75,7 +79,24 @@ export function useMembersSidebarActions({
   const removeMemberMutation = useRemoveChannelMemberMutation(channelId);
   const startManagedAgentMutation = useStartManagedAgentMutation();
   const stopManagedAgentMutation = useStopManagedAgentMutation();
-  const runtimeActionMutation = useManagedAgentRuntimeAction();
+  const runtimeActionMutation = useManagedAgentRuntimeAction(currentPubkey);
+  function captureCommandScope(): ManagedAgentCommandScope {
+    const expectedRelayUrl = relayUrl?.trim() ? relayUrl : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(currentPubkey ?? "") || undefined;
+    if (!expectedRelayUrl || !expectedSignerPubkey) {
+      throw new Error(
+        "Buzz is still connecting to this community. Try again in a moment.",
+      );
+    }
+    return { expectedRelayUrl, expectedSignerPubkey };
+  }
+  const startManagedAgentCommand: StartManagedAgentCommand = (
+    pubkey,
+    options,
+  ) => startManagedAgentMutation.mutateAsync({ pubkey, ...options });
+  const stopManagedAgentCommand: StopManagedAgentCommand = (pubkey, options) =>
+    stopManagedAgentMutation.mutateAsync({ pubkey, ...options });
   const [actionNoticeMessage, setActionNoticeMessage] = React.useState<
     string | null
   >(null);
@@ -187,15 +208,21 @@ export function useMembersSidebarActions({
         return;
       }
 
+      const scope = captureCommandScope();
       if (isManagedAgentActive(agent)) {
         await stopManagedAgentWithRules({
           agent,
           ...EMPTY_AGENT_CONTEXT,
           preferredChannelId: channelId,
-          stopManagedAgent: stopManagedAgentMutation.mutateAsync,
+          scope,
+          stopManagedAgent: stopManagedAgentCommand,
         });
         if (agent.backend.type === "local") {
-          clearActiveTurnsForAgentOnStop(agent.pubkey);
+          clearScopedActiveTurnsForAgentOnStop(
+            agent.pubkey,
+            scope.expectedRelayUrl,
+            scope.expectedSignerPubkey,
+          );
         }
         setActionNoticeMessage(
           agent.backend.type === "provider"
@@ -208,7 +235,8 @@ export function useMembersSidebarActions({
       assertStartNotBlockedByPresence(agent, false);
       await startManagedAgentWithRules({
         agent,
-        startManagedAgent: startManagedAgentMutation.mutateAsync,
+        scope,
+        startManagedAgent: startManagedAgentCommand,
       });
       setActionNoticeMessage(getLifecycleSuccessMessage(agent));
     } catch (error) {
@@ -221,64 +249,96 @@ export function useMembersSidebarActions({
   }
 
   async function handleRespawnAll() {
-    await runBulkAgentAction({
-      action: async (agent) => {
-        assertStartNotBlockedByPresence(agent, isManagedAgentActive(agent));
-        await respawnManagedAgentWithRules({
-          agent,
-          startManagedAgent: startManagedAgentMutation.mutateAsync,
-          stopManagedAgent: stopManagedAgentMutation.mutateAsync,
-          onStopped: () => clearActiveTurnsForAgentOnStop(agent.pubkey),
-        });
-        return undefined;
-      },
-      actionKey: "bulk-respawn",
-      agents: controllableManagedBots,
-      failureMessage: "Failed to respawn agent.",
-      successMessage: (count) =>
-        `Spawned or respawned ${formatCountLabel(count, "agent", "agents")}.`,
-    });
+    try {
+      const scope = captureCommandScope();
+      await runBulkAgentAction({
+        action: async (agent) => {
+          assertStartNotBlockedByPresence(agent, isManagedAgentActive(agent));
+          await respawnManagedAgentWithRules({
+            agent,
+            scope,
+            startManagedAgent: startManagedAgentCommand,
+            stopManagedAgent: stopManagedAgentCommand,
+            onStopped: () =>
+              clearScopedActiveTurnsForAgentOnStop(
+                agent.pubkey,
+                scope.expectedRelayUrl,
+                scope.expectedSignerPubkey,
+              ),
+          });
+          return undefined;
+        },
+        actionKey: "bulk-respawn",
+        agents: controllableManagedBots,
+        failureMessage: "Failed to respawn agent.",
+        successMessage: (count) =>
+          `Spawned or respawned ${formatCountLabel(count, "agent", "agents")}.`,
+      });
+    } catch (error) {
+      setActionErrorMessage(
+        error instanceof Error ? error.message : "Failed to respawn agents.",
+      );
+    }
   }
 
   async function handleStopAll() {
-    await runBulkAgentAction({
-      action: async (agent) => {
-        const result = await stopManagedAgentWithRules({
-          agent,
-          ...EMPTY_AGENT_CONTEXT,
-          preferredChannelId: channelId,
-          stopManagedAgent: stopManagedAgentMutation.mutateAsync,
-        });
-        if (agent.backend.type === "local") {
-          clearActiveTurnsForAgentOnStop(agent.pubkey);
-        }
-        return result;
-      },
-      actionKey: "bulk-stop",
-      agents: stoppableManagedBots,
-      failureMessage: "Failed to stop agent.",
-      successMessage: (count) =>
-        `Stopped or requested shutdown for ${formatCountLabel(
-          count,
-          "agent",
-          "agents",
-        )}.`,
-    });
+    try {
+      const scope = captureCommandScope();
+      await runBulkAgentAction({
+        action: async (agent) => {
+          const result = await stopManagedAgentWithRules({
+            agent,
+            ...EMPTY_AGENT_CONTEXT,
+            preferredChannelId: channelId,
+            scope,
+            stopManagedAgent: stopManagedAgentCommand,
+          });
+          if (agent.backend.type === "local") {
+            clearScopedActiveTurnsForAgentOnStop(
+              agent.pubkey,
+              scope.expectedRelayUrl,
+              scope.expectedSignerPubkey,
+            );
+          }
+          return result;
+        },
+        actionKey: "bulk-stop",
+        agents: stoppableManagedBots,
+        failureMessage: "Failed to stop agent.",
+        successMessage: (count) =>
+          `Stopped or requested shutdown for ${formatCountLabel(
+            count,
+            "agent",
+            "agents",
+          )}.`,
+      });
+    } catch (error) {
+      setActionErrorMessage(
+        error instanceof Error ? error.message : "Failed to stop agents.",
+      );
+    }
   }
 
   async function handleRemoveAll() {
-    await runBulkAgentAction({
-      action: async (agent) => {
-        await removeManagedBotMembership(agent.pubkey);
-        return undefined;
-      },
-      actionKey: "bulk-remove",
-      agents: removableManagedBots,
-      failureMessage: "Failed to remove bot from channel.",
-      onSettled: invalidateSidebarQueries,
-      successMessage: (count) =>
-        `Removed ${formatCountLabel(count, "managed bot", "managed bots")} from this channel.`,
-    });
+    try {
+      const scope = captureCommandScope();
+      await runBulkAgentAction({
+        action: async (agent) => {
+          await removeManagedBotMembership(agent.pubkey, scope);
+          return undefined;
+        },
+        actionKey: "bulk-remove",
+        agents: removableManagedBots,
+        failureMessage: "Failed to remove bot from channel.",
+        onSettled: invalidateSidebarQueries,
+        successMessage: (count) =>
+          `Removed ${formatCountLabel(count, "managed bot", "managed bots")} from this channel.`,
+      });
+    } catch (error) {
+      setActionErrorMessage(
+        error instanceof Error ? error.message : "Failed to remove agents.",
+      );
+    }
   }
 
   const handleRemoveMember = React.useCallback(
@@ -304,12 +364,15 @@ export function useMembersSidebarActions({
     [clearActionFeedback, currentPubkey, onOpenChange, removeMemberMutation],
   );
 
-  async function removeManagedBotMembership(pubkey: string) {
+  async function removeManagedBotMembership(
+    pubkey: string,
+    scope: ManagedAgentCommandScope,
+  ) {
     if (!channelId) {
       throw new Error("No channel selected.");
     }
 
-    await removeChannelMember(channelId, pubkey);
+    await removeChannelMember(channelId, pubkey, scope);
   }
 
   async function invalidateSidebarQueries() {
