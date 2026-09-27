@@ -116,7 +116,13 @@ function markSnapshotDiagnostic(
   ownerPubkey: string,
   diagnostics: ReturnType<typeof inspectChannelSnapshot>["diagnostics"],
 ): void {
-  if (typeof performance === "undefined") return;
+  if (
+    typeof performance === "undefined" ||
+    typeof window === "undefined" ||
+    typeof window.requestAnimationFrame !== "function"
+  ) {
+    return;
+  }
   const key = sidebarMeasurementKey(relayUrl, ownerPubkey);
   if (markedSnapshotKeys.has(key)) return;
   markedSnapshotKeys.add(key);
