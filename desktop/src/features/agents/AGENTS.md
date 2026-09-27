@@ -330,6 +330,15 @@ with a TypeScript lookup table or an id comparison in a component.
     for resets; owner replay of a redacted head preserves only a nonportable
     local override. That local path is not synchronized through catalog heads.
 
+20. **CLI-login model catalogs prefer the live adapter and keep a curated
+    recovery list.** Codex and Claude use the ACP adapter's discovered catalog
+    whenever discovery succeeds, including a successful empty response. If the
+    adapter is missing, outdated, or unavailable, the editor may offer the
+    current verified model IDs from its static list so configuration remains
+    possible. Keep the Codex and Claude adapter version floors aligned with the
+    packages that understand those IDs; an older resolved adapter must be
+    offered the maintained `@agentclientprotocol` replacement before spawn.
+
 ## Channel-only runtime controls
 
 Desktop observer controls identify a channel, not a thread session. The harness

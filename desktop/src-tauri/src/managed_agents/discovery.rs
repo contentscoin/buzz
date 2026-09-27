@@ -495,13 +495,13 @@ pub fn clear_resolve_cache() {
 
 // ── Adapter availability cache (Phase-2 badge fallback) ─────────────────────
 //
-// `build_managed_agent_summary` needs to compare the spawn-time adapter
+// `build_managed_agent_summary` needs to compare the spawn-time Codex adapter
 // availability against the *current* availability without triggering a live
 // `probe_codex_acp_version` subprocess on every poll cycle.  This cache
 // stores the last availability status of the codex-acp binary at its resolved
-// path.  It is warmed by `discover_acp_runtimes` (which already probes), so
-// the badge path reads warm data, and is invalidated by `clear_resolve_cache`
-// (called on every Doctor install and every `discover_acp_providers` call).
+// path. Claude uses a separate cache so cheap catalog refreshes keep its last
+// version-gated status. Both are invalidated by `clear_resolve_cache` (called
+// on every Doctor install and every `discover_acp_providers` call).
 
 fn adapter_availability_cache() -> &'static std::sync::Mutex<Option<AcpAvailabilityStatus>> {
     use std::sync::{Mutex, OnceLock};
@@ -509,8 +509,17 @@ fn adapter_availability_cache() -> &'static std::sync::Mutex<Option<AcpAvailabil
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
+fn claude_adapter_availability_cache() -> &'static std::sync::Mutex<Option<AcpAvailabilityStatus>> {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<Option<AcpAvailabilityStatus>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
 fn clear_adapter_availability_cache() {
     if let Ok(mut guard) = adapter_availability_cache().lock() {
+        *guard = None;
+    }
+    if let Ok(mut guard) = claude_adapter_availability_cache().lock() {
         *guard = None;
     }
 }
@@ -521,6 +530,12 @@ fn clear_adapter_availability_cache() {
 /// badge path has a warm value without re-probing.
 pub(crate) fn cache_adapter_availability(status: AcpAvailabilityStatus) {
     if let Ok(mut guard) = adapter_availability_cache().lock() {
+        *guard = Some(status);
+    }
+}
+
+fn cache_claude_adapter_availability(status: AcpAvailabilityStatus) {
+    if let Ok(mut guard) = claude_adapter_availability_cache().lock() {
         *guard = Some(status);
     }
 }
@@ -539,6 +554,17 @@ pub(crate) fn adapter_availability_cached() -> Option<AcpAvailabilityStatus> {
         .lock()
         .ok()
         .and_then(|g| g.clone())
+}
+
+fn cli_adapter_availability_cached(runtime_id: &str) -> Option<AcpAvailabilityStatus> {
+    match runtime_id {
+        "codex" => adapter_availability_cached(),
+        "claude" => claude_adapter_availability_cache()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone()),
+        _ => None,
+    }
 }
 
 /// Pure predicate: does the stamped adapter availability differ from the
@@ -780,17 +806,20 @@ pub(crate) fn classify_runtime(
     }
 }
 
-/// The oldest `codex-acp` version supported by Buzz managed agents.
+/// The oldest ACP adapter versions that expose the requested current model
+/// catalogs to Buzz managed agents.
 ///
 /// Older 1.x adapters are detected successfully, but can still bundle a Codex runtime
 /// that cannot use newer models. Adapter 1.6.2 bundles Codex 0.148.x, which rejects
 /// GPT-6 Astra even when the separately installed Codex CLI has been updated.
-/// Published adapter 1.10.0 depends on `@openai/codex ^0.153.3`.
+/// Published adapter 1.13.1 depends on `@openai/codex ^0.156.1` and the
+/// maintained Claude adapter 0.81.2 exposes Claude Opus 5.5.
 ///
 /// Bump policy: raise this only when a newer adapter fixes a defect that breaks managed
 /// agents, and only to a version already published on npm — every user below the floor is
 /// offered a reinstall on their next discovery pass.
-pub(crate) const MIN_CODEX_ACP_VERSION: (u64, u64, u64) = (1, 10, 0);
+pub(crate) const MIN_CODEX_ACP_VERSION: (u64, u64, u64) = (1, 13, 1);
+pub(crate) const MIN_CLAUDE_ACP_VERSION: (u64, u64, u64) = (0, 81, 2);
 
 /// Probe the full version of a `codex-acp` binary by running `--version`.
 ///
@@ -905,6 +934,25 @@ pub(crate) fn codex_adapter_availability(path: &Path) -> AcpAvailabilityStatus {
     }
 }
 
+/// Classify the current `claude-agent-acp` adapter. The former
+/// `@zed-industries` package either reports an older version or does not
+/// implement `--version`, so both cases correctly surface as outdated and
+/// offer the maintained `@agentclientprotocol` package.
+pub(crate) fn claude_adapter_availability(path: &Path) -> AcpAvailabilityStatus {
+    match probe_codex_acp_version(path) {
+        Some(version) if version >= MIN_CLAUDE_ACP_VERSION => AcpAvailabilityStatus::Available,
+        _ => AcpAvailabilityStatus::AdapterOutdated,
+    }
+}
+
+pub(crate) fn cli_adapter_availability(runtime_id: &str, path: &Path) -> AcpAvailabilityStatus {
+    match runtime_id {
+        "codex" => codex_adapter_availability(path),
+        "claude" => claude_adapter_availability(path),
+        _ => AcpAvailabilityStatus::Available,
+    }
+}
+
 /// Returns `true` when the codex-acp binary at `path` is below
 /// [`MIN_CODEX_ACP_VERSION`] or cannot be probed using `augmented_path`. Thin wrapper
 /// around [`codex_adapter_is_outdated_with_path`].
@@ -918,6 +966,7 @@ pub(crate) fn codex_adapter_is_outdated(path: &Path) -> bool {
 
 /// Returns `true` when the codex-acp binary at `path` is below
 /// [`MIN_CODEX_ACP_VERSION`] or cannot be probed with the supplied PATH.
+#[cfg(test)]
 pub(crate) fn codex_adapter_is_outdated_with_path(
     path: &Path,
     augmented_path: Option<&str>,
@@ -925,6 +974,24 @@ pub(crate) fn codex_adapter_is_outdated_with_path(
     !matches!(
         probe_codex_acp_version_with_path(path, augmented_path),
         Some(version) if version >= MIN_CODEX_ACP_VERSION
+    )
+}
+
+/// Returns whether a CLI-login runtime's adapter is too old to expose the
+/// current model catalog. Unknown runtimes retain the prior no-update policy.
+pub(crate) fn cli_adapter_is_outdated_with_path(
+    runtime_id: &str,
+    path: &Path,
+    augmented_path: Option<&str>,
+) -> bool {
+    let minimum = match runtime_id {
+        "codex" => MIN_CODEX_ACP_VERSION,
+        "claude" => MIN_CLAUDE_ACP_VERSION,
+        _ => return false,
+    };
+    !matches!(
+        probe_codex_acp_version_with_path(path, augmented_path),
+        Some(version) if version >= minimum
     )
 }
 
@@ -952,29 +1019,32 @@ fn discover_acp_runtime_phase1(runtime: &'static KnownAcpRuntime, force: bool) -
         .unwrap_or(false);
     let (mut availability, command, binary_path) =
         classify_runtime(adapter_result, runtime.underlying_cli, underlying_cli_found);
+    let mut cli_adapter_version_known = availability != AcpAvailabilityStatus::Available;
 
-    // For codex-acp: when the adapter resolves as Available, determine its full
-    // version. A forced discovery probes the binary (spawns a subprocess); the
-    // cheap default path reuses the last cached availability so it stays
-    // process-free. An adapter below MIN_CODEX_ACP_VERSION is treated as outdated.
-    if runtime.id == "codex"
-        && availability == AcpAvailabilityStatus::Available
-        && command.as_deref() == Some("codex-acp")
+    // CLI-login adapters must be recent enough to expose the curated current
+    // models. Forced discovery probes the binary; Codex keeps its existing
+    // cache-backed cheap path because the summary badge also consumes it.
+    if matches!(runtime.id, "codex" | "claude") && availability == AcpAvailabilityStatus::Available
     {
         if force {
             if let Some(path_str) = &binary_path {
-                availability = codex_adapter_availability(&PathBuf::from(path_str));
+                availability = cli_adapter_availability(runtime.id, &PathBuf::from(path_str));
+                cli_adapter_version_known = true;
             }
-        } else if let Some(cached) = adapter_availability_cached() {
+        } else if let Some(cached) = cli_adapter_availability_cached(runtime.id) {
             availability = cached;
+            cli_adapter_version_known = true;
         }
     }
 
-    // Warm the adapter-availability cache for the badge fallback.
-    // The cache is scoped to the codex runtime; other runtimes leave it
-    // unchanged. Invalidated by `clear_resolve_cache`.
-    if runtime.id == "codex" {
-        cache_adapter_availability(availability.clone());
+    // Warm the runtime-specific adapter availability cache after forced
+    // discovery. Codex also uses its cache for the restart badge.
+    if cli_adapter_version_known {
+        match runtime.id {
+            "codex" => cache_adapter_availability(availability.clone()),
+            "claude" => cache_claude_adapter_availability(availability.clone()),
+            _ => {}
+        }
     }
 
     let underlying_cli_path = runtime

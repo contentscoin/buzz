@@ -197,12 +197,14 @@ test("resetConfigForHarnessChange does not carry relay mesh to Goose", () => {
 // so codex/claude never receive the global provider. These tests verify that
 // the static model options also stay provider-agnostic for those runtimes.
 
-test("getPersonaModelOptions for codex returns only default model regardless of provider", () => {
+test("getPersonaModelOptions for codex returns curated models regardless of provider", () => {
   const withProvider = getPersonaModelOptions("codex", "anthropic");
   const withoutProvider = getPersonaModelOptions("codex", "");
   assert.deepEqual(withProvider, withoutProvider);
-  assert.equal(withProvider.length, 1);
-  assert.equal(withProvider[0]?.id, "");
+  assert.deepEqual(
+    withProvider.map((option) => option.id),
+    ["", "gpt-6-sol", "gpt-6-luna"],
+  );
 });
 
 test("getPersonaModelOptions for buzz-agent with anthropic filters out zero-value default", () => {

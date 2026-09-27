@@ -36,7 +36,6 @@ import {
   BLOCK_BUILD_HIDDEN_PROVIDER_IDS,
   CUSTOM_PROVIDER_DROPDOWN_VALUE,
   formatRuntimeOptionLabel,
-  getDefaultLlmModelLabel,
   getDefaultPersonaRuntime,
   getPersonaProviderOptions,
   isMissingRequiredDropdownField,
@@ -78,11 +77,9 @@ import {
   usePersonaModelDiscovery,
 } from "./usePersonaModelDiscovery";
 import { EditAgentProviderModelFields } from "./EditAgentProviderModelFields";
-import {
-  getBakedModelInheritLabel,
-  getBakedProviderInheritLabel,
-} from "./bakedEnvHelpers";
+import { getBakedProviderInheritLabel } from "./bakedEnvHelpers";
 import { getProviderApiKeyEnvVar } from "./agentConfigOptions";
+import { deriveAgentInstanceModelFallback } from "./agentInstanceModelFallback";
 import { useAgentDialogDefaults } from "./useAgentDialogDefaults";
 import { AgentAiDefaultsNotice } from "./AgentAiDefaults";
 import { AgentDefaultsDialog } from "./AgentDefaultsDialog";
@@ -430,7 +427,7 @@ export function AgentInstanceEditDialog({
   const providerForDiscovery = llmProviderFieldVisible ? effectiveProvider : "";
 
   const {
-    discoveredModelOptions,
+    authoritativeDiscoveredModelOptions: discoveredModelOptions,
     modelDiscoveryLoading,
     modelDiscoveryStatus,
   } = usePersonaModelDiscovery({
@@ -835,10 +832,11 @@ export function AgentInstanceEditDialog({
     normalizedConfig?.provider,
     provider,
   );
-  const inheritedModelLabel =
-    inheritedModelDefault.source === "build"
-      ? getBakedModelInheritLabel(inheritedModelDefault.value)
-      : getDefaultLlmModelLabel(inheritedModelDefault.value);
+  const editModelFallback = deriveAgentInstanceModelFallback(
+    selectedRuntime?.id ?? selectedRuntimeId,
+    providerForDiscovery,
+    inheritedModelDefault,
+  );
   const {
     isRelayMesh,
     options: effectiveModelOptions,
@@ -846,7 +844,7 @@ export function AgentInstanceEditDialog({
     showCustomInput: showCustomModelInput,
   } = relayMeshModelPickerState({
     discoveredOptions: discoveredModelOptions,
-    fallbackOptions: [{ id: "", label: inheritedModelLabel }],
+    fallbackOptions: editModelFallback.options,
     isCustomEditing: isCustomModelEditing,
     model,
     provider: providerForDiscovery,
@@ -854,7 +852,7 @@ export function AgentInstanceEditDialog({
   const modelDropdownOptions = buildModelDropdownOptions({
     allowCustom: !isRelayMesh,
     globalModel: isRelayMesh ? undefined : inheritedModelDefault.value,
-    globalModelLabel: isRelayMesh ? undefined : inheritedModelLabel,
+    globalModelLabel: isRelayMesh ? undefined : editModelFallback.label,
     loading: modelDiscoveryLoading && discoveredModelOptions === null,
     loadingValue: MODEL_DISCOVERY_LOADING_VALUE,
     options: effectiveModelOptions,

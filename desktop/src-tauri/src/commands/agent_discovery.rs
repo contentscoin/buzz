@@ -5,48 +5,16 @@ use crate::managed_agents::{
 };
 
 mod forced_single_flight;
+mod install_plan;
 mod post_install_verification;
+
+use install_plan::plan_adapter_install;
 
 fn active_installs() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
     use std::collections::HashSet;
     use std::sync::{Mutex, OnceLock};
     static ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     ACTIVE.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-/// Returns the adapter install commands that `install_acp_runtime_blocking` would
-/// run for `runtime_id` given a resolved adapter binary at `adapter_path` (or `None` if not found).
-/// Returns `None` when no install is needed; `Some(cmds)` when adapter is missing or outdated.
-/// For the codex **outdated** case, returns a two-step reinstall: uninstall `@zed-industries/codex-acp`
-/// then install `@agentclientprotocol/codex-acp` (npm ≥7 refuses to overwrite a bin from another pkg).
-/// For the **missing** case, catalog's `adapter_install_commands` are used as-is.
-/// Pure planning function: never spawns a process. Tests use it to assert commands without real npm.
-pub(crate) fn plan_adapter_install<'c>(
-    runtime_id: &str,
-    adapter_path: Option<&std::path::Path>,
-    adapter_install_commands: &'c [&'c str],
-    adapter_probe_path: Option<&str>,
-) -> Option<Vec<&'c str>> {
-    match adapter_path {
-        // Adapter present and current — no install needed.
-        Some(_) if runtime_id != "codex" => None,
-        Some(path)
-            if !crate::managed_agents::codex_adapter_is_outdated_with_path(
-                path,
-                adapter_probe_path,
-            ) =>
-        {
-            None
-        }
-        // Codex adapter is outdated: uninstall the old package first so npm
-        // doesn't hit EEXIST on the shared `codex-acp` bin-link, then install.
-        Some(_) => Some(vec![
-            "npm uninstall -g @zed-industries/codex-acp",
-            "npm install -g @agentclientprotocol/codex-acp",
-        ]),
-        // Adapter missing: use the catalog's install commands directly.
-        None => Some(adapter_install_commands.to_vec()),
-    }
 }
 
 /// Discover the ACP runtime catalog. `force: false` (the default) serves the
@@ -1167,7 +1135,7 @@ mod tests {
         // Simulate the minimum supported adapter version.
         std::fs::write(
             &bin,
-            "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.10.0'\nexit 0\n",
+            "#!/bin/sh\necho '@agentclientprotocol/codex-acp 1.13.1'\nexit 0\n",
         )
         .expect("write script");
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
@@ -1223,10 +1191,11 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn test_plan_adapter_install_non_codex_runtime_never_reinstalls() {
+    fn test_plan_adapter_install_non_version_gated_runtime_never_reinstalls() {
         use std::os::unix::fs::PermissionsExt;
 
-        // For non-codex runtimes, any resolved binary means no install needed.
+        // For runtimes without a version gate, any resolved binary means no
+        // install is needed.
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("goose-acp");
         std::fs::write(&bin, "#!/bin/sh\nexit 1\n").expect("write script");
@@ -1237,7 +1206,7 @@ mod tests {
         let plan = plan_adapter_install("goose", Some(&bin), install_cmds, None);
         assert!(
             plan.is_none(),
-            "non-codex runtime with resolved binary must not trigger reinstall"
+            "runtime without a version gate must not trigger reinstall"
         );
     }
 

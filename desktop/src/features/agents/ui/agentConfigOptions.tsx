@@ -142,6 +142,17 @@ const DEFAULT_MODEL_OPTION: PersonaModelOption = {
   label: "Default model",
 };
 
+const CLAUDE_MODEL_OPTIONS: readonly PersonaModelOption[] = [
+  DEFAULT_MODEL_OPTION,
+  { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
+];
+
+const CODEX_MODEL_OPTIONS: readonly PersonaModelOption[] = [
+  DEFAULT_MODEL_OPTION,
+  { id: "gpt-6-sol", label: "GPT-6 Sol" },
+  { id: "gpt-6-luna", label: "GPT-6 Luna" },
+];
+
 export const PERSONA_LLM_PROVIDER_OPTIONS: readonly PersonaModelOption[] = [
   { id: "anthropic", label: "Anthropic" },
   { id: "openai", label: "OpenAI" },
@@ -158,8 +169,8 @@ const PERSONA_MODEL_OPTIONS_BY_RUNTIME: Record<
 > = {
   goose: [DEFAULT_MODEL_OPTION],
   "buzz-agent": [DEFAULT_MODEL_OPTION],
-  claude: [DEFAULT_MODEL_OPTION],
-  codex: [DEFAULT_MODEL_OPTION],
+  claude: CLAUDE_MODEL_OPTIONS,
+  codex: CODEX_MODEL_OPTIONS,
 };
 
 export function getRuntimePersonaModelOptions(
@@ -244,6 +255,9 @@ export function getPersonaModelOptions(
   providerId: string | null | undefined,
 ): readonly PersonaModelOption[] {
   const options = getRuntimePersonaModelOptions(runtimeId);
+  if (!runtimeSupportsLlmProviderSelection(runtimeId)) {
+    return options;
+  }
   const trimmedProvider = effectiveModelProviderForOptions(
     runtimeId,
     providerId,
