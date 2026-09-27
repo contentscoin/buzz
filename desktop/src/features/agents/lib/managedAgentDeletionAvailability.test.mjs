@@ -146,6 +146,7 @@ function mount(
     },
   });
   clients.push(client);
+  client.setQueryData(["identity"], { pubkey: PK });
   client.setQueryData(["managed-agents"], agents);
   client.setQueryData(["relay-agents"], directory);
   if (seedChannels) client.setQueryData(["channels"], [channel]);
