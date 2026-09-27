@@ -20,10 +20,11 @@ import {
 } from "@/features/agents/lib/useAutoRestartPolicy";
 import { managedAgentsQueryKey } from "@/features/agents/hooks";
 import { requestOpenEditAgent } from "@/features/agents/openEditAgentEvent";
-import { useCommunities } from "@/features/communities/useCommunities";
-import { useIdentityQuery } from "@/shared/api/hooks";
 import type { AgentAvailabilityReader } from "@/features/agents/lib/useAgentAvailability";
-import { isManagedAgentActive } from "@/features/agents/lib/managedAgentControlActions";
+import {
+  isManagedAgentActive,
+  type ManagedAgentCommandScope,
+} from "@/features/agents/lib/managedAgentControlActions";
 import { pickProfileAgent } from "@/features/agents/lib/pickProfileAgent";
 import { useIsArchivedPredicate } from "@/features/identity-archive/hooks";
 import { useUserProfileQuery } from "@/features/profile/hooks";
@@ -43,6 +44,7 @@ import { PersonaActionsMenu } from "./PersonaActionsMenu";
 import { buildUnifiedGroups } from "./unifiedAgentGroups";
 
 type UnifiedAgentsSectionProps = {
+  commandScope: ManagedAgentCommandScope | null;
   defaultModel: string;
   getAvailability: AgentAvailabilityReader;
   actionErrorMessage: string | null;
@@ -145,6 +147,7 @@ export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
   const {
     actionErrorMessage,
     actionNoticeMessage,
+    commandScope,
     defaultModel,
     getAvailability,
     agents,
@@ -231,6 +234,7 @@ export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
                     />
                   )}
                   agent={profileAgent}
+                  commandScope={commandScope}
                   getAvailability={getAvailability}
                   defaultModel={defaultModel}
                   isBestie={profileAgent?.pubkey.toLowerCase() === bestiePubkey}
@@ -252,6 +256,7 @@ export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
           {unknown.length > 0 ? (
             <CollapsibleAgentGroup
               agents={unknown}
+              commandScope={commandScope}
               collapsed={collapsed}
               getAvailability={getAvailability}
               defaultModel={defaultModel}
@@ -269,6 +274,7 @@ export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
           {ungrouped.length > 0 ? (
             <CollapsibleAgentGroup
               agents={ungrouped}
+              commandScope={commandScope}
               collapsed={collapsed}
               getAvailability={getAvailability}
               defaultModel={defaultModel}
@@ -307,6 +313,7 @@ export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
 function AgentPersonaCard({
   actions,
   agent,
+  commandScope,
   defaultModel,
   isBestie,
   getAvailability,
@@ -325,6 +332,7 @@ function AgentPersonaCard({
     isEffectiveAvatarLoading: boolean,
   ) => React.ReactNode;
   agent: ManagedAgent | undefined;
+  commandScope: ManagedAgentCommandScope | null;
   defaultModel: string;
   isBestie: boolean;
   getAvailability: AgentAvailabilityReader;
@@ -343,12 +351,10 @@ function AgentPersonaCard({
 }) {
   const queryClient = useQueryClient();
   const { onOpenSettings } = useAppShell();
-  const { activeCommunity } = useCommunities();
-  const identityQuery = useIdentityQuery();
-  const relayScope = activeCommunity?.relayUrl ?? null;
+  const relayScope = commandScope?.expectedRelayUrl ?? null;
   const failureScope = getAutoRestartFailureScope(
     relayScope,
-    identityQuery.data?.pubkey,
+    commandScope?.expectedSignerPubkey,
   );
   const availability = getAvailability(agent?.pubkey);
   const title = persona.displayName;
@@ -376,11 +382,11 @@ function AgentPersonaCard({
 
   const handleErrorAction = () => {
     if (!agent) return;
-    if (autoRestartFailure?.manualRetryAvailable && relayScope) {
+    if (autoRestartFailure?.manualRetryAvailable && commandScope) {
       void retryFailedAutoRestart(
-        relayScope,
+        commandScope.expectedRelayUrl,
         agent.pubkey,
-        identityQuery.data?.pubkey ?? "",
+        commandScope.expectedSignerPubkey,
       ).finally(() => {
         void queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey });
       });
@@ -494,6 +500,7 @@ function AgentPersonaCard({
 
 function StandaloneAgentCard({
   agent,
+  commandScope,
   isBestie,
   defaultModel,
   getAvailability,
@@ -504,6 +511,7 @@ function StandaloneAgentCard({
   onStartAgent,
 }: {
   agent: ManagedAgent;
+  commandScope: ManagedAgentCommandScope | null;
   isBestie: boolean;
   defaultModel: string;
   getAvailability: AgentAvailabilityReader;
@@ -518,12 +526,10 @@ function StandaloneAgentCard({
 }) {
   const queryClient = useQueryClient();
   const { onOpenSettings } = useAppShell();
-  const { activeCommunity } = useCommunities();
-  const identityQuery = useIdentityQuery();
-  const relayScope = activeCommunity?.relayUrl ?? null;
+  const relayScope = commandScope?.expectedRelayUrl ?? null;
   const failureScope = getAutoRestartFailureScope(
     relayScope,
-    identityQuery.data?.pubkey,
+    commandScope?.expectedSignerPubkey,
   );
   const availability = getAvailability(agent.pubkey);
   const title = agent.name;
@@ -537,11 +543,11 @@ function StandaloneAgentCard({
   const isActive = isManagedAgentActive(agent);
 
   const handleErrorAction = () => {
-    if (autoRestartFailure?.manualRetryAvailable && relayScope) {
+    if (autoRestartFailure?.manualRetryAvailable && commandScope) {
       void retryFailedAutoRestart(
-        relayScope,
+        commandScope.expectedRelayUrl,
         agent.pubkey,
-        identityQuery.data?.pubkey ?? "",
+        commandScope.expectedSignerPubkey,
       ).finally(() => {
         void queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey });
       });
@@ -659,6 +665,7 @@ function CollapsibleAgentGroup({
   groupKey,
   label,
   agents,
+  commandScope,
   bestiePubkey,
   collapsed,
   defaultModel,
@@ -673,6 +680,7 @@ function CollapsibleAgentGroup({
   groupKey: string;
   label: string;
   agents: ManagedAgent[];
+  commandScope: ManagedAgentCommandScope | null;
   bestiePubkey: string | null;
   collapsed: ReadonlySet<string>;
   defaultModel: string;
@@ -708,6 +716,7 @@ function CollapsibleAgentGroup({
           {agents.map((agent) => (
             <StandaloneAgentCard
               agent={agent}
+              commandScope={commandScope}
               getAvailability={getAvailability}
               defaultModel={defaultModel}
               isBestie={agent.pubkey.toLowerCase() === bestiePubkey}

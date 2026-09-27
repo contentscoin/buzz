@@ -29,6 +29,7 @@ import {
   buildInstanceInputForDefinition,
   resolveStartRuntimeForDefinition,
 } from "@/features/agents/lib/instanceInputForDefinition";
+import type { ManagedAgentCommandScope } from "@/features/agents/lib/managedAgentControlActions";
 import { describeLogFile } from "@/features/agents/ui/agentUi";
 import { useAgentLifecycleActions } from "@/features/profile/ui/useAgentLifecycleActions";
 import {
@@ -124,6 +125,16 @@ export function UserProfilePanel({
 }: UserProfilePanelProps) {
   const { globalConfig } = useGlobalAgentConfig();
   const { activeCommunity } = useCommunities();
+  const commandScope = React.useMemo<ManagedAgentCommandScope | null>(() => {
+    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(currentPubkey ?? "") || undefined;
+    return expectedRelayUrl && expectedSignerPubkey
+      ? { expectedRelayUrl, expectedSignerPubkey }
+      : null;
+  }, [activeCommunity?.relayUrl, currentPubkey]);
   const isOverlay = useIsThreadPanelOverlay();
   const isSplitLayout = layout === "split";
   useEscapeKey(onClose, isOverlay || isSinglePanelView);
@@ -412,6 +423,7 @@ export function UserProfilePanel({
   const { deleteManagedAgentRecord, deleteManagedAgentsForPersona } =
     useProfileAgentDeletion({
       channels: channelsQuery.data,
+      commandScope,
       deleteManagedAgent: deleteAgentMutation.mutateAsync,
       managedAgent,
       managedAgents: managedAgentsQuery.data,
@@ -925,6 +937,7 @@ export function UserProfilePanel({
     <UserProfileEditAgentDialog
       agent={managedAgent}
       canEdit={canEditAgent}
+      commandScope={commandScope}
       initialFocus={editAgentFocus}
       onEditLinkedPersona={
         resolvedPersona && !resolvedPersona.isBuiltIn

@@ -14,6 +14,7 @@ import { AgentRunLocationProvider } from "./AgentRunLocationContext";
 import type { BackendIntent } from "../lib/instanceInputForDefinition";
 import type { AgentCreateIntent } from "./agentCreateIntent";
 import type { EditAgentFocusTarget } from "@/features/agents/openEditAgentEvent";
+import type { ManagedAgentCommandScope } from "@/features/agents/lib/managedAgentControlActions";
 import { AgentInstanceEditDialog } from "./AgentInstanceEditDialog";
 import { createPersonaDialogState } from "./personaDialogState";
 import {
@@ -48,6 +49,7 @@ type AgentDialogCreateProps = {
 type AgentDialogInstanceEditProps = {
   mode: "instance-edit";
   agent: ManagedAgent;
+  commandScope?: ManagedAgentCommandScope | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdated?: (agent: ManagedAgent) => void;
@@ -104,6 +106,7 @@ export function AgentDialog(props: AgentDialogProps) {
       >
         <AgentInstanceEditDialog
           agent={props.agent}
+          {...(props.commandScope ? { commandScope: props.commandScope } : {})}
           onEditLinkedPersona={props.onEditLinkedPersona}
           onOpenChange={props.onOpenChange}
           onUpdated={props.onUpdated}

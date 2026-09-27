@@ -1,20 +1,15 @@
 import { toast } from "sonner";
 
 import { useStartManagedAgentMutation } from "@/features/agents/hooks";
-import { useCommunities } from "@/features/communities/useCommunities";
-import { useIdentityQuery } from "@/shared/api/hooks";
-import { normalizePubkey } from "@/shared/lib/pubkey";
+import type { ManagedAgentCommandScope } from "@/features/agents/lib/managedAgentControlActions";
 
 /** Start action used by save-complete toasts, scoped to the render that saved. */
-export function useStartManagedAgentToastAction() {
+export function useStartManagedAgentToastAction(
+  commandScope?: ManagedAgentCommandScope | null,
+) {
   const startMutation = useStartManagedAgentMutation();
-  const { activeCommunity } = useCommunities();
-  const identityQuery = useIdentityQuery();
-  const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
-    ? activeCommunity.relayUrl
-    : undefined;
-  const expectedSignerPubkey =
-    normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+  const expectedRelayUrl = commandScope?.expectedRelayUrl;
+  const expectedSignerPubkey = commandScope?.expectedSignerPubkey;
 
   return (pubkey: string, name: string) => {
     if (!expectedRelayUrl || !expectedSignerPubkey) {

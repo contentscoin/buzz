@@ -80,6 +80,17 @@ export function useManagedAgentActions() {
 
   const managedAgentLogQuery = useManagedAgentLogQuery(logAgentPubkey);
 
+  const commandScope = React.useMemo<ManagedAgentCommandScope | null>(() => {
+    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+    return expectedRelayUrl && expectedSignerPubkey
+      ? { expectedRelayUrl, expectedSignerPubkey }
+      : null;
+  }, [activeCommunity?.relayUrl, identityQuery.data?.pubkey]);
+
   React.useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       setShouldLoadChannels(true);
@@ -179,17 +190,12 @@ export function useManagedAgentActions() {
   }
 
   function captureCommandScope(): ManagedAgentCommandScope {
-    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
-      ? activeCommunity.relayUrl
-      : undefined;
-    const expectedSignerPubkey =
-      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
-    if (!expectedRelayUrl || !expectedSignerPubkey) {
+    if (!commandScope) {
       throw new Error(
         "Buzz is still connecting to this community. Try again in a moment.",
       );
     }
-    return { expectedRelayUrl, expectedSignerPubkey };
+    return commandScope;
   }
 
   const startManagedAgentCommand: StartManagedAgentCommand = (
@@ -525,6 +531,7 @@ export function useManagedAgentActions() {
     managedPubkeys,
     channelIdToName,
     channelsByPubkey,
+    commandScope,
     isPending,
     isCreateOpen,
     setIsCreateOpen,

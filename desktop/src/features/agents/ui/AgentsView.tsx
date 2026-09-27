@@ -219,6 +219,7 @@ export function AgentsView() {
           />
           <div className="flex flex-col gap-8">
             <UnifiedAgentsSection
+              commandScope={agents.commandScope}
               getAvailability={agents.getAvailability}
               defaultModel={inheritedDefaults.model.value}
               actionErrorMessage={agents.actionErrorMessage}

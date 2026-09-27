@@ -7,6 +7,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 });
 const PK = "a".repeat(64);
 const SIBLING = "b".repeat(64);
+const RELAY = "wss://relay.test";
 const agent = {
   pubkey: PK,
   name: "Remote",
@@ -101,8 +102,22 @@ function setup() {
   commands = [];
   confirms = [];
   connection = "connected";
+  localStorage.setItem(
+    "buzz-communities",
+    JSON.stringify([
+      {
+        id: "community",
+        name: "Test community",
+        relayUrl: RELAY,
+        pubkey: PK,
+        addedAt: "2026-01-01T00:00:00Z",
+      },
+    ]),
+  );
+  localStorage.setItem("buzz-active-community-id", "community");
   listeners = new Set();
   handlers = new Map([
+    ["get_identity", () => ({ pubkey: PK })],
     ["get_presence", () => ({ [PK]: "online" })],
     ["delete_managed_agent", () => null],
     ["remove_channel_member", () => null],

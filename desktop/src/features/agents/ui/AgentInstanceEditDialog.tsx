@@ -14,7 +14,10 @@ import {
   useUpdateManagedAgentMutation,
 } from "@/features/agents/hooks";
 import { useAgentAccessOwnerOnlyQuery } from "@/features/agents/useAgentAccessOwnerOnly";
-import { isManagedAgentActive } from "@/features/agents/lib/managedAgentControlActions";
+import {
+  isManagedAgentActive,
+  type ManagedAgentCommandScope,
+} from "@/features/agents/lib/managedAgentControlActions";
 import type {
   ManagedAgent,
   RespondToMode,
@@ -96,6 +99,7 @@ import { useStartManagedAgentToastAction } from "./useStartManagedAgentToastActi
 
 export function AgentInstanceEditDialog({
   agent,
+  commandScope,
   initialFocus,
   open,
   onEditLinkedPersona,
@@ -103,6 +107,7 @@ export function AgentInstanceEditDialog({
   onUpdated,
 }: {
   agent: ManagedAgent;
+  commandScope?: ManagedAgentCommandScope | null;
   /** Optional field to scroll/focus when the dialog opens from a card deep-link. */
   initialFocus?: EditAgentFocusTarget;
   open: boolean;
@@ -112,7 +117,8 @@ export function AgentInstanceEditDialog({
   onUpdated?: (agent: ManagedAgent) => void;
 }) {
   const updateMutation = useUpdateManagedAgentMutation();
-  const startManagedAgentFromToast = useStartManagedAgentToastAction();
+  const startManagedAgentFromToast =
+    useStartManagedAgentToastAction(commandScope);
   const queryClient = useQueryClient();
   // Gate the full Save sequence, including standalone setters, with isSaving.
   const [isSaving, setIsSaving] = React.useState(false);

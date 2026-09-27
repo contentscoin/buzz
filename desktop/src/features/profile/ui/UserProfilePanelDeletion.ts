@@ -6,9 +6,7 @@ import {
   type ManagedAgentActionResult,
   type ManagedAgentCommandScope,
 } from "@/features/agents/lib/managedAgentControlActions";
-import { useCommunities } from "@/features/communities/useCommunities";
 import { invalidateChannelMembersRosters } from "@/features/channels/rosterFreshness";
-import { useIdentityQuery } from "@/shared/api/hooks";
 import { removeChannelMember } from "@/shared/api/tauri";
 import type {
   AgentPersona,
@@ -16,7 +14,6 @@ import type {
   ManagedAgent,
   RelayAgent,
 } from "@/shared/api/types";
-import { normalizePubkey } from "@/shared/lib/pubkey";
 import { getRelayAgentChannelIds } from "@/features/profile/ui/UserProfilePanelUtils";
 
 type DeleteManagedAgentRulesContext = Omit<
@@ -39,6 +36,7 @@ type DeleteProfileManagedAgentsForPersonaContext =
 
 type UseProfileAgentDeletionInput = {
   channels?: readonly Channel[];
+  commandScope?: ManagedAgentCommandScope | null;
   deleteManagedAgent: DeleteManagedAgentRulesContext["deleteManagedAgent"];
   managedAgent?: ManagedAgent;
   managedAgents?: readonly ManagedAgent[];
@@ -48,6 +46,7 @@ type UseProfileAgentDeletionInput = {
 
 export function useProfileAgentDeletion({
   channels,
+  commandScope,
   deleteManagedAgent,
   managedAgent,
   managedAgents,
@@ -55,22 +54,14 @@ export function useProfileAgentDeletion({
   relayAgents,
 }: UseProfileAgentDeletionInput) {
   const queryClient = useQueryClient();
-  const { activeCommunity } = useCommunities();
-  const identityQuery = useIdentityQuery();
-  const captureCommandScope =
-    React.useCallback((): ManagedAgentCommandScope => {
-      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
-        ? activeCommunity.relayUrl
-        : undefined;
-      const expectedSignerPubkey =
-        normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
-      if (!expectedRelayUrl || !expectedSignerPubkey) {
-        throw new Error(
-          "Buzz is still connecting to this community. Try again in a moment.",
-        );
-      }
-      return { expectedRelayUrl, expectedSignerPubkey };
-    }, [activeCommunity?.relayUrl, identityQuery.data?.pubkey]);
+  const captureCommandScope = React.useCallback(() => {
+    if (commandScope === null) {
+      throw new Error(
+        "Buzz is still connecting to this community. Try again in a moment.",
+      );
+    }
+    return commandScope;
+  }, [commandScope]);
   const removeAgentFromAllChannels = React.useCallback(
     async (agentPubkey: string, scope?: ManagedAgentCommandScope) => {
       const normalizedPubkey = agentPubkey.toLowerCase();
@@ -120,8 +111,8 @@ export function useProfileAgentDeletion({
         skipRemoteDeleteConfirm: true,
       }),
     [
-      captureCommandScope,
       channels,
+      captureCommandScope,
       deleteManagedAgent,
       getAvailability,
       relayAgents,
@@ -142,8 +133,8 @@ export function useProfileAgentDeletion({
         selectedAgent: managedAgent,
       }),
     [
-      captureCommandScope,
       channels,
+      captureCommandScope,
       deleteManagedAgent,
       managedAgent,
       managedAgents,
