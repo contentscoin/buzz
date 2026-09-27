@@ -229,16 +229,29 @@ pub(crate) fn start_managed_agent_runtime_pair_lazy(
     relay_url: String,
     app: AppHandle,
 ) -> Result<ManagedAgentRuntimeStatus, String> {
-    start_pair(pubkey, relay_url, true, None, app)
+    start_pair(pubkey, relay_url, true, None, None, app)
 }
 
 #[tauri::command]
 pub fn start_managed_agent_runtime(
     pubkey: String,
     relay_url: String,
+    expected_signer_pubkey: Option<String>,
     app: AppHandle,
 ) -> Result<ManagedAgentRuntimeStatus, String> {
-    start_managed_agent_runtime_pair_lazy(pubkey, relay_url, app)
+    let state = app.state::<AppState>();
+    let workspace_signer = crate::relay::bind_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        state.signing_keys()?.public_key().to_hex(),
+    )?;
+    start_pair(
+        pubkey,
+        relay_url,
+        true,
+        None,
+        Some(workspace_signer.as_str()),
+        app,
+    )
 }
 
 fn start_pair(
@@ -246,6 +259,7 @@ fn start_pair(
     relay_url: String,
     lazy: bool,
     expected_updated_at: Option<&str>,
+    bound_owner_pubkey: Option<&str>,
     app: AppHandle,
 ) -> Result<ManagedAgentRuntimeStatus, String> {
     let state = app.state::<AppState>();
@@ -283,11 +297,14 @@ fn start_pair(
     runtimes.remove(&key);
     terminate_untracked_pair_runtime(&app, &key)?;
 
-    let owner = state
-        .keys
-        .lock()
-        .ok()
-        .map(|keys| keys.public_key().to_hex());
+    let owner = match bound_owner_pubkey {
+        Some(owner) => Some(owner.to_string()),
+        None => state
+            .keys
+            .lock()
+            .ok()
+            .map(|keys| keys.public_key().to_hex()),
+    };
     let mut process =
         spawn_agent_child(&app, record, &key.relay_url, lazy, owner.as_deref(), None)?;
     let now = crate::util::now_iso();
@@ -319,9 +336,14 @@ fn start_pair(
 pub fn stop_managed_agent_runtime(
     pubkey: String,
     relay_url: String,
+    expected_signer_pubkey: Option<String>,
     app: AppHandle,
 ) -> Result<ManagedAgentRuntimeStatus, String> {
     let state = app.state::<AppState>();
+    let _workspace_signer = crate::relay::bind_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        state.signing_keys()?.public_key().to_hex(),
+    )?;
     let _transition = state
         .managed_agent_runtime_transition
         .lock()
@@ -386,10 +408,28 @@ pub fn stop_managed_agent_runtime(
 pub fn restart_managed_agent_runtime(
     pubkey: String,
     relay_url: String,
+    expected_signer_pubkey: Option<String>,
     app: AppHandle,
 ) -> Result<ManagedAgentRuntimeStatus, String> {
-    stop_managed_agent_runtime(pubkey.clone(), relay_url.clone(), app.clone())?;
-    start_pair(pubkey, relay_url, true, None, app)
+    let state = app.state::<AppState>();
+    let workspace_signer = crate::relay::bind_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        state.signing_keys()?.public_key().to_hex(),
+    )?;
+    stop_managed_agent_runtime(
+        pubkey.clone(),
+        relay_url.clone(),
+        expected_signer_pubkey.clone(),
+        app.clone(),
+    )?;
+    start_pair(
+        pubkey,
+        relay_url,
+        true,
+        None,
+        Some(workspace_signer.as_str()),
+        app,
+    )
 }
 
 /// Probe whether this agent can operate on `requested_relay_url`.
@@ -513,6 +553,7 @@ pub async fn reconcile_managed_agent_runtimes(
                         key.relay_url.clone(),
                         true,
                         Some(&record.updated_at),
+                        None,
                         app.clone(),
                     ) {
                         Ok(mut status) => {

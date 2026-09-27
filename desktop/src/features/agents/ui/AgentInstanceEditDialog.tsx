@@ -16,6 +16,8 @@ import {
 } from "@/features/agents/hooks";
 import { useAgentAccessOwnerOnlyQuery } from "@/features/agents/useAgentAccessOwnerOnly";
 import { isManagedAgentActive } from "@/features/agents/lib/managedAgentControlActions";
+import { useCommunities } from "@/features/communities/useCommunities";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import type {
   ManagedAgent,
   RespondToMode,
@@ -23,6 +25,7 @@ import type {
 } from "@/shared/api/types";
 import type { EditAgentFocusTarget } from "@/features/agents/openEditAgentEvent";
 import { cn } from "@/shared/lib/cn";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import { Button } from "@/shared/ui/button";
 import { ChooserDialogContent } from "@/shared/ui/chooser-dialog-content";
 import { Dialog } from "@/shared/ui/dialog";
@@ -113,6 +116,8 @@ export function AgentInstanceEditDialog({
 }) {
   const updateMutation = useUpdateManagedAgentMutation();
   const startMutation = useStartManagedAgentMutation();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const queryClient = useQueryClient();
   // Gate the full Save sequence, including standalone setters, with isSaving.
   const [isSaving, setIsSaving] = React.useState(false);
@@ -634,6 +639,11 @@ export function AgentInstanceEditDialog({
     !isAvatarUploadPending;
 
   async function handleSubmit() {
+    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
     setIsSaving(true);
     setSetterError(null);
     try {
@@ -802,15 +812,28 @@ export function AgentInstanceEditDialog({
           action: {
             label: "Start now",
             onClick: () => {
-              startMutation.mutate(result.agent.pubkey, {
-                onSuccess: () => toast.success(`${startedName} started.`),
-                onError: (error) =>
-                  toast.error(
-                    error instanceof Error
-                      ? `${startedName} failed to start: ${error.message}`
-                      : `${startedName} failed to start.`,
-                  ),
-              });
+              if (!expectedRelayUrl || !expectedSignerPubkey) {
+                toast.error(
+                  "Buzz is still connecting to this community. Try starting the agent from its card in a moment.",
+                );
+                return;
+              }
+              startMutation.mutate(
+                {
+                  pubkey: result.agent.pubkey,
+                  expectedRelayUrl,
+                  expectedSignerPubkey,
+                },
+                {
+                  onSuccess: () => toast.success(`${startedName} started.`),
+                  onError: (error) =>
+                    toast.error(
+                      error instanceof Error
+                        ? `${startedName} failed to start: ${error.message}`
+                        : `${startedName} failed to start.`,
+                    ),
+                },
+              );
             },
           },
         });

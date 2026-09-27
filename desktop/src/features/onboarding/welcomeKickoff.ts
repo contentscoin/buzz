@@ -7,7 +7,7 @@ import {
 } from "@/features/agents/hooks";
 import { useAgentAccessOwnerOnlyQuery } from "@/features/agents/useAgentAccessOwnerOnly";
 import { useGlobalAgentConfig } from "@/features/agents/useGlobalAgentConfig";
-import { clearActiveTurnsForAgentOnStop } from "@/features/agents/managedAgentRuntimeHooks";
+import { clearScopedActiveTurnsForAgentOnStop } from "@/features/agents/managedAgentRuntimeHooks";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { welcomeKickoffMarker } from "@/features/onboarding/devFreshOnboarding";
 import { resolveAgentReadiness } from "@/features/onboarding/ui/agentReadiness";
@@ -25,6 +25,7 @@ import {
   startManagedAgent,
   stopManagedAgent,
 } from "@/shared/api/tauriManagedAgents";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import { hasManagedAgentChannelMessageMarker } from "@/shared/api/tauriManagedAgentMessageMarkers";
 import { sendManagedAgentChannelMessage } from "@/shared/api/tauriManagedAgentMessages";
 import { getPresence, listManagedAgents } from "@/shared/api/tauri";
@@ -349,11 +350,21 @@ async function resolveLatestWelcomeAgentSet({
   return resolveWelcomeAgentSetForRelay(agents, relayUrl) ?? fallback;
 }
 
-async function markerExists(channelId: string, marker: string) {
+type WelcomeCommandScope = {
+  expectedRelayUrl: string;
+  expectedSignerPubkey: string;
+};
+
+async function markerExists(
+  channelId: string,
+  marker: string,
+  scope: WelcomeCommandScope,
+) {
   return hasManagedAgentChannelMessageMarker({
     channelId,
     marker,
     markerScope: "channel",
+    ...scope,
   });
 }
 
@@ -455,16 +466,30 @@ export async function restartWelcomeTeammate(
   options: {
     stopAgent?: typeof stopManagedAgent;
     startAgent?: typeof startManagedAgent;
+    expectedRelayUrl?: string;
+    expectedSignerPubkey?: string;
     onStopped?: () => void;
   } = {},
 ) {
   const stopAgent = options.stopAgent ?? stopManagedAgent;
   const startAgent = options.startAgent ?? startManagedAgent;
   if (agent.status === "running") {
-    await stopAgent(agent.pubkey);
+    if (options.expectedRelayUrl) {
+      await stopAgent(agent.pubkey, {
+        expectedRelayUrl: options.expectedRelayUrl,
+        expectedSignerPubkey: options.expectedSignerPubkey,
+      });
+    } else {
+      await stopAgent(agent.pubkey);
+    }
     options.onStopped?.();
   }
-  return startAgent(agent.pubkey);
+  return options.expectedRelayUrl || options.expectedSignerPubkey
+    ? startAgent(agent.pubkey, {
+        expectedRelayUrl: options.expectedRelayUrl,
+        expectedSignerPubkey: options.expectedSignerPubkey,
+      })
+    : startAgent(agent.pubkey);
 }
 
 async function sendWelcomeKickoffCloser({
@@ -472,13 +497,15 @@ async function sendWelcomeKickoffCloser({
   channelId,
   content,
   opener,
+  scope,
 }: {
   agentSet: WelcomeAgentSet;
   channelId: string;
   content: string;
   opener: RelayEvent;
+  scope: WelcomeCommandScope;
 }) {
-  if (await markerExists(channelId, closerMarker)) return;
+  if (await markerExists(channelId, closerMarker, scope)) return;
 
   await sendManagedAgentChannelMessage({
     agentPubkey: agentSet.lead.pubkey,
@@ -487,6 +514,7 @@ async function sendWelcomeKickoffCloser({
     marker: closerMarker,
     markerScope: "channel",
     parentEventId: opener.id,
+    ...scope,
   });
 }
 
@@ -498,6 +526,12 @@ export function useWelcomeKickoff(
 ) {
   const queryClient = useQueryClient();
   const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+  const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+    ? activeCommunity.relayUrl
+    : undefined;
+  const expectedSignerPubkey =
+    normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
   const runtimesQuery = useAcpRuntimesQuery();
   const managedAgentsQuery = useManagedAgentsQuery();
   const agentAccessOwnerOnlyQuery = useAgentAccessOwnerOnlyQuery();
@@ -549,9 +583,9 @@ export function useWelcomeKickoff(
     () =>
       resolveWelcomeAgentSetForRelay(
         managedAgentsQuery.data ?? [],
-        activeCommunity?.relayUrl,
+        expectedRelayUrl,
       ),
-    [activeCommunity?.relayUrl, managedAgentsQuery.data],
+    [expectedRelayUrl, managedAgentsQuery.data],
   );
   const readiness = React.useMemo(
     () => resolveAgentReadiness(runtimesQuery.data ?? [], globalConfig),
@@ -575,9 +609,16 @@ export function useWelcomeKickoff(
       focusedWelcomeChannelRef.current !== channelId;
     void (async () => {
       try {
+        if (!expectedRelayUrl || !expectedSignerPubkey) {
+          throw new Error(
+            "Buzz is still connecting to this community. Welcome agents were not started.",
+          );
+        }
+        const commandScope = { expectedRelayUrl, expectedSignerPubkey };
         const welcomeTeam = await ensureWelcomeTeam(
           channelId,
-          activeCommunity?.relayUrl,
+          expectedRelayUrl,
+          expectedSignerPubkey,
         );
         await queryClient.invalidateQueries({
           queryKey: managedAgentsQueryKey,
@@ -587,7 +628,7 @@ export function useWelcomeKickoff(
           teammates: [welcomeTeam[1], welcomeTeam[2]],
         };
 
-        if (await markerExists(channelId, closerMarker)) {
+        if (await markerExists(channelId, closerMarker, commandScope)) {
           return;
         }
         if (!readiness.ready) {
@@ -597,10 +638,15 @@ export function useWelcomeKickoff(
             content: WELCOME_KICKOFF_PROVIDER_MESSAGE,
             marker: providerMarker,
             markerScope: "channel",
+            ...commandScope,
           });
           return;
         }
-        const openerAlreadySent = await markerExists(channelId, openerMarker);
+        const openerAlreadySent = await markerExists(
+          channelId,
+          openerMarker,
+          commandScope,
+        );
 
         // Start before publishing the mention. buzz-acp replays events from its
         // startup watermark, so no separate subscription-ready wait is needed.
@@ -624,12 +670,22 @@ export function useWelcomeKickoff(
               )
             ) {
               return restartWelcomeTeammate(agent, {
-                onStopped: () => clearActiveTurnsForAgentOnStop(agent.pubkey),
+                expectedRelayUrl,
+                expectedSignerPubkey,
+                onStopped: () =>
+                  clearScopedActiveTurnsForAgentOnStop(
+                    agent.pubkey,
+                    expectedRelayUrl,
+                    expectedSignerPubkey,
+                  ),
               });
             }
             return agent.status === "running" || agent.status === "deployed"
               ? Promise.resolve(agent)
-              : startManagedAgent(agent.pubkey);
+              : startManagedAgent(agent.pubkey, {
+                  expectedRelayUrl,
+                  expectedSignerPubkey,
+                });
           }),
         );
         for (const [index, result] of startResults.entries()) {
@@ -681,14 +737,15 @@ export function useWelcomeKickoff(
             displayName: profile.displayName,
           }))
           .catch(() => null);
-        const openerResult = await sendManagedAgentChannelMessage(
-          buildWelcomeKickoffOpenerSendInput(
+        const openerResult = await sendManagedAgentChannelMessage({
+          ...buildWelcomeKickoffOpenerSendInput(
             resolvedAgentSet,
             introTeammates,
             channelId,
             owner,
           ),
-        );
+          ...commandScope,
+        });
         if (!isCancelled()) onKickoffOpenerPosted?.(openerResult.eventId);
       } catch (error) {
         console.warn("Failed to start the Welcome team kickoff.", error);
@@ -697,10 +754,11 @@ export function useWelcomeKickoff(
       }
     })();
   }, [
-    activeCommunity?.relayUrl,
     agentAccessOwnerOnly,
     channelId,
     configLoading,
+    expectedRelayUrl,
+    expectedSignerPubkey,
     isActiveWelcome,
     onKickoffOpenerPosted,
     queryClient,
@@ -727,6 +785,8 @@ export function useWelcomeKickoff(
       !channelId ||
       !isActiveWelcome ||
       !agentSet ||
+      !expectedRelayUrl ||
+      !expectedSignerPubkey ||
       closerInFlight.has(channelId) ||
       // Respect the latch, not just the events. Retiring the opener-thread
       // watch drops the subtree from `kickoffEvents`, which is where the closer
@@ -790,6 +850,7 @@ export function useWelcomeKickoff(
                 latestResolution.unresolved.map((agent) => agent.name),
               ),
               opener: latestOpener,
+              scope: { expectedRelayUrl, expectedSignerPubkey },
             });
           })()
             .catch((error) => {
@@ -844,6 +905,7 @@ export function useWelcomeKickoff(
           latestResolution.failed.map((agent) => agent.name),
         ),
         opener: latestOpener,
+        scope: { expectedRelayUrl, expectedSignerPubkey },
       });
     })()
       .catch((error) => {
@@ -861,6 +923,8 @@ export function useWelcomeKickoff(
     kickoffEvents,
     kickoffResolved,
     channelId,
+    expectedRelayUrl,
+    expectedSignerPubkey,
     isActiveWelcome,
     queryClient,
   ]);

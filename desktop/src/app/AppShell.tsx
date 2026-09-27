@@ -99,6 +99,7 @@ import { joinChannel } from "@/shared/api/tauri";
 import type { Channel, ChannelVisibility, SearchHit } from "@/shared/api/types";
 import { ChannelNavigationProvider } from "@/shared/context/ChannelNavigationContext";
 import { useAppDeepLinks } from "@/shared/useAppDeepLinks";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import { SidebarProvider } from "@/shared/ui/sidebar";
 import { RelayConnectionOverlay } from "@/app/RelayConnectionOverlay";
 import { useSidebarRelayConnectionCard } from "@/features/sidebar/ui/useSidebarRelayConnectionCard";
@@ -197,7 +198,10 @@ export function AppShell() {
   );
   useAgentsDataRefresh();
   // Chunk F: auto-restart drifted idle agents (per-agent opt-out, default ON).
-  useAutoRestartPolicy();
+  useAutoRestartPolicy(
+    communitiesHook.activeCommunity?.relayUrl,
+    identityQuery.data?.pubkey,
+  );
   // Owner-global observer ingestion: receives + decrypts agent observer
   // frames and keeps derived active-turn liveness in sync app-wide, so no
   // individual screen/panel has to mount its own bridge for ingestion.
@@ -554,6 +558,13 @@ export function AppShell() {
       },
       onCreated?: (channelId: string) => void,
     ) => {
+      const commandScope = {
+        expectedRelayUrl: communitiesHook.activeCommunity?.relayUrl?.trim()
+          ? communitiesHook.activeCommunity.relayUrl
+          : undefined,
+        expectedSignerPubkey:
+          normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined,
+      };
       const createdChannel = await createChannelMutation.mutateAsync({
         name,
         description,
@@ -565,9 +576,16 @@ export function AppShell() {
       await applyCanvas(templateId, createdChannel.id, name);
       await goChannel(createdChannel.id);
       onCreated?.(createdChannel.id);
-      void applyAgents(templateId, createdChannel.id);
+      void applyAgents(templateId, createdChannel.id, commandScope);
     },
-    [applyAgents, applyCanvas, createChannelMutation, goChannel],
+    [
+      applyAgents,
+      applyCanvas,
+      communitiesHook.activeCommunity?.relayUrl,
+      createChannelMutation,
+      goChannel,
+      identityQuery.data?.pubkey,
+    ],
   );
   const handleCreateForum = React.useCallback(
     async ({
@@ -583,6 +601,13 @@ export function AppShell() {
       ttlSeconds?: number;
       templateId?: string;
     }) => {
+      const commandScope = {
+        expectedRelayUrl: communitiesHook.activeCommunity?.relayUrl?.trim()
+          ? communitiesHook.activeCommunity.relayUrl
+          : undefined,
+        expectedSignerPubkey:
+          normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined,
+      };
       const createdForum = await createForumMutation.mutateAsync({
         name,
         description,
@@ -593,9 +618,16 @@ export function AppShell() {
 
       await applyCanvas(templateId, createdForum.id, name);
       await goChannel(createdForum.id);
-      void applyAgents(templateId, createdForum.id);
+      void applyAgents(templateId, createdForum.id, commandScope);
     },
-    [applyAgents, applyCanvas, createForumMutation, goChannel],
+    [
+      applyAgents,
+      applyCanvas,
+      communitiesHook.activeCommunity?.relayUrl,
+      createForumMutation,
+      goChannel,
+      identityQuery.data?.pubkey,
+    ],
   );
 
   // The channel browser can create either a stream or a forum depending on

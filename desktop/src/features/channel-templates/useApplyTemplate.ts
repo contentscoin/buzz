@@ -13,8 +13,16 @@ import { resolvePersonaRuntime } from "@/features/agents/lib/resolvePersonaRunti
 import { resolveTeamPersonas } from "@/features/agents/lib/teamPersonas";
 import { useLastRuntime } from "@/features/agents/lib/useLastRuntime";
 import { useChannelTemplatesQuery } from "@/features/channel-templates/hooks";
+import { useCommunities } from "@/features/communities/useCommunities";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import { setCanvas } from "@/shared/api/tauri";
 import type { ChannelTemplate } from "@/shared/api/types";
+import { normalizePubkey } from "@/shared/lib/pubkey";
+
+export type ApplyTemplateAgentScope = {
+  expectedRelayUrl?: string;
+  expectedSignerPubkey?: string;
+};
 
 /**
  * TemplateBackend omits `config` — supply an empty object for provider backends.
@@ -28,6 +36,8 @@ function toManagedBackend(
 
 export function useApplyTemplate() {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const channelTemplatesQuery = useChannelTemplatesQuery();
   const acpRuntimesQuery = useAvailableAcpRuntimes();
   const personasQuery = usePersonasQuery();
@@ -57,6 +67,7 @@ export function useApplyTemplate() {
   async function applyAgents(
     templateId: string | undefined,
     channelId: string,
+    capturedScope?: ApplyTemplateAgentScope,
   ) {
     if (!templateId) return;
     const template = channelTemplatesQuery.data?.find(
@@ -66,6 +77,15 @@ export function useApplyTemplate() {
     const { personas: templatePersonas, teams: templateTeams } =
       template.agents;
     if (templatePersonas.length === 0 && templateTeams.length === 0) return;
+    const expectedRelayUrl = capturedScope
+      ? capturedScope.expectedRelayUrl
+      : activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+    const expectedSignerPubkey = capturedScope
+      ? capturedScope.expectedSignerPubkey
+      : normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+    if (!expectedRelayUrl || !expectedSignerPubkey) return;
 
     const allPersonas = personasQuery.data ?? [];
     const allTeams = teamsQuery.data ?? [];
@@ -100,6 +120,8 @@ export function useApplyTemplate() {
         model: entry.model ?? persona.model ?? undefined,
         role: "bot",
         backend: toManagedBackend(entry.backend),
+        expectedRelayUrl,
+        expectedSignerPubkey,
       });
     }
 
@@ -125,6 +147,8 @@ export function useApplyTemplate() {
           model: teamEntry.model ?? persona.model ?? undefined,
           role: "bot",
           backend: toManagedBackend(teamEntry.backend),
+          expectedRelayUrl,
+          expectedSignerPubkey,
         });
       }
     }

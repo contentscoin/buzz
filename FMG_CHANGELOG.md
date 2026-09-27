@@ -1,5 +1,37 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.4
+
+Base: FMG live release `0.5.26-fmg.3`.
+
+### Added
+
+- A six-column project task board that opens the existing task detail,
+  discussion, activity and comment workflow.
+- Durable, one-time recovery controls for failed local-agent restarts and
+  actionable provider, model, runtime and community error routing.
+- `buzz messages send --content-file` for bounded UTF-8 Korean, emoji,
+  mention and multiline input on Windows.
+
+### Fixed
+
+- Project repository operations now use the compatible MinGit runtime bundled
+  with FMG Buzz, require the Nostr credential helper, and classify
+  non-interactive Git authentication failures correctly.
+- Agent lifecycle and channel-membership writes remain bound to the community
+  and signing identity that scheduled them, including automatic restart,
+  explicit retry, attach and removal paths.
+- The **FMG 센터** task-graph preview remains read-only while transition
+  publishing requires the CLI's complete relay preflight and conflict checks.
+
+### Deployment
+
+- This is a desktop-only update. The Hostinger relay, OpenClaw service and
+  pinned `sprig-v0.5.26-fmg.1` agent runtime remain unchanged.
+- The release lane silent-installs each Windows candidate and verifies the app,
+  Nostr credential helper, managed Git launcher and pinned MinGit runtime before
+  it writes the immutable release receipt.
+
 ## 0.5.26-fmg.3
 
 Base: FMG live release `0.5.26-fmg.2`.

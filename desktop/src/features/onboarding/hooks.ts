@@ -22,6 +22,7 @@ import { useProfileQuery } from "@/features/profile/hooks";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { useIdentityQuery } from "@/shared/api/hooks";
 import type { Channel } from "@/shared/api/types";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import {
   createChannel,
   deleteChannel,
@@ -50,13 +51,13 @@ function seedWelcomeExperience(
   pubkey: string | null,
   communityScope: string | null,
 ) {
-  const key = `${communityScope ?? ""}:${channelId}`;
+  const key = `${communityScope ?? ""}:${normalizePubkey(pubkey ?? "")}:${channelId}`;
   const current = welcomeSeedPromises.get(key);
   if (current) return current;
 
   const promise = (async () => {
     try {
-      await ensureWelcomeTeam(channelId, communityScope);
+      await ensureWelcomeTeam(channelId, communityScope, pubkey);
       await ensureWelcomeCanvas(channelId);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey }),

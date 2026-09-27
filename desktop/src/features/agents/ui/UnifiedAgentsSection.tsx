@@ -1,13 +1,27 @@
 import * as React from "react";
 import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 
+import { useAppShell } from "@/app/AppShellContext";
 import {
   isAgentCardAvatarLoading,
   resolveAgentCardAvatarUrl,
 } from "@/features/agents/lib/agentCardAvatar";
 import { resolveAgentCardModelLabel } from "@/features/agents/lib/agentCardModelLabel";
 import { effectiveAgentDescription } from "@/features/agents/lib/agentDescription";
-import { friendlyAgentLastError } from "@/features/agents/lib/friendlyAgentLastError";
+import {
+  classifyAgentLastError,
+  type ClassifiedAgentLastError,
+} from "@/features/agents/lib/friendlyAgentLastError";
+import { useAutoRestartFailure } from "@/features/agents/lib/autoRestartFailureStore";
+import {
+  getAutoRestartFailureScope,
+  retryFailedAutoRestart,
+} from "@/features/agents/lib/useAutoRestartPolicy";
+import { managedAgentsQueryKey } from "@/features/agents/hooks";
+import { requestOpenEditAgent } from "@/features/agents/openEditAgentEvent";
+import { useCommunities } from "@/features/communities/useCommunities";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import type { AgentAvailabilityReader } from "@/features/agents/lib/useAgentAvailability";
 import { isManagedAgentActive } from "@/features/agents/lib/managedAgentControlActions";
 import { pickProfileAgent } from "@/features/agents/lib/pickProfileAgent";
@@ -70,6 +84,62 @@ const AGENT_CARD_COLUMN_CLASS = "w-full";
 export const AGENT_CARD_GRID_COLUMNS_CLASS =
   "grid-cols-1 [@container(min-width:21rem)]:grid-cols-2 [@container(min-width:32rem)]:grid-cols-3 [@container(min-width:43rem)]:grid-cols-4 [@container(min-width:54rem)]:grid-cols-5";
 export const IDENTITY_CARD_GRID_CLASS = `${AGENT_CARD_COLUMN_CLASS} ${AGENT_CARD_GRID_COLUMNS_CLASS} grid gap-3`;
+
+function openAgentErrorRecovery({
+  error,
+  onOpenAgentProfile,
+  onOpenSettings,
+  pubkey,
+}: {
+  error: ClassifiedAgentLastError;
+  onOpenAgentProfile: (
+    pubkey: string,
+    options?: ProfilePanelOpenOptions,
+  ) => void;
+  onOpenSettings: ReturnType<typeof useAppShell>["onOpenSettings"];
+  pubkey: string;
+}) {
+  switch (error.recovery.target) {
+    case "edit-agent":
+      onOpenAgentProfile(pubkey);
+      requestOpenEditAgent(pubkey);
+      return;
+    case "edit-model":
+      onOpenAgentProfile(pubkey);
+      requestOpenEditAgent(pubkey, {
+        type: "normalized_field",
+        field: "model",
+      });
+      return;
+    case "agent-runtimes":
+      if (onOpenSettings) {
+        onOpenSettings("agents");
+      } else {
+        onOpenAgentProfile(pubkey, { tab: "runtime" });
+      }
+      return;
+    case "community-membership":
+      onOpenAgentProfile(pubkey, { tab: "channels" });
+      return;
+    case "runtime-details":
+      onOpenAgentProfile(pubkey, { tab: "runtime" });
+      return;
+  }
+}
+
+function AutoRestartFailureBadge({ reason }: { reason: string }) {
+  return (
+    <Badge
+      className="max-w-full gap-1 normal-case tracking-normal"
+      data-testid="auto-restart-failed-badge"
+      title={reason}
+      variant="destructive"
+    >
+      <AlertTriangle className="h-3 w-3 shrink-0" />
+      Auto-restart failed
+    </Badge>
+  );
+}
 
 export function UnifiedAgentsSection(props: UnifiedAgentsSectionProps) {
   const {
@@ -271,11 +341,20 @@ function AgentPersonaCard({
   onStartAgent: (pubkey: string) => void;
   onStartPersona: (persona: AgentPersona) => void;
 }) {
+  const queryClient = useQueryClient();
+  const { onOpenSettings } = useAppShell();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+  const relayScope = activeCommunity?.relayUrl ?? null;
+  const failureScope = getAutoRestartFailureScope(
+    relayScope,
+    identityQuery.data?.pubkey,
+  );
   const availability = getAvailability(agent?.pubkey);
   const title = persona.displayName;
   // Card face second line: the authored description when one exists;
   // otherwise fall back to the model label as before.
-  const subtitle =
+  const baseSubtitle =
     effectiveAgentDescription(persona) ??
     resolveAgentCardModelLabel({
       agent,
@@ -289,8 +368,39 @@ function AgentPersonaCard({
     ? resolveAgentCardAvatarUrl(profileQuery.data?.avatarUrl, persona.avatarUrl)
     : persona.avatarUrl;
   const friendlyError = agent
-    ? friendlyAgentLastError(agent.lastError, agent.lastErrorCode)?.copy
+    ? classifyAgentLastError(agent.lastError, agent.lastErrorCode)
     : null;
+  const autoRestartFailure = useAutoRestartFailure(failureScope, agent?.pubkey);
+  const autoRestartFailureCopy = autoRestartFailure?.message ?? null;
+  const subtitle = autoRestartFailureCopy ?? baseSubtitle;
+
+  const handleErrorAction = () => {
+    if (!agent) return;
+    if (autoRestartFailure?.manualRetryAvailable && relayScope) {
+      void retryFailedAutoRestart(
+        relayScope,
+        agent.pubkey,
+        identityQuery.data?.pubkey ?? "",
+      ).finally(() => {
+        void queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey });
+      });
+      return;
+    }
+    if (autoRestartFailure) {
+      onOpenAgentProfile(agent.pubkey, { tab: "runtime" });
+      return;
+    }
+    if (friendlyError) {
+      openAgentErrorRecovery({
+        error: friendlyError,
+        onOpenAgentProfile,
+        onOpenSettings,
+        pubkey: agent.pubkey,
+      });
+      return;
+    }
+    onOpenAgentProfile(agent.pubkey, { tab: "runtime" });
+  };
 
   return (
     <AgentIdentityCard
@@ -304,18 +414,31 @@ function AgentPersonaCard({
           <AgentRuntimeAvatarControl
             activeTestId={`agent-runtime-active-${agent.pubkey}`}
             avatarUrl={avatarUrl}
-            errorLabel={friendlyError}
+            errorActionLabel={
+              autoRestartFailure
+                ? autoRestartFailure.manualRetryAvailable
+                  ? `Retry the failed automatic restart for ${title}.`
+                  : `Open runtime details for ${title}. ${autoRestartFailure.message}`
+                : friendlyError
+                  ? `${friendlyError.recovery.label}. ${friendlyError.copy}`
+                  : undefined
+            }
+            errorActionText={
+              autoRestartFailure?.manualRetryAvailable ? "Retry" : undefined
+            }
+            errorActionPendingLabel={`Retrying automatic restart for ${title}.`}
+            errorLabel={autoRestartFailureCopy ?? friendlyError?.copy}
             errorTestId={`agent-runtime-error-${agent.pubkey}`}
             isActive={isActive}
             availability={availability}
+            isErrorActionPending={autoRestartFailure?.retrying}
             isRestarting={restartingAgentPubkey === agent.pubkey}
             isStarting={startingAgentPubkey === agent.pubkey}
             label={title}
             requiresRestart={agent.needsRestart}
+            showErrorAction={Boolean(autoRestartFailure)}
             startTestId={`agent-runtime-start-${agent.pubkey}`}
-            onOpenError={() => {
-              onOpenAgentProfile(agent.pubkey, { tab: "runtime" });
-            }}
+            onOpenError={handleErrorAction}
             onStart={() =>
               agent.needsRestart
                 ? onRestartAgent(agent.pubkey)
@@ -356,7 +479,9 @@ function AgentPersonaCard({
         onOpenPersonaProfile(persona);
       }}
       statusBadge={
-        agent?.personaOrphaned ? (
+        autoRestartFailure ? (
+          <AutoRestartFailureBadge reason={autoRestartFailure.message} />
+        ) : agent?.personaOrphaned ? (
           <Badge className="gap-1" variant="warning">
             <AlertTriangle className="h-3 w-3" />
             Configuration missing
@@ -391,15 +516,52 @@ function StandaloneAgentCard({
   onRestartAgent: (pubkey: string) => void;
   onStartAgent: (pubkey: string) => void;
 }) {
+  const queryClient = useQueryClient();
+  const { onOpenSettings } = useAppShell();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+  const relayScope = activeCommunity?.relayUrl ?? null;
+  const failureScope = getAutoRestartFailureScope(
+    relayScope,
+    identityQuery.data?.pubkey,
+  );
   const availability = getAvailability(agent.pubkey);
   const title = agent.name;
   const profileQuery = useUserProfileQuery(agent.pubkey);
-  const friendlyError = friendlyAgentLastError(
+  const friendlyError = classifyAgentLastError(
     agent.lastError,
     agent.lastErrorCode,
-  )?.copy;
+  );
+  const autoRestartFailure = useAutoRestartFailure(failureScope, agent.pubkey);
+  const autoRestartFailureCopy = autoRestartFailure?.message ?? null;
   const isActive = isManagedAgentActive(agent);
-  const opensRuntimeTab = Boolean(friendlyError && !isActive);
+
+  const handleErrorAction = () => {
+    if (autoRestartFailure?.manualRetryAvailable && relayScope) {
+      void retryFailedAutoRestart(
+        relayScope,
+        agent.pubkey,
+        identityQuery.data?.pubkey ?? "",
+      ).finally(() => {
+        void queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey });
+      });
+      return;
+    }
+    if (autoRestartFailure) {
+      onOpenAgentProfile(agent.pubkey, { tab: "runtime" });
+      return;
+    }
+    if (friendlyError) {
+      openAgentErrorRecovery({
+        error: friendlyError,
+        onOpenAgentProfile,
+        onOpenSettings,
+        pubkey: agent.pubkey,
+      });
+      return;
+    }
+    onOpenAgentProfile(agent.pubkey, { tab: "runtime" });
+  };
 
   return (
     <AgentIdentityCard
@@ -408,18 +570,31 @@ function StandaloneAgentCard({
         <AgentRuntimeAvatarControl
           activeTestId={`agent-runtime-active-${agent.pubkey}`}
           avatarUrl={profileQuery.data?.avatarUrl}
-          errorLabel={friendlyError}
+          errorActionLabel={
+            autoRestartFailure
+              ? autoRestartFailure.manualRetryAvailable
+                ? `Retry the failed automatic restart for ${title}.`
+                : `Open runtime details for ${title}. ${autoRestartFailure.message}`
+              : friendlyError
+                ? `${friendlyError.recovery.label}. ${friendlyError.copy}`
+                : undefined
+          }
+          errorActionText={
+            autoRestartFailure?.manualRetryAvailable ? "Retry" : undefined
+          }
+          errorActionPendingLabel={`Retrying automatic restart for ${title}.`}
+          errorLabel={autoRestartFailureCopy ?? friendlyError?.copy}
           errorTestId={`agent-runtime-error-${agent.pubkey}`}
           isActive={isActive}
           availability={availability}
+          isErrorActionPending={autoRestartFailure?.retrying}
           isRestarting={restartingAgentPubkey === agent.pubkey}
           isStarting={startingAgentPubkey === agent.pubkey}
           label={title}
           requiresRestart={agent.needsRestart}
+          showErrorAction={Boolean(autoRestartFailure)}
           startTestId={`agent-runtime-start-${agent.pubkey}`}
-          onOpenError={() => {
-            onOpenAgentProfile(agent.pubkey, { tab: "runtime" });
-          }}
+          onOpenError={handleErrorAction}
           onStart={() =>
             agent.needsRestart
               ? onRestartAgent(agent.pubkey)
@@ -434,6 +609,7 @@ function StandaloneAgentCard({
       }
       label={title}
       subtitle={
+        autoRestartFailureCopy ??
         // Definition-less instance: no authored description exists, so fall
         // back to the model label.
         resolveAgentCardModelLabel({
@@ -444,13 +620,12 @@ function StandaloneAgentCard({
         })
       }
       onClick={() => {
-        onOpenAgentProfile(
-          agent.pubkey,
-          opensRuntimeTab ? { tab: "runtime" } : undefined,
-        );
+        onOpenAgentProfile(agent.pubkey);
       }}
       statusBadge={
-        agent.personaOrphaned ? (
+        autoRestartFailure ? (
+          <AutoRestartFailureBadge reason={autoRestartFailure.message} />
+        ) : agent.personaOrphaned ? (
           <Badge className="gap-1" variant="warning">
             <AlertTriangle className="h-3 w-3" />
             Configuration missing

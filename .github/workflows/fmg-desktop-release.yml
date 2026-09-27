@@ -156,7 +156,18 @@ jobs:
           cat > desktop/src-tauri/tauri.fmg.conf.json <<'JSON'
           {
             "bundle": {
-              "createUpdaterArtifacts": false
+              "createUpdaterArtifacts": false,
+              "externalBin": [
+                "binaries/buzz-acp",
+                "binaries/buzz-agent",
+                "binaries/buzz-dev-mcp",
+                "binaries/git-credential-nostr",
+                "binaries/buzz",
+                "binaries/git"
+              ],
+              "resources": [
+                "resources/fmg-managed-git/"
+              ]
             }
           }
           JSON
@@ -166,6 +177,7 @@ jobs:
         run: |
           cargo build --release --target "$TARGET" -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
           ./scripts/bundle-sidecars.sh "$TARGET"
+          pwsh -NoProfile -File scripts/stage-windows-managed-git.ps1 -Target "$TARGET"
 
       - name: Build Windows NSIS installer
         shell: bash
@@ -176,7 +188,7 @@ jobs:
           cd desktop
           pnpm tauri build --target "$TARGET" --bundles nsis --config src-tauri/tauri.fmg.conf.json
 
-      - name: Stage installer and release receipt
+      - name: Stage installer
         id: artifact
         shell: bash
         env:
@@ -199,13 +211,95 @@ jobs:
           OUTPUT="dist/FMG-Buzz_${VERSION}_x64-setup.exe"
           cp "$EXE" "$OUTPUT"
           INSTALLER_SHA256=$(node --input-type=module -e "import {createHash} from 'node:crypto'; import {readFileSync} from 'node:fs'; process.stdout.write(createHash('sha256').update(readFileSync(process.argv[1])).digest('hex'))" "$OUTPUT")
-          node --input-type=module - "$OUTPUT" "$INSTALLER_SHA256" <<'NODE'
+          echo "installer=$OUTPUT" >> "$GITHUB_OUTPUT"
+          echo "installer_sha256=$INSTALLER_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Verify installed managed Git payload
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.artifact.outputs.installer }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = (Resolve-Path -LiteralPath $env:INSTALLER).Path
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+          $installRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP "fmg-buzz-installer-verify"))
+          if (-not $installRoot.StartsWith($runnerTemp, [StringComparison]::OrdinalIgnoreCase) -or
+              [IO.Path]::GetFileName($installRoot) -ne "fmg-buzz-installer-verify") {
+            throw "Refusing to use unexpected installer verification path: $installRoot"
+          }
+
+          try {
+            if (Test-Path -LiteralPath $installRoot) {
+              Remove-Item -LiteralPath $installRoot -Recurse -Force
+            }
+            $install = Start-Process `
+              -FilePath $installer `
+              -ArgumentList @("/S", "/D=$installRoot") `
+              -Wait `
+              -PassThru `
+              -WindowStyle Hidden
+            if ($install.ExitCode -ne 0) {
+              throw "Silent candidate install failed with exit code $($install.ExitCode)"
+            }
+
+            $appExe = Join-Path $installRoot "buzz-desktop.exe"
+            $launcher = Join-Path $installRoot "git.exe"
+            $credentialHelper = Join-Path $installRoot "git-credential-nostr.exe"
+            $managedGit = Join-Path $installRoot "resources/fmg-managed-git/cmd/git.exe"
+            $requiredFiles = @(
+              $appExe,
+              $launcher,
+              $credentialHelper,
+              $managedGit,
+              (Join-Path $installRoot "resources/fmg-managed-git/LICENSE.txt"),
+              (Join-Path $installRoot "resources/fmg-managed-git/etc/package-versions.txt"),
+              (Join-Path $installRoot "resources/fmg-managed-git/FMG-MINGIT-SOURCE.txt")
+            )
+            foreach ($requiredFile in $requiredFiles) {
+              if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+                throw "Candidate installer is missing required payload: $requiredFile"
+              }
+            }
+
+            $productVersion = (Get-Item -LiteralPath $appExe).VersionInfo.ProductVersion
+            if ($productVersion -ne $env:VERSION) {
+              throw "Installed app ProductVersion $productVersion does not match $env:VERSION"
+            }
+            $managedGitManifest = Get-Content -LiteralPath "scripts/windows-managed-git.json" -Raw | ConvertFrom-Json
+            if ($managedGitManifest.tag -notmatch '^v(.+)$') {
+              throw "Managed Git manifest has an invalid release tag"
+            }
+            $expectedGitVersion = "git version $($Matches[1])"
+            $managedGitVersion = (& $managedGit --version | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $managedGitVersion -ne $expectedGitVersion) {
+              throw "Installed managed Git reported '$managedGitVersion', expected '$expectedGitVersion'"
+            }
+            $launcherVersion = (& $launcher --version | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $launcherVersion -ne $expectedGitVersion) {
+              throw "Installed Git launcher reported '$launcherVersion', expected '$expectedGitVersion'"
+            }
+          } finally {
+            if (Test-Path -LiteralPath $installRoot) {
+              Remove-Item -LiteralPath $installRoot -Recurse -Force
+            }
+          }
+
+      - name: Write release receipt
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.artifact.outputs.installer }}
+          INSTALLER_SHA256: ${{ steps.artifact.outputs.installer_sha256 }}
+        run: |
+          node --input-type=module - "$INSTALLER" "$INSTALLER_SHA256" <<'NODE'
           import { readFileSync, writeFileSync } from "node:fs";
           const config = JSON.parse(readFileSync(".release/fmg-live.json", "utf8"));
+          const managedGit = JSON.parse(readFileSync("scripts/windows-managed-git.json", "utf8"));
           const [installer, installerSha256] = process.argv.slice(2);
           writeFileSync("dist/fmg-release-receipt.json", `${JSON.stringify({
             schema: 1,
             ...config,
+            managed_git: managedGit,
             source: {
               repository: process.env.GITHUB_REPOSITORY,
               commit: process.env.GITHUB_SHA,
@@ -214,11 +308,16 @@ jobs:
             installer: {
               file: installer.split("/").at(-1),
               sha256: installerSha256,
+              verification: {
+                method: "nsis-silent-install",
+                app: "buzz-desktop.exe",
+                managed_git_launcher: "git.exe",
+                credential_helper: "git-credential-nostr.exe",
+                managed_git_version: managedGit.version,
+              },
             },
           }, null, 2)}\n`);
           NODE
-          echo "installer=$OUTPUT" >> "$GITHUB_OUTPUT"
-          echo "installer_sha256=$INSTALLER_SHA256" >> "$GITHUB_OUTPUT"
 
       - name: Upload FMG release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -228,6 +327,7 @@ jobs:
             ${{ steps.artifact.outputs.installer }}
             dist/fmg-release-receipt.json
             .release/fmg-live.json
+            scripts/windows-managed-git.json
             FMG_CHANGELOG.md
           include-hidden-files: true
           if-no-files-found: error
@@ -377,8 +477,9 @@ jobs:
           INSTALLER="candidate/dist/FMG-Buzz_${VERSION}_x64-setup.exe"
           RECEIPT="candidate/dist/fmg-release-receipt.json"
           MANIFEST="candidate/.release/fmg-live.json"
+          MANAGED_GIT_MANIFEST="candidate/scripts/windows-managed-git.json"
           CHANGELOG="candidate/FMG_CHANGELOG.md"
-          for FILE in "$INSTALLER" "$RECEIPT" "$MANIFEST" "$CHANGELOG"; do
+          for FILE in "$INSTALLER" "$RECEIPT" "$MANIFEST" "$MANAGED_GIT_MANIFEST" "$CHANGELOG"; do
             if [[ ! -f "$FILE" ]]; then
               echo "::error::Candidate artifact is missing $FILE"
               exit 1
@@ -392,6 +493,10 @@ jobs:
           fi
           if ! cmp -s "$MANIFEST" .release/fmg-live.json; then
             echo "::error::Candidate release manifest differs from current main"
+            exit 1
+          fi
+          if ! cmp -s "$MANAGED_GIT_MANIFEST" scripts/windows-managed-git.json; then
+            echo "::error::Candidate managed Git manifest differs from current main"
             exit 1
           fi
           if ! cmp -s "$CHANGELOG" FMG_CHANGELOG.md; then
@@ -411,6 +516,14 @@ jobs:
              .source.commit == $sha and .source.workflow_run == $run and
              .desktop.version == $version and .installer.file == $file and
              (.installer.sha256 | ascii_downcase) == $hash' \
+            "$RECEIPT" >/dev/null
+          jq -e --slurpfile managed_git "$MANAGED_GIT_MANIFEST" \
+            '.managed_git == $managed_git[0] and
+             .installer.verification.method == "nsis-silent-install" and
+             .installer.verification.app == "buzz-desktop.exe" and
+             .installer.verification.managed_git_launcher == "git.exe" and
+             .installer.verification.credential_helper == "git-credential-nostr.exe" and
+             .installer.verification.managed_git_version == $managed_git[0].version' \
             "$RECEIPT" >/dev/null
 
           if git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>&1; then

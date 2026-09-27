@@ -13,41 +13,82 @@
  *                  the log tail (`managed_agents/storage.rs`) into
  *                  `ManagedAgent.lastError` / `lastErrorCode`.
  *
- * This function dispatches on the numeric code first (works for any harness),
- * then recovers a code embedded in the message string (handles records where
- * the `lastErrorCode` field was lost, e.g. downgrade or pre-code records with
- * new-format strings), then falls back to legacy string prefixes for records
- * written before structured codes existed.
+ * This function first preserves explicit community/relay source language,
+ * then dispatches on a structured numeric code. It can recover that code from
+ * the message when `lastErrorCode` was lost, and finally falls back to legacy
+ * string prefixes for records written before structured codes existed.
  *
- * Returns:
- *  - null when there's nothing to show (null/empty lastError).
- *  - A `{ severity: "denied"; copy: string }` object for the auth-failure
- *    and model-not-found cases, so the UI can render with the right visual
- *    weight (destructive).
- *  - A `{ severity: "generic"; copy: string }` pass-through for any other
- *    lastError, so generic harness exits still surface their text instead of
- *    being swallowed.
+ * `friendlyAgentLastError` keeps the established display-only return shape.
+ * Interactive renderers use `classifyAgentLastError`, which adds a typed
+ * category and recovery route without making them inspect copy or codes.
  */
-export type FriendlyAgentLastError =
-  | { severity: "denied"; copy: string }
-  | { severity: "generic"; copy: string };
+export type AgentErrorCategory =
+  | "community-access"
+  | "provider-auth"
+  | "model"
+  | "runtime-setup"
+  | "generic";
+
+export type AgentRecoveryTarget =
+  | "community-membership"
+  | "edit-agent"
+  | "edit-model"
+  | "agent-runtimes"
+  | "runtime-details";
+
+export type FriendlyAgentLastError = {
+  severity: "denied" | "generic";
+  copy: string;
+};
+
+export type ClassifiedAgentLastError = FriendlyAgentLastError & {
+  category: AgentErrorCategory;
+  recovery: {
+    target: AgentRecoveryTarget;
+    label: string;
+  };
+};
 
 /**
- * The exact copy for the relay-mesh denial. Centralized as a constant so the
- * test asserts the user-facing string verbatim rather than a fuzzy pattern.
+ * Exact copy for a denial that explicitly identifies community access or
+ * membership as its source.
  */
-export const RELAY_MESH_DENIED_COPY =
+export const COMMUNITY_ACCESS_DENIED_COPY =
   "Community access denied this agent — check its community membership.";
+
+export const PROVIDER_AUTH_DENIED_COPY =
+  "The model provider rejected this agent's credentials — update its provider or API key.";
+
+/**
+ * Backward-compatible export name. The old implementation used this constant
+ * for `-32001`, which is a provider-auth code, so its value now reflects that
+ * source rather than claiming the community denied access.
+ */
+export const RELAY_MESH_DENIED_COPY = PROVIDER_AUTH_DENIED_COPY;
 
 export const MODEL_NOT_FOUND_COPY =
   "The configured model is not available — open agent settings and select a different one from the dropdown.";
 
 export const CLI_ACP_INTERNAL_ERROR_COPY =
-  "The agent's harness reported an internal error. For Codex agents this can mean the configured model isn't supported by your installed codex-acp — check the model in `~/.codex/config.toml` or upgrade the adapter (`brew upgrade codex-acp`).";
+  "The agent adapter reported an internal error. Open Agent runtimes to update or reinstall the adapter, then check the selected model.";
 
 const EMBEDDED_CODE_RE = /^Agent reported error \(code (-?\d+)\): /;
 /** Bare form of the standard JSON-RPC -32603 message (after stripping the ACP wrapper prefix). */
 const BARE_INTERNAL_ERROR = "Internal error";
+const COMMUNITY_ACCESS_RE =
+  /(?:community access denied|community membership|relay membership|not a channel member|channel .*access denied|restricted:\s*not a channel member)/i;
+const RUNTIME_SETUP_RE =
+  /(?:failed to spawn|not found in path|command not found|is not recognized as an internal or external command|no such file or directory|cannot find the (?:file|path) specified|os error 2|adapter (?:is )?(?:missing|outdated|not installed)|runtime (?:is )?not installed|cli (?:is )?not installed|executable .*not found)/i;
+
+function classified(
+  category: AgentErrorCategory,
+  severity: ClassifiedAgentLastError["severity"],
+  copy: string,
+  target: AgentRecoveryTarget,
+  label: string,
+): ClassifiedAgentLastError {
+  return { category, severity, copy, recovery: { target, label } };
+}
 
 function recoverEmbeddedCode(trimmed: string): {
   code: number;
@@ -61,10 +102,10 @@ function recoverEmbeddedCode(trimmed: string): {
   };
 }
 
-export function friendlyAgentLastError(
+export function classifyAgentLastError(
   raw: string | null,
   code?: number | null,
-): FriendlyAgentLastError | null {
+): ClassifiedAgentLastError | null {
   if (raw == null) return null;
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
@@ -72,15 +113,43 @@ export function friendlyAgentLastError(
   // Structured code first; a code embedded in the message string is the
   // same signal recovered from a record that lost the field.
   const embedded = recoverEmbeddedCode(trimmed);
+  const unwrapped = embedded?.remainder ?? trimmed;
+
+  // Relay/community denials carry explicit source language. Check that before
+  // the JSON-RPC number because -32001 is the native buzz-agent LLM-provider
+  // auth code and must not turn every provider credential failure into a
+  // community membership diagnosis.
+  if (COMMUNITY_ACCESS_RE.test(unwrapped)) {
+    return classified(
+      "community-access",
+      "denied",
+      COMMUNITY_ACCESS_DENIED_COPY,
+      "community-membership",
+      "Review channels",
+    );
+  }
+
   const effectiveCode = Number.isFinite(code)
     ? (code as number)
     : (embedded?.code ?? null);
   if (effectiveCode != null) {
     switch (effectiveCode) {
       case -32001:
-        return { severity: "denied", copy: RELAY_MESH_DENIED_COPY };
+        return classified(
+          "provider-auth",
+          "denied",
+          PROVIDER_AUTH_DENIED_COPY,
+          "edit-agent",
+          "Review agent settings",
+        );
       case -32002:
-        return { severity: "denied", copy: MODEL_NOT_FOUND_COPY };
+        return classified(
+          "model",
+          "denied",
+          MODEL_NOT_FOUND_COPY,
+          "edit-model",
+          "Change model",
+        );
       case -32603: {
         // Standard JSON-RPC "Internal error" — emitted by external harnesses
         // (e.g. codex-acp) when the configured model is unsupported. Only
@@ -94,14 +163,32 @@ export function friendlyAgentLastError(
         // ("Agent reported error (code -32603): Internal error").
         const remainder = embedded?.remainder ?? trimmed;
         if (remainder === BARE_INTERNAL_ERROR) {
-          return { severity: "generic", copy: CLI_ACP_INTERNAL_ERROR_COPY };
+          return classified(
+            "runtime-setup",
+            "generic",
+            CLI_ACP_INTERNAL_ERROR_COPY,
+            "agent-runtimes",
+            "Open Agent runtimes",
+          );
         }
-        return { severity: "generic", copy: remainder };
+        return classified(
+          "generic",
+          "generic",
+          remainder,
+          "runtime-details",
+          "View logs and restart",
+        );
       }
     }
     // A structured code we don't recognize is authoritative — don't let
     // string patterns cross-classify it.
-    return { severity: "generic", copy: trimmed };
+    return classified(
+      "generic",
+      "generic",
+      trimmed,
+      "runtime-details",
+      "View logs and restart",
+    );
   }
 
   // Legacy string fallback for records written before codes existed.
@@ -110,10 +197,40 @@ export function friendlyAgentLastError(
     trimmed.startsWith("Agent reported error: llm auth:") ||
     trimmed.startsWith("llm auth:")
   ) {
-    return { severity: "denied", copy: RELAY_MESH_DENIED_COPY };
+    return classified(
+      "provider-auth",
+      "denied",
+      PROVIDER_AUTH_DENIED_COPY,
+      "edit-agent",
+      "Review agent settings",
+    );
   }
 
-  return { severity: "generic", copy: trimmed };
+  if (RUNTIME_SETUP_RE.test(trimmed)) {
+    return classified(
+      "runtime-setup",
+      "generic",
+      trimmed,
+      "agent-runtimes",
+      "Open Agent runtimes",
+    );
+  }
+
+  return classified(
+    "generic",
+    "generic",
+    trimmed,
+    "runtime-details",
+    "View logs and restart",
+  );
+}
+
+export function friendlyAgentLastError(
+  raw: string | null,
+  code?: number | null,
+): FriendlyAgentLastError | null {
+  const result = classifyAgentLastError(raw, code);
+  return result ? { severity: result.severity, copy: result.copy } : null;
 }
 
 /**

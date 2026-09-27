@@ -76,6 +76,29 @@ export type ActiveChannelTurnSummary = {
 // Module-level state: agentPubkey → turnId → ActiveTurn
 const activeTurnsByAgent = new Map<string, Map<string, ActiveTurn>>();
 const listeners = new Set<() => void>();
+let activeTurnsSignerPubkey: string | null = null;
+
+/** Bind the live module store to the signer whose community tree is active. */
+export function setActiveAgentTurnsSignerPubkey(
+  signerPubkey: string | null | undefined,
+): void {
+  activeTurnsSignerPubkey = signerPubkey
+    ? normalizePubkey(signerPubkey) || null
+    : null;
+}
+
+export function activeAgentTurnsSignerMatches(
+  expectedSignerPubkey: string | null | undefined,
+): boolean {
+  const expected = expectedSignerPubkey
+    ? normalizePubkey(expectedSignerPubkey)
+    : "";
+  return Boolean(
+    expected &&
+      activeTurnsSignerPubkey &&
+      expected === activeTurnsSignerPubkey,
+  );
+}
 
 // Per-agent clock offset: the desktop clock minus the agent-host clock, in
 // milliseconds. Estimated as the running minimum of
@@ -725,8 +748,12 @@ type TurnsStoreSnapshot = {
   terminals: Map<string, Map<string, number>>;
 };
 
-/** Per-community snapshots. Keyed by community ID. */
+/** Per-community-and-signer snapshots. */
 const savedByCommunity = new Map<string, TurnsStoreSnapshot>();
+
+function communitySnapshotKey(communityId: string, signerPubkey?: string | null) {
+  return `${communityId}\u0000${normalizePubkey(signerPubkey ?? "")}`;
+}
 
 /**
  * Snapshot the current active-turns state under `communityId` so it can be
@@ -737,9 +764,13 @@ const savedByCommunity = new Map<string, TurnsStoreSnapshot>();
  * Deep-clones all four maps so subsequent mutations on the live maps do not
  * corrupt the snapshot.
  */
-export function saveActiveAgentTurnsForCommunity(communityId: string): void {
+export function saveActiveAgentTurnsForCommunity(
+  communityId: string,
+  signerPubkey?: string | null,
+): void {
+  const snapshotKey = communitySnapshotKey(communityId, signerPubkey);
   if (activeTurnsByAgent.size === 0 && terminalAtByAgent.size === 0) {
-    savedByCommunity.delete(communityId);
+    savedByCommunity.delete(snapshotKey);
     return;
   }
 
@@ -770,7 +801,12 @@ export function saveActiveAgentTurnsForCommunity(communityId: string): void {
     terminals.set(agentKey, new Map(tombstones));
   }
 
-  savedByCommunity.set(communityId, { turns, offsets, watermarks, terminals });
+  savedByCommunity.set(snapshotKey, {
+    turns,
+    offsets,
+    watermarks,
+    terminals,
+  });
 }
 
 /**
@@ -791,10 +827,14 @@ export function saveActiveAgentTurnsForCommunity(communityId: string): void {
  * Consumes the snapshot (deletes it from `savedByCommunity`) — a given
  * community's snapshot is only usable once per round-trip.
  */
-export function restoreActiveAgentTurnsForCommunity(communityId: string): void {
-  const snap = savedByCommunity.get(communityId);
+export function restoreActiveAgentTurnsForCommunity(
+  communityId: string,
+  signerPubkey?: string | null,
+): void {
+  const snapshotKey = communitySnapshotKey(communityId, signerPubkey);
+  const snap = savedByCommunity.get(snapshotKey);
   if (!snap) return;
-  savedByCommunity.delete(communityId);
+  savedByCommunity.delete(snapshotKey);
 
   // Clear before writing so this is a replace, not a merge.
   activeTurnsByAgent.clear();
@@ -835,5 +875,8 @@ export function restoreActiveAgentTurnsForCommunity(communityId: string): void {
  * Call this alongside the other relay-specific GC in `removeCommunity`.
  */
 export function clearSavedCommunitySnapshot(communityId: string): void {
-  savedByCommunity.delete(communityId);
+  const prefix = `${communityId}\u0000`;
+  for (const key of savedByCommunity.keys()) {
+    if (key.startsWith(prefix)) savedByCommunity.delete(key);
+  }
 }

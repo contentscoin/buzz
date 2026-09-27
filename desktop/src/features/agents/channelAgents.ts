@@ -32,7 +32,14 @@ type ChannelAgentRuntime = Pick<
   "id" | "label" | "command" | "defaultArgs" | "mcpCommand"
 >;
 
-export type AttachManagedAgentToChannelInput = {
+export type ManagedAgentStartScopeInput = {
+  /** Active-community relay captured before the operation's first await. */
+  expectedRelayUrl?: string;
+  /** Active signing identity captured with `expectedRelayUrl`. */
+  expectedSignerPubkey?: string;
+};
+
+export type AttachManagedAgentToChannelInput = ManagedAgentStartScopeInput & {
   agent: ManagedAgent;
   role?: Exclude<ChannelRole, "owner">;
   ensureRunning?: boolean;
@@ -54,7 +61,7 @@ export type AttachManagedAgentToChannelResult = {
   started: boolean;
 };
 
-export type EnsureChannelAgentPresetInput = {
+export type EnsureChannelAgentPresetInput = ManagedAgentStartScopeInput & {
   runtime: ChannelAgentRuntime;
   role?: Exclude<ChannelRole, "owner">;
   ensureRunning?: boolean;
@@ -66,7 +73,7 @@ export type EnsureChannelAgentPresetResult =
     runtimeId: string;
   };
 
-export type CreateChannelManagedAgentInput = {
+export type CreateChannelManagedAgentInput = ManagedAgentStartScopeInput & {
   runtime: ChannelAgentRuntime;
   name: string;
   systemPrompt?: string;
@@ -175,10 +182,28 @@ export async function attachManagedAgentToChannel(
   const role = input.role ?? "bot";
   const ensureRunning = input.ensureRunning ?? true;
   const agentPubkey = normalizePubkey(input.agent.pubkey);
+  const isRemote = input.agent.backend.type === "provider";
+  const needsStart = isRemote
+    ? input.agent.status !== "deployed"
+    : input.agent.status !== "running" && input.agent.status !== "deployed";
+  const expectedRelayUrl = input.expectedRelayUrl?.trim()
+    ? input.expectedRelayUrl
+    : undefined;
+  const expectedSignerPubkey =
+    normalizePubkey(input.expectedSignerPubkey ?? "") || undefined;
+
+  if (!expectedRelayUrl || !expectedSignerPubkey) {
+    throw new Error(
+      "Buzz is still connecting to this community. Try adding the agent again in a moment.",
+    );
+  }
+
   const membershipResult = await addChannelMembers({
     channelId,
     pubkeys: [input.agent.pubkey],
     role,
+    expectedRelayUrl,
+    expectedSignerPubkey,
   });
   const membershipError = membershipResult.errors.find(
     (error) => normalizePubkey(error.pubkey) === agentPubkey,
@@ -198,19 +223,18 @@ export async function attachManagedAgentToChannel(
     // via the harness's membership notifications — no restart needed. Only
     // not-yet-running agents need a start/deploy call before the first mention
     // can reach them. For a local agent the status check and the start are both
-    // pair-scoped to the active community: `agent.status` reflects that
-    // community's (agent, relay) pair, and `startManagedAgent` spawns that same
-    // pair — so this ensures the pair the caller is attaching to, never
-    // another community's.
-    const isRemote = input.agent.backend.type === "provider";
-    const needsStart = isRemote
-      ? input.agent.status !== "deployed"
-      : input.agent.status !== "running" && input.agent.status !== "deployed";
+    // pair-scoped to the community captured before the membership write.
+    // `startManagedAgent` asserts that relay and signer after the await, so a
+    // community or identity switch refuses the start instead of targeting the
+    // newly active tenant.
     if (needsStart) {
       if (input.detachedStart) {
         input.detachedStart(input.agent);
       } else {
-        agent = await startManagedAgent(input.agent.pubkey);
+        agent = await startManagedAgent(input.agent.pubkey, {
+          expectedRelayUrl,
+          expectedSignerPubkey,
+        });
         started = true;
       }
     }
@@ -285,6 +309,8 @@ export async function ensureChannelAgentPresetInChannel(
       agent: existingAgent,
       role,
       ensureRunning,
+      expectedRelayUrl: input.expectedRelayUrl,
+      expectedSignerPubkey: input.expectedSignerPubkey,
     });
     return {
       ...attached,
@@ -295,6 +321,9 @@ export async function ensureChannelAgentPresetInChannel(
 
   const created = await createManagedAgent({
     name: expectedName,
+    relayUrl: input.expectedRelayUrl,
+    expectedRelayUrl: input.expectedRelayUrl,
+    expectedSignerPubkey: input.expectedSignerPubkey,
     acpCommand: "buzz-acp",
     agentCommand: input.runtime.command,
     // Do NOT seed agentArgs from runtime.defaultArgs (see instanceInputForDefinition.ts
@@ -307,6 +336,8 @@ export async function ensureChannelAgentPresetInChannel(
     agent: created.agent,
     role,
     ensureRunning,
+    expectedRelayUrl: input.expectedRelayUrl,
+    expectedSignerPubkey: input.expectedSignerPubkey,
   });
 
   return {
@@ -396,6 +427,9 @@ export async function provisionChannelManagedAgent(
 
   const created = await createManagedAgent({
     name: trimmedName,
+    relayUrl: input.expectedRelayUrl,
+    expectedRelayUrl: input.expectedRelayUrl,
+    expectedSignerPubkey: input.expectedSignerPubkey,
     acpCommand: "buzz-acp",
     agentCommand: input.runtime.command,
     harnessOverride: input.harnessOverride ?? false,
@@ -438,6 +472,8 @@ export async function createChannelManagedAgent(
     role: input.role ?? "bot",
     ensureRunning: input.ensureRunning ?? true,
     detachedStart: input.detachedStart,
+    expectedRelayUrl: input.expectedRelayUrl,
+    expectedSignerPubkey: input.expectedSignerPubkey,
   });
 
   return {

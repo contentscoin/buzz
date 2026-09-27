@@ -7,6 +7,7 @@ import {
   upsertCachedChannel,
 } from "@/features/channels/hooks";
 import { useApplyTemplate } from "@/features/channel-templates/useApplyTemplate";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { type Project, projectsQueryKey } from "@/features/projects/hooks";
 import {
   createProject,
@@ -21,13 +22,17 @@ import {
 } from "@/features/projects/lib/projectHomeTemplate";
 import { markProjectDataAuthoritative } from "@/features/projects/projectSnapshot";
 import type { Channel } from "@/shared/api/types";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import { getCachedRelayOrigin } from "@/shared/lib/mediaUrl";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 
 export type { CreateProjectInput, CreateProjectResult };
 
 /** Mutation that creates a project home and inserts it into the caches. */
 export function useCreateProjectMutation() {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const { applyAgents, applyCanvas } = useApplyTemplate();
   const resumeRef = React.useRef<CreateProjectResumeState>({
     channels: new Map(),
@@ -35,9 +40,38 @@ export function useCreateProjectMutation() {
   });
 
   return useMutation({
-    mutationFn: (input: CreateProjectInput) =>
-      createProject(input, resumeRef.current),
-    onSuccess: async ({ channel, project }, input) => {
+    mutationFn: async (input: CreateProjectInput) => {
+      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+      const expectedSignerPubkey =
+        normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+      if (
+        input.agents?.length &&
+        (!expectedRelayUrl || !expectedSignerPubkey)
+      ) {
+        throw new Error(
+          "Buzz is still connecting to this community. Try creating the project again in a moment.",
+        );
+      }
+      const result = await createProject(
+        {
+          ...input,
+          agents: input.agents?.map((agent) => ({
+            ...agent,
+            expectedRelayUrl: agent.expectedRelayUrl ?? expectedRelayUrl,
+            expectedSignerPubkey:
+              agent.expectedSignerPubkey ?? expectedSignerPubkey,
+          })),
+        },
+        resumeRef.current,
+      );
+      return {
+        ...result,
+        commandScope: { expectedRelayUrl, expectedSignerPubkey },
+      };
+    },
+    onSuccess: async ({ channel, project, commandScope }, input) => {
       markProjectDataAuthoritative(project, "local-write");
       addProjectToSidebar(
         project.projectAddress,
@@ -82,7 +116,7 @@ export function useCreateProjectMutation() {
         } else if (input.templateId) {
           await Promise.all([
             applyCanvas(input.templateId, channel.id, channel.name),
-            applyAgents(input.templateId, channel.id),
+            applyAgents(input.templateId, channel.id, commandScope),
           ]);
         }
       }

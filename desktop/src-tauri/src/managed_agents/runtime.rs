@@ -69,7 +69,10 @@ use setup_payload::apply_setup_payload_env;
 
 mod stop;
 pub(crate) use stop::managed_agent_runtime_keys;
-pub use stop::{stop_managed_agent_process, stop_managed_agent_workspace_pair};
+pub use stop::{
+    stop_managed_agent_bound_workspace_pair, stop_managed_agent_process,
+    stop_managed_agent_workspace_pair,
+};
 
 mod sweep;
 pub(crate) use sweep::sweep_untracked_bundle_harnesses;

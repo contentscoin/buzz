@@ -6,6 +6,7 @@ import {
   useCreateChannelMutation,
 } from "@/features/channels/hooks";
 import { useApplyTemplate } from "@/features/channel-templates/useApplyTemplate";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { type Project, projectsQueryKey } from "@/features/projects/hooks";
 import { isUnsupportedProjectKindError } from "@/features/projects/projectCreation";
 import { buildProjectRelatedChannelPatchTemplate } from "@/features/projects/projectChannelCreation";
@@ -14,9 +15,11 @@ import { publishOwnedAgentProjectAnnouncements } from "@/features/projects/proje
 import { markProjectDataAuthoritative } from "@/features/projects/projectSnapshot";
 import { publishProjectOwnerAnnouncement } from "@/shared/api/projectGit";
 import { relayClient } from "@/shared/api/relayClient";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import { deleteChannel as deleteChannelApi } from "@/shared/api/tauriChannels";
 import type { Channel, ChannelVisibility } from "@/shared/api/types";
 import { KIND_PROJECT_ANNOUNCEMENT } from "@/shared/constants/kinds";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 
 export type AddProjectChannelInput = {
   description?: string;
@@ -173,16 +176,27 @@ export async function addProjectChannel(
 
 export function useAddProjectChannelMutation() {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const createChannelMutation = useCreateChannelMutation();
   const { applyAgents, applyCanvas } = useApplyTemplate();
 
   return useMutation({
-    mutationFn: (input: AddProjectChannelInput) =>
-      addProjectChannel(input, {
-        applyAgents,
+    mutationFn: (input: AddProjectChannelInput) => {
+      const commandScope = {
+        expectedRelayUrl: activeCommunity?.relayUrl?.trim()
+          ? activeCommunity.relayUrl
+          : undefined,
+        expectedSignerPubkey:
+          normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined,
+      };
+      return addProjectChannel(input, {
+        applyAgents: (templateId, channelId) =>
+          applyAgents(templateId, channelId, commandScope),
         applyCanvas,
         createChannel: createChannelMutation.mutateAsync,
-      }),
+      });
+    },
     onSuccess: ({ channel, project }) => {
       markProjectDataAuthoritative(project, "local-write");
       queryClient.setQueryData<Project[]>(projectsQueryKey, (current = []) =>

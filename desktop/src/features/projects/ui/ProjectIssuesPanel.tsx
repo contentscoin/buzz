@@ -4,6 +4,8 @@ import {
   CircleDashed,
   CircleDot,
   CircleX,
+  Columns3,
+  List,
   MessageSquare,
   Tag,
   type LucideIcon,
@@ -34,11 +36,13 @@ import {
 } from "@/features/projects/projectTaskCategories";
 import { useIdentityQuery } from "@/shared/api/hooks";
 import type { ChannelMember } from "@/shared/api/types";
-import { BuzzLoadingState } from "@/shared/ui/BuzzLoadingState";
 import { normalizePubkey } from "@/shared/lib/pubkey";
+import { BuzzLoadingState } from "@/shared/ui/BuzzLoadingState";
+import { SegmentedControl } from "@/shared/ui/segmented-control";
 import { IssueAssigneeFacepile, IssueAssigneesRow } from "./IssueAssigneesRow";
 import { DiscussedInChannels } from "./DiscussionChannels";
 import { ProjectIssueCommentTimeline } from "./ProjectIssueCommentTimeline";
+import { ProjectIssueKanbanBoard } from "./ProjectIssueKanbanBoard";
 import { ProjectOriginReference } from "./ProjectOriginReference";
 import {
   ProjectDetailMetaList,
@@ -115,6 +119,11 @@ const ISSUE_STATUS_ORDER: readonly ProjectIssue["status"][] = [
   "Done",
   "Closed",
 ];
+
+const ISSUE_VIEW_OPTIONS = [
+  { value: "list", label: "List", Icon: List },
+  { value: "board", label: "Board", Icon: Columns3 },
+] as const;
 
 export type ProjectIssuePanelItem = {
   issue: ProjectIssue;
@@ -436,6 +445,7 @@ export function ProjectIssuesPanel({
   project: Project;
   selectedIssueId: string | null;
 }) {
+  const [viewMode, setViewMode] = React.useState<"list" | "board">("list");
   const issuesQuery = useProjectIssuesQuery(
     issueItems === undefined ? project : null,
   );
@@ -476,16 +486,61 @@ export function ProjectIssuesPanel({
     );
   }
 
-  const groups = ISSUE_STATUS_ORDER.map((status) => ({
+  const allGroups = ISSUE_STATUS_ORDER.map((status) => ({
     items: resolvedItems.filter(({ issue }) => issue.status === status),
     status,
-  })).filter((group) => group.items.length > 0);
+  }));
+  const groups = allGroups.filter((group) => group.items.length > 0);
   const rangeItems = resolvedItems.map(({ issue, project: itemProject }) =>
     issueSelectionItem(itemProject, issue),
   );
 
+  const viewControl = (
+    <div className="flex justify-end border-b border-border/50 px-3 py-2">
+      <SegmentedControl
+        className="w-40"
+        legend="Task layout"
+        onValueChange={setViewMode}
+        optionTestIdPrefix="project-task-view"
+        options={ISSUE_VIEW_OPTIONS}
+        size="compact"
+        testId="project-task-view-control"
+        value={viewMode}
+      />
+    </div>
+  );
+
+  if (viewMode === "board") {
+    return (
+      <div>
+        {viewControl}
+        <ProjectIssueKanbanBoard
+          groups={allGroups.map(({ items, status }) => {
+            const visual = issueStatusVisual(status);
+            return {
+              icon: (
+                <ProjectStatusProgressIcon
+                  aria-hidden="true"
+                  className={`h-4 w-4 ${visual.className}`}
+                  focusable="false"
+                  state={visual.progress}
+                />
+              ),
+              items: items.map(({ issue }) => ({
+                issue,
+                onOpen: () => onSelectedIssueIdChange(issue.id),
+              })),
+              status,
+            };
+          })}
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
+      {viewControl}
       {groups.map(({ items, status }) => {
         const visual = issueStatusVisual(status);
         return (

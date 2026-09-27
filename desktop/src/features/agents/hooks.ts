@@ -1,6 +1,8 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useCommunities } from "@/features/communities/useCommunities";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import {
   connectAcpRuntime,
   discoverAcpAuthMethods,
@@ -112,6 +114,32 @@ export type {
 } from "@/features/agents/channelAgents";
 
 export const AGENTS_FOCUS_STALE_TIME_MS = 5 * 60_000;
+
+type ManagedAgentCommandScopeInput = {
+  expectedRelayUrl?: string;
+  expectedSignerPubkey?: string;
+};
+
+type ManagedAgentCommandScope = {
+  expectedRelayUrl: string;
+  expectedSignerPubkey: string;
+};
+
+function resolveManagedAgentCommandScope(
+  input: ManagedAgentCommandScopeInput,
+  fallback: ManagedAgentCommandScopeInput,
+): ManagedAgentCommandScope {
+  const expectedRelayUrl =
+    input.expectedRelayUrl ?? fallback.expectedRelayUrl;
+  const expectedSignerPubkey =
+    input.expectedSignerPubkey ?? fallback.expectedSignerPubkey;
+  if (!expectedRelayUrl || !expectedSignerPubkey) {
+    throw new Error(
+      "Buzz is still connecting to this community. Try again in a moment.",
+    );
+  }
+  return { expectedRelayUrl, expectedSignerPubkey };
+}
 
 /**
  * Matches the query's 30 s poll so a focus-return refetches anything older
@@ -421,9 +449,19 @@ export function useManagedAgentsQuery(options?: { enabled?: boolean }) {
 
 export function useCreateManagedAgentMutation() {
   const queryClient = useQueryClient();
+  const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
-    mutationFn: (input: CreateManagedAgentInput) => createManagedAgent(input),
+    mutationFn: (input: CreateManagedAgentInput) => {
+      const { expectedRelayUrl, expectedSignerPubkey } =
+        resolveManagedAgentCommandScope(input, commandScope);
+      return createManagedAgent({
+        ...input,
+        relayUrl: input.relayUrl ?? expectedRelayUrl,
+        expectedRelayUrl,
+        expectedSignerPubkey,
+      });
+    },
     onSuccess: (created) => {
       queryClient.setQueryData<ManagedAgent[]>(
         managedAgentsQueryKey,
@@ -636,7 +674,21 @@ export function useStopManagedAgentMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (pubkey: string) => stopManagedAgent(pubkey),
+    mutationFn: (
+      input:
+        | string
+        | {
+            pubkey: string;
+            expectedRelayUrl?: string;
+            expectedSignerPubkey?: string;
+          },
+    ) =>
+      typeof input === "string"
+        ? stopManagedAgent(input)
+        : stopManagedAgent(input.pubkey, {
+            expectedRelayUrl: input.expectedRelayUrl,
+            expectedSignerPubkey: input.expectedSignerPubkey,
+          }),
     onSettled: () => {
       invalidateManagedAgentQueriesInBackground(queryClient);
     },
@@ -696,12 +748,27 @@ export function useDeleteManagedAgentMutation() {
   });
 }
 
+function useManagedAgentCommandScopeSnapshot() {
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+  return {
+    expectedRelayUrl: activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined,
+    expectedSignerPubkey:
+      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined,
+  };
+}
+
 export function useAttachManagedAgentToChannelMutation(
   channelId: string | null,
 ) {
   const queryClient = useQueryClient();
+  const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
+    onMutate: (input) =>
+      resolveManagedAgentCommandScope(input, commandScope),
     mutationFn: async (
       input: AttachManagedAgentToChannelInput & { channelId?: string },
     ) => {
@@ -711,9 +778,12 @@ export function useAttachManagedAgentToChannelMutation(
         throw new Error("No channel selected.");
       }
 
-      return attachManagedAgentToChannel(effectiveChannelId, rest);
+      return attachManagedAgentToChannel(effectiveChannelId, {
+        ...rest,
+        ...resolveManagedAgentCommandScope(rest, commandScope),
+      });
     },
-    onSuccess: (result, variables) => {
+    onSuccess: (result, variables, capturedScope) => {
       const effectiveChannelId = variables.channelId ?? channelId;
       if (!effectiveChannelId) {
         return;
@@ -729,6 +799,8 @@ export function useAttachManagedAgentToChannelMutation(
       void invokeTauri("sync_agents_to_active_huddle", {
         channelId: effectiveChannelId,
         agentPubkeys: [result.agent.pubkey],
+        expectedRelayUrl: capturedScope.expectedRelayUrl,
+        expectedSignerPubkey: capturedScope.expectedSignerPubkey,
       }).catch((error) => {
         console.warn("Could not sync attached agent into Huddle:", error);
       });
@@ -752,6 +824,7 @@ export function useAttachManagedAgentToChannelMutation(
 
 export function useEnsureChannelAgentPresetMutation(channelId: string | null) {
   const queryClient = useQueryClient();
+  const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
     mutationFn: async (
@@ -761,7 +834,10 @@ export function useEnsureChannelAgentPresetMutation(channelId: string | null) {
         throw new Error("No channel selected.");
       }
 
-      return ensureChannelAgentPresetInChannel(channelId, input);
+      return ensureChannelAgentPresetInChannel(channelId, {
+        ...input,
+        ...resolveManagedAgentCommandScope(input, commandScope),
+      });
     },
     onSettled: () => {
       invalidateAgentQueriesInBackground(queryClient, channelId);
@@ -771,6 +847,7 @@ export function useEnsureChannelAgentPresetMutation(channelId: string | null) {
 
 export function useCreateChannelManagedAgentMutation(channelId: string | null) {
   const queryClient = useQueryClient();
+  const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
     mutationFn: async (
@@ -783,7 +860,10 @@ export function useCreateChannelManagedAgentMutation(channelId: string | null) {
       }
 
       const result = await createChannelManagedAgents(effectiveChannelId, [
-        rest,
+        {
+          ...rest,
+          ...resolveManagedAgentCommandScope(rest, commandScope),
+        },
       ]);
       const success = result.successes[0];
       if (success) {
@@ -823,6 +903,7 @@ export function useProvisionChannelManagedAgentMutation(
   channelId: string | null,
 ) {
   const queryClient = useQueryClient();
+  const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
     mutationFn: async (
@@ -833,15 +914,19 @@ export function useProvisionChannelManagedAgentMutation(
       if (!effectiveChannelId) {
         throw new Error("No channel selected.");
       }
+      const scopedInput = {
+        ...rest,
+        ...resolveManagedAgentCommandScope(rest, commandScope),
+      };
 
       const [managedAgents, members, personas] = await Promise.all([
         listManagedAgents(),
         getChannelMembers(effectiveChannelId),
-        rest.personaId && rest.respondTo === undefined
+        scopedInput.personaId && scopedInput.respondTo === undefined
           ? listPersonas()
           : Promise.resolve([]),
       ]);
-      return provisionChannelManagedAgent(rest, {
+      return provisionChannelManagedAgent(scopedInput, {
         managedAgents,
         personas,
         channelMemberPubkeys: new Set(
@@ -874,6 +959,7 @@ export function useCreateChannelManagedAgentsMutation(
   channelId: string | null,
 ) {
   const queryClient = useQueryClient();
+  const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
     mutationFn: async (
@@ -883,7 +969,13 @@ export function useCreateChannelManagedAgentsMutation(
         throw new Error("No channel selected.");
       }
 
-      return createChannelManagedAgents(channelId, inputs);
+      return createChannelManagedAgents(
+        channelId,
+        inputs.map((input) => ({
+          ...input,
+          ...resolveManagedAgentCommandScope(input, commandScope),
+        })),
+      );
     },
     onSettled: () => {
       invalidateAgentQueriesInBackground(queryClient, channelId);

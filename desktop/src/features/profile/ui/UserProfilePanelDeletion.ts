@@ -4,8 +4,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   deleteManagedAgentWithRules,
   type ManagedAgentActionResult,
+  type ManagedAgentCommandScope,
 } from "@/features/agents/lib/managedAgentControlActions";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { invalidateChannelMembersRosters } from "@/features/channels/rosterFreshness";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import { removeChannelMember } from "@/shared/api/tauri";
 import type {
   AgentPersona,
@@ -13,6 +16,7 @@ import type {
   ManagedAgent,
   RelayAgent,
 } from "@/shared/api/types";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import { getRelayAgentChannelIds } from "@/features/profile/ui/UserProfilePanelUtils";
 
 type DeleteManagedAgentRulesContext = Omit<
@@ -21,7 +25,10 @@ type DeleteManagedAgentRulesContext = Omit<
 >;
 
 type DeleteProfileManagedAgentContext = DeleteManagedAgentRulesContext & {
-  removeAgentFromAllChannels: (pubkey: string) => Promise<void>;
+  removeAgentFromAllChannels: (
+    pubkey: string,
+    scope?: ManagedAgentCommandScope,
+  ) => Promise<void>;
 };
 
 type DeleteProfileManagedAgentsForPersonaContext =
@@ -48,8 +55,24 @@ export function useProfileAgentDeletion({
   relayAgents,
 }: UseProfileAgentDeletionInput) {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+  const captureCommandScope =
+    React.useCallback((): ManagedAgentCommandScope => {
+      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+      const expectedSignerPubkey =
+        normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+      if (!expectedRelayUrl || !expectedSignerPubkey) {
+        throw new Error(
+          "Buzz is still connecting to this community. Try again in a moment.",
+        );
+      }
+      return { expectedRelayUrl, expectedSignerPubkey };
+    }, [activeCommunity?.relayUrl, identityQuery.data?.pubkey]);
   const removeAgentFromAllChannels = React.useCallback(
-    async (agentPubkey: string) => {
+    async (agentPubkey: string, scope?: ManagedAgentCommandScope) => {
       const normalizedPubkey = agentPubkey.toLowerCase();
       const channelIds = new Set(
         getRelayAgentChannelIds(relayAgents, agentPubkey),
@@ -64,30 +87,40 @@ export function useProfileAgentDeletion({
         }
       }
       if (channelIds.size === 0) return;
-      await Promise.allSettled(
+      const removalResults = await Promise.allSettled(
         [...channelIds].map((channelId) =>
-          removeChannelMember(channelId, agentPubkey),
+          removeChannelMember(channelId, agentPubkey, scope),
         ),
       );
       // Direct writes bypass the member mutations' invalidation; without
       // this, the deleted agent stays in cached rosters for the freshness
       // window.
       await invalidateChannelMembersRosters(queryClient, channelIds);
+      const failedRemovalCount = removalResults.filter(
+        (result) => result.status === "rejected",
+      ).length;
+      if (failedRemovalCount > 0) {
+        throw new Error(
+          `Agent deleted, but Buzz could not remove it from ${failedRemovalCount} channel${failedRemovalCount === 1 ? "" : "s"}. Refresh and retry the channel cleanup.`,
+        );
+      }
     },
     [channels, queryClient, relayAgents],
   );
 
   const deleteManagedAgentRecord = React.useCallback(
-    (agentToDelete: ManagedAgent) =>
+    async (agentToDelete: ManagedAgent) =>
       deleteProfileManagedAgent(agentToDelete, {
         channels: channels ?? [],
         deleteManagedAgent,
         getAvailability,
         relayAgents: relayAgents ?? [],
         removeAgentFromAllChannels,
+        scope: captureCommandScope(),
         skipRemoteDeleteConfirm: true,
       }),
     [
+      captureCommandScope,
       channels,
       deleteManagedAgent,
       getAvailability,
@@ -97,7 +130,7 @@ export function useProfileAgentDeletion({
   );
 
   const deleteManagedAgentsForPersona = React.useCallback(
-    (persona: AgentPersona) =>
+    async (persona: AgentPersona) =>
       deleteProfileManagedAgentsForPersona(persona, {
         channels: channels ?? [],
         deleteManagedAgent,
@@ -105,9 +138,11 @@ export function useProfileAgentDeletion({
         getAvailability,
         relayAgents: relayAgents ?? [],
         removeAgentFromAllChannels,
+        scope: captureCommandScope(),
         selectedAgent: managedAgent,
       }),
     [
+      captureCommandScope,
       channels,
       deleteManagedAgent,
       managedAgent,
@@ -136,7 +171,7 @@ export async function deleteProfileManagedAgent(
   });
   if (result.cancelled) return result;
 
-  await removeAgentFromAllChannels(agent.pubkey);
+  await removeAgentFromAllChannels(agent.pubkey, deleteContext.scope);
   return result;
 }
 

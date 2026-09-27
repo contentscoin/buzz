@@ -823,8 +823,23 @@ export function useDeleteChannelMutation(channelId: string | null) {
 
 export function useAddChannelMembersMutation(channelId: string | null) {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+  const resolveCommandScope = (input: Partial<AddChannelMembersInput>) => {
+    const expectedRelayUrl =
+      input.expectedRelayUrl ?? activeCommunity?.relayUrl;
+    const expectedSignerPubkey =
+      input.expectedSignerPubkey ?? identityQuery.data?.pubkey;
+    if (!expectedRelayUrl?.trim() || !expectedSignerPubkey?.trim()) {
+      throw new Error(
+        "Buzz is still connecting to this community. Try again in a moment.",
+      );
+    }
+    return { expectedRelayUrl, expectedSignerPubkey };
+  };
 
   return useMutation({
+    onMutate: (input) => resolveCommandScope(input),
     mutationFn: (
       input: Omit<AddChannelMembersInput, "channelId"> & {
         channelId?: string;
@@ -836,9 +851,17 @@ export function useAddChannelMembersMutation(channelId: string | null) {
         throw new Error("No channel selected.");
       }
 
-      return addChannelMembers({ ...rest, channelId: effectiveChannelId });
+      const { expectedRelayUrl, expectedSignerPubkey } =
+        resolveCommandScope(rest);
+
+      return addChannelMembers({
+        ...rest,
+        channelId: effectiveChannelId,
+        expectedRelayUrl,
+        expectedSignerPubkey,
+      });
     },
-    onSuccess: (result, variables) => {
+    onSuccess: (result, variables, commandScope) => {
       const effectiveChannelId = variables.channelId ?? channelId;
       if (
         effectiveChannelId &&
@@ -848,6 +871,8 @@ export function useAddChannelMembersMutation(channelId: string | null) {
         void invokeTauri("sync_agents_to_active_huddle", {
           channelId: effectiveChannelId,
           agentPubkeys: result.added,
+          expectedRelayUrl: commandScope.expectedRelayUrl,
+          expectedSignerPubkey: commandScope.expectedSignerPubkey,
         }).catch((error) => {
           console.warn("Could not sync added agents into Huddle:", error);
         });
@@ -864,6 +889,8 @@ export function useAddChannelMembersMutation(channelId: string | null) {
 
 export function useRemoveChannelMemberMutation(channelId: string | null) {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
 
   return useMutation({
     mutationFn: async (pubkey: string) => {
@@ -871,7 +898,18 @@ export function useRemoveChannelMemberMutation(channelId: string | null) {
         throw new Error("No channel selected.");
       }
 
-      await removeChannelMember(channelId, pubkey);
+      const expectedRelayUrl = activeCommunity?.relayUrl;
+      const expectedSignerPubkey = identityQuery.data?.pubkey;
+      if (!expectedRelayUrl?.trim() || !expectedSignerPubkey?.trim()) {
+        throw new Error(
+          "Buzz is still connecting to this community. Try again in a moment.",
+        );
+      }
+
+      await removeChannelMember(channelId, pubkey, {
+        expectedRelayUrl,
+        expectedSignerPubkey,
+      });
     },
     onSettled: async () => {
       await Promise.all([

@@ -37,6 +37,7 @@ import {
   type PersonaDialogState,
 } from "@/features/agents/ui/personaDialogState";
 import { useChannelsQuery } from "@/features/channels/hooks";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { useIdentityArchive } from "@/features/identity-archive/hooks";
 import { useAgentAvailabilityLookup } from "@/features/agents/lib/useAgentAvailability";
 import {
@@ -122,6 +123,7 @@ export function UserProfilePanel({
   transparentChrome = false,
 }: UserProfilePanelProps) {
   const { globalConfig } = useGlobalAgentConfig();
+  const { activeCommunity } = useCommunities();
   const isOverlay = useIsThreadPanelOverlay();
   const isSplitLayout = layout === "split";
   useEscapeKey(onClose, isOverlay || isSinglePanelView);
@@ -419,6 +421,16 @@ export function UserProfilePanel({
 
   const createManagedAgentForPersona = React.useCallback(
     async (personaToStart: AgentPersona) => {
+      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+      const expectedSignerPubkey =
+        normalizePubkey(currentPubkey ?? "") || undefined;
+      if (!expectedRelayUrl || !expectedSignerPubkey) {
+        throw new Error(
+          "Buzz is still connecting to this community. Try creating the agent again in a moment.",
+        );
+      }
       const runtimes = await availableRuntimesForStart(availableRuntimesQuery);
       const { runtime, warnings } = resolveStartRuntimeForDefinition(
         personaToStart,
@@ -435,14 +447,21 @@ export function UserProfilePanel({
         runtime,
       );
 
-      const created = await createAgentMutation.mutateAsync(input);
+      const created = await createAgentMutation.mutateAsync({
+        ...input,
+        relayUrl: expectedRelayUrl,
+        expectedRelayUrl,
+        expectedSignerPubkey,
+      });
       void managedAgentsQuery.refetch();
       void relayAgentsQuery.refetch();
       return created;
     },
     [
       availableRuntimesQuery,
+      activeCommunity?.relayUrl,
       createAgentMutation.mutateAsync,
+      currentPubkey,
       globalConfig.preferred_runtime,
       managedAgentsQuery.refetch,
       relayAgentsQuery.refetch,

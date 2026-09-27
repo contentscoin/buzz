@@ -638,12 +638,15 @@ export function HuddleBar({
         <AddAgentDialog
           currentAgentPubkeys={barState.agent_pubkeys}
           onClose={() => setShowAddAgent(false)}
-          onAdd={async (pubkey: string): Promise<AgentAddResult> => {
+          onAdd={async (
+            pubkey: string,
+            scope,
+          ): Promise<AgentAddResult> => {
             setAgentAddError(null);
             try {
               const result = await invoke<AgentAddResult>(
                 "add_agent_to_huddle",
-                { agentPubkey: pubkey },
+                { agentPubkey: pubkey, ...scope },
               );
               // Refresh huddle state so the participant list updates immediately.
               const s = await invoke<HuddleState>("get_huddle_state");

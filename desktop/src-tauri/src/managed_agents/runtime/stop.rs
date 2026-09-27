@@ -125,9 +125,38 @@ pub fn stop_managed_agent_workspace_pair(
     record: &mut ManagedAgentRecord,
     runtimes: &mut HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>,
 ) -> Result<(), String> {
+    stop_managed_agent_resolved_workspace_pair(
+        app,
+        record,
+        runtimes,
+        super::workspace_pair_key(app, record),
+    )
+}
+
+/// Stop only the runtime pair addressed by a caller-validated workspace relay.
+///
+/// The bound relay is the same value that passed the caller's scope check, so
+/// a community switch after that check cannot retarget the stop to another
+/// pair that happens to use the same agent public key.
+pub fn stop_managed_agent_bound_workspace_pair(
+    app: &AppHandle,
+    record: &mut ManagedAgentRecord,
+    runtimes: &mut HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>,
+    workspace_relay: &crate::relay::ScopedWorkspaceRelay,
+) -> Result<(), String> {
+    let pair_key = super::bound_runtime_key(record, workspace_relay)?;
+    stop_managed_agent_resolved_workspace_pair(app, record, runtimes, Some(pair_key))
+}
+
+fn stop_managed_agent_resolved_workspace_pair(
+    app: &AppHandle,
+    record: &mut ManagedAgentRecord,
+    runtimes: &mut HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>,
+    pair_key: Option<ManagedAgentRuntimeKey>,
+) -> Result<(), String> {
     use tauri::Manager;
     let state = app.state::<crate::app_state::AppState>();
-    match super::workspace_pair_key(app, record) {
+    match pair_key {
         Some(pair_key) if runtimes.contains_key(&pair_key) => {
             stop_managed_agent_pair(app, record, runtimes, &pair_key)?;
             state.clear_agent_session_cache(&pair_key);

@@ -19,19 +19,24 @@ import {
   useAgentAvailabilityLookup,
 } from "../lib/useAgentAvailability";
 import { useGlobalAgentConfig } from "@/features/agents/useGlobalAgentConfig";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { useChannelsQuery } from "@/features/channels/hooks";
 import { invalidateChannelMembersRosters } from "@/features/channels/rosterFreshness";
 import type { AgentPersona, Channel, ManagedAgent } from "@/shared/api/types";
 import { removeChannelMember } from "@/shared/api/tauri";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import {
   deleteManagedAgentWithRules,
   isManagedAgentActive,
+  type ManagedAgentCommandScope,
   respawnManagedAgentWithRules,
+  type StartManagedAgentCommand,
   startManagedAgentWithRules,
+  type StopManagedAgentCommand,
   stopManagedAgentWithRules,
 } from "../lib/managedAgentControlActions";
-import { clearActiveTurnsForAgentOnStop } from "../managedAgentRuntimeHooks";
+import { clearScopedActiveTurnsForAgentOnStop } from "../managedAgentRuntimeHooks";
 import {
   availableRuntimesForStart,
   buildInstanceInputForDefinition,
@@ -40,6 +45,8 @@ import {
 
 export function useManagedAgentActions() {
   const queryClient = useQueryClient();
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
   const { globalConfig } = useGlobalAgentConfig();
   const relayAgentsQuery = useRelayAgentsQuery();
   const managedAgentsQuery = useManagedAgentsQuery();
@@ -171,15 +178,38 @@ export function useManagedAgentActions() {
     setActionErrorMessage(null);
   }
 
+  function captureCommandScope(): ManagedAgentCommandScope {
+    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+    if (!expectedRelayUrl || !expectedSignerPubkey) {
+      throw new Error(
+        "Buzz is still connecting to this community. Try again in a moment.",
+      );
+    }
+    return { expectedRelayUrl, expectedSignerPubkey };
+  }
+
+  const startManagedAgentCommand: StartManagedAgentCommand = (
+    pubkey,
+    options,
+  ) => startMutation.mutateAsync({ pubkey, ...options });
+  const stopManagedAgentCommand: StopManagedAgentCommand = (pubkey, options) =>
+    stopMutation.mutateAsync({ pubkey, ...options });
+
   async function handleStart(pubkey: string) {
     clearFeedback();
     try {
       const agent = managedAgents.find((c) => c.pubkey === pubkey);
       if (!agent) return;
+      const scope = captureCommandScope();
       assertStartNotBlockedByPresence(agent);
       await startManagedAgentWithRules({
         agent,
-        startManagedAgent: startMutation.mutateAsync,
+        scope,
+        startManagedAgent: startManagedAgentCommand,
       });
     } catch (error) {
       setActionErrorMessage(
@@ -197,12 +227,19 @@ export function useManagedAgentActions() {
         (candidate) => candidate.pubkey === pubkey,
       );
       if (!agent) return;
+      const scope = captureCommandScope();
       assertStartNotBlockedByPresence(agent);
       await respawnManagedAgentWithRules({
         agent,
-        startManagedAgent: startMutation.mutateAsync,
-        stopManagedAgent: stopMutation.mutateAsync,
-        onStopped: () => clearActiveTurnsForAgentOnStop(agent.pubkey),
+        scope,
+        startManagedAgent: startManagedAgentCommand,
+        stopManagedAgent: stopManagedAgentCommand,
+        onStopped: () =>
+          clearScopedActiveTurnsForAgentOnStop(
+            agent.pubkey,
+            scope.expectedRelayUrl,
+            scope.expectedSignerPubkey,
+          ),
       });
     } catch (error) {
       setActionErrorMessage(
@@ -231,6 +268,7 @@ export function useManagedAgentActions() {
     setPersonaStartPending(persona.id, true);
     clearFeedback();
     try {
+      const scope = captureCommandScope();
       const runtimes = await availableRuntimesForStart(availableRuntimesQuery);
       const { runtime, warnings } = resolveStartRuntimeForDefinition(
         persona,
@@ -239,7 +277,12 @@ export function useManagedAgentActions() {
       );
       const input = await buildInstanceInputForDefinition(persona, runtime);
 
-      const created = await createAgentMutation.mutateAsync(input);
+      const created = await createAgentMutation.mutateAsync({
+        ...input,
+        relayUrl: scope.expectedRelayUrl,
+        expectedRelayUrl: scope.expectedRelayUrl,
+        expectedSignerPubkey: scope.expectedSignerPubkey,
+      });
       toast.success("Agent created");
       const notices = [...warnings];
 
@@ -279,15 +322,21 @@ export function useManagedAgentActions() {
     try {
       const agent = managedAgents.find((a) => a.pubkey === pubkey);
       if (!agent) return;
+      const scope = captureCommandScope();
       const channels = await getChannelsForAction();
       const result = await stopManagedAgentWithRules({
         agent,
         channels,
         relayAgents: relayAgentsQuery.data ?? [],
-        stopManagedAgent: stopMutation.mutateAsync,
+        scope,
+        stopManagedAgent: stopManagedAgentCommand,
       });
       if (agent.backend.type === "local") {
-        clearActiveTurnsForAgentOnStop(pubkey);
+        clearScopedActiveTurnsForAgentOnStop(
+          pubkey,
+          scope.expectedRelayUrl,
+          scope.expectedSignerPubkey,
+        );
       }
       if (result.noticeMessage) {
         setActionNoticeMessage(result.noticeMessage);
@@ -307,15 +356,28 @@ export function useManagedAgentActions() {
     return relayAgent?.channelIds ?? [];
   }
 
-  async function removeAgentFromAllChannels(pubkey: string) {
+  async function removeAgentFromAllChannels(
+    pubkey: string,
+    scope: ManagedAgentCommandScope,
+  ) {
     const channelIds = getAgentChannelIds(pubkey);
     if (channelIds.length === 0) return;
-    await Promise.allSettled(
-      channelIds.map((channelId) => removeChannelMember(channelId, pubkey)),
+    const removalResults = await Promise.allSettled(
+      channelIds.map((channelId) =>
+        removeChannelMember(channelId, pubkey, scope),
+      ),
     );
     // Direct writes bypass the member mutations' invalidation; without this,
     // the deleted agent stays in cached rosters for the freshness window.
     await invalidateChannelMembersRosters(queryClient, channelIds);
+    const failedRemovalCount = removalResults.filter(
+      (result) => result.status === "rejected",
+    ).length;
+    if (failedRemovalCount > 0) {
+      throw new Error(
+        `Agent deleted, but Buzz could not remove it from ${failedRemovalCount} channel${failedRemovalCount === 1 ? "" : "s"}. Refresh and retry the channel cleanup.`,
+      );
+    }
   }
 
   async function handleDelete(pubkey: string) {
@@ -323,6 +385,7 @@ export function useManagedAgentActions() {
     try {
       const agent = managedAgents.find((a) => a.pubkey === pubkey);
       if (!agent) return;
+      const scope = captureCommandScope();
       const channels = await getChannelsForAction();
       const result = await deleteManagedAgentWithRules({
         agent,
@@ -330,9 +393,10 @@ export function useManagedAgentActions() {
         deleteManagedAgent: deleteMutation.mutateAsync,
         getAvailability,
         relayAgents: relayAgentsQuery.data ?? [],
+        scope,
       });
       if (result.cancelled) return;
-      await removeAgentFromAllChannels(pubkey);
+      await removeAgentFromAllChannels(pubkey, scope);
       if (logAgentPubkey === pubkey) {
         setLogAgentPubkey(null);
       }
@@ -408,22 +472,34 @@ export function useManagedAgentActions() {
   }
 
   async function handleBulkStopRunning() {
-    await runBulkAction(
-      managedAgents.filter((a) => isManagedAgentActive(a)),
-      "Stop",
-      "stop",
-      async (a) => {
-        await stopManagedAgentWithRules({
-          agent: a,
-          channels: channelsQuery.data ?? [],
-          relayAgents: relayAgentsQuery.data ?? [],
-          stopManagedAgent: stopMutation.mutateAsync,
-        });
-        if (a.backend.type === "local") {
-          clearActiveTurnsForAgentOnStop(a.pubkey);
-        }
-      },
-    );
+    try {
+      const scope = captureCommandScope();
+      await runBulkAction(
+        managedAgents.filter((a) => isManagedAgentActive(a)),
+        "Stop",
+        "stop",
+        async (a) => {
+          await stopManagedAgentWithRules({
+            agent: a,
+            channels: channelsQuery.data ?? [],
+            relayAgents: relayAgentsQuery.data ?? [],
+            scope,
+            stopManagedAgent: stopManagedAgentCommand,
+          });
+          if (a.backend.type === "local") {
+            clearScopedActiveTurnsForAgentOnStop(
+              a.pubkey,
+              scope.expectedRelayUrl,
+              scope.expectedSignerPubkey,
+            );
+          }
+        },
+      );
+    } catch (error) {
+      setActionErrorMessage(
+        error instanceof Error ? error.message : "Failed to stop agents.",
+      );
+    }
   }
 
   const isPending =
@@ -433,10 +509,11 @@ export function useManagedAgentActions() {
     stopMutation.isPending ||
     startOnLaunchMutation.isPending ||
     deleteMutation.isPending;
-  const startingAgentPubkey =
-    startMutation.isPending && typeof startMutation.variables === "string"
+  const startingAgentPubkey = startMutation.isPending
+    ? typeof startMutation.variables === "string"
       ? startMutation.variables
-      : null;
+      : (startMutation.variables?.pubkey ?? null)
+    : null;
 
   return {
     relayAgentsQuery,

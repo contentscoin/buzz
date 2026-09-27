@@ -13,6 +13,7 @@ import {
 import { resolvePersonaRuntime } from "@/features/agents/lib/resolvePersonaRuntime";
 import { useAddChannelMembersMutation } from "@/features/channels/hooks";
 import { useCanAddChannelMembers } from "@/features/channels/useCanAddChannelMembers";
+import { useCommunities } from "@/features/communities/useCommunities";
 import { useNonMemberInvite } from "./useNonMemberInvite";
 import { dmThreadAgentMentionError } from "@/features/messages/lib/dmThreadAgentMentionError";
 import {
@@ -27,6 +28,7 @@ import { useActivePreparedLinkPreviews } from "./useActivePreparedLinkPreviews";
 import { useDetachedAgentStart } from "./useDetachedAgentStart";
 import { useEnsureAgentMentionsReady } from "./useEnsureAgentMentionsReady";
 import { invokeTauri } from "@/shared/api/tauri";
+import { useIdentityQuery } from "@/shared/api/hooks";
 import type { AcpRuntime, ManagedAgent } from "@/shared/api/types";
 import { normalizePubkey, truncateNpub } from "@/shared/lib/pubkey";
 import { buildCustomEmojiTags } from "@/shared/lib/customEmojiTags";
@@ -74,6 +76,13 @@ export function useMentionSendFlow({
   restoreQueuedAttachments,
   setSpoileredAttachmentUrls,
 }: UseMentionSendFlowOptions) {
+  const { activeCommunity } = useCommunities();
+  const identityQuery = useIdentityQuery();
+  const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+    ? activeCommunity.relayUrl
+    : undefined;
+  const expectedSignerPubkey =
+    normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
   const [pendingNonMemberSend, setPendingNonMemberSend] =
     React.useState<PendingNonMemberMentionSend | null>(null);
   const [nonMemberPromptError, setNonMemberPromptError] = React.useState<
@@ -510,9 +519,16 @@ export function useMentionSendFlow({
         }
         if (preparedAgentPubkeys.length > 0 && sendChannelId) {
           try {
+            if (!expectedRelayUrl || !expectedSignerPubkey) {
+              throw new Error(
+                "Buzz is still connecting to this community. Try sending again in a moment.",
+              );
+            }
             await invokeTauri("sync_agents_to_active_huddle", {
               channelId: sendChannelId,
               agentPubkeys: preparedAgentPubkeys,
+              expectedRelayUrl,
+              expectedSignerPubkey,
             });
             if (isSendCancelled()) return restoreComposerAfterFailure();
           } catch (error) {
@@ -703,6 +719,8 @@ export function useMentionSendFlow({
       contentRef,
       drafts,
       ensureManagedAgentMentionsReady,
+      expectedRelayUrl,
+      expectedSignerPubkey,
       getManagedAgentsByPubkey,
       mentions.isAgentPubkey,
       mentions.revalidateMentionPubkeys,
