@@ -215,13 +215,17 @@ export function useAgentManagement() {
         const targetChannel = (channelsQuery.data ?? []).find(
           (channel) => channel.id === request.request.channelId,
         );
-        await createdAgentAttachment.presentCreatedAgent(created, {
-          id: request.request.channelId,
-          name: targetChannel?.name ?? "this channel",
-        }, {
-          expectedRelayUrl,
-          expectedSignerPubkey,
-        });
+        await createdAgentAttachment.presentCreatedAgent(
+          created,
+          {
+            id: request.request.channelId,
+            name: targetChannel?.name ?? "this channel",
+          },
+          {
+            expectedRelayUrl,
+            expectedSignerPubkey,
+          },
+        );
       }
 
       await Promise.all([

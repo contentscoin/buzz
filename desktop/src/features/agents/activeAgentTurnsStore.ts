@@ -94,9 +94,7 @@ export function activeAgentTurnsSignerMatches(
     ? normalizePubkey(expectedSignerPubkey)
     : "";
   return Boolean(
-    expected &&
-      activeTurnsSignerPubkey &&
-      expected === activeTurnsSignerPubkey,
+    expected && activeTurnsSignerPubkey && expected === activeTurnsSignerPubkey,
   );
 }
 
@@ -751,7 +749,10 @@ type TurnsStoreSnapshot = {
 /** Per-community-and-signer snapshots. */
 const savedByCommunity = new Map<string, TurnsStoreSnapshot>();
 
-function communitySnapshotKey(communityId: string, signerPubkey?: string | null) {
+function communitySnapshotKey(
+  communityId: string,
+  signerPubkey?: string | null,
+) {
   return `${communityId}\u0000${normalizePubkey(signerPubkey ?? "")}`;
 }
 

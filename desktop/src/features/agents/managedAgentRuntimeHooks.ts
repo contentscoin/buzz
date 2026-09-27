@@ -163,11 +163,7 @@ export function clearScopedActiveTurnsForAgentOnStop(
   relayUrl: string,
   expectedSignerPubkey: string,
 ): void {
-  clearActiveTurnsForAgentOnStop(
-    pubkey,
-    relayUrl,
-    expectedSignerPubkey,
-  );
+  clearActiveTurnsForAgentOnStop(pubkey, relayUrl, expectedSignerPubkey);
 }
 
 /**

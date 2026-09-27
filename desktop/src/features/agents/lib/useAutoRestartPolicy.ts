@@ -86,11 +86,7 @@ async function performAutomaticRestart(
     expectedRelayUrl: scope,
     expectedSignerPubkey,
   });
-  clearScopedActiveTurnsForAgentOnStop(
-    pubkey,
-    scope,
-    expectedSignerPubkey,
-  );
+  clearScopedActiveTurnsForAgentOnStop(pubkey, scope, expectedSignerPubkey);
   await startManagedAgent(pubkey, {
     expectedRelayUrl: scope,
     expectedSignerPubkey,

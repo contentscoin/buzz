@@ -48,12 +48,12 @@ function ProjectIssueKanbanCard({ issue, onOpen }: KanbanIssueItem) {
           {projectTaskCategoryLabel(issue.category)}
         </span>
         <span
-          aria-label={commentLabel}
           className="ml-auto flex shrink-0 items-center gap-1"
           title={commentLabel}
         >
           <MessageSquare aria-hidden="true" className="h-3 w-3" />
-          {issue.comments.length}
+          <span aria-hidden="true">{issue.comments.length}</span>
+          <span className="sr-only">{commentLabel}</span>
         </span>
       </span>
       <span
@@ -101,13 +101,15 @@ export function ProjectIssueKanbanBoard({
                 {status}
               </h3>
               <span
-                aria-label={`${items.length} ${items.length === 1 ? "task" : "tasks"}`}
                 className={cn(
                   "ml-auto min-w-5 rounded-full bg-muted px-1.5 py-0.5 text-center text-2xs font-medium tabular-nums text-muted-foreground",
                   items.length === 0 && "opacity-60",
                 )}
               >
-                {items.length}
+                <span aria-hidden="true">{items.length}</span>
+                <span className="sr-only">
+                  {items.length} {items.length === 1 ? "task" : "tasks"}
+                </span>
               </span>
             </header>
             <div className="space-y-2 p-2">

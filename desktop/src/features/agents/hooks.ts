@@ -129,8 +129,7 @@ function resolveManagedAgentCommandScope(
   input: ManagedAgentCommandScopeInput,
   fallback: ManagedAgentCommandScopeInput,
 ): ManagedAgentCommandScope {
-  const expectedRelayUrl =
-    input.expectedRelayUrl ?? fallback.expectedRelayUrl;
+  const expectedRelayUrl = input.expectedRelayUrl ?? fallback.expectedRelayUrl;
   const expectedSignerPubkey =
     input.expectedSignerPubkey ?? fallback.expectedSignerPubkey;
   if (!expectedRelayUrl || !expectedSignerPubkey) {
@@ -767,8 +766,7 @@ export function useAttachManagedAgentToChannelMutation(
   const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
-    onMutate: (input) =>
-      resolveManagedAgentCommandScope(input, commandScope),
+    onMutate: (input) => resolveManagedAgentCommandScope(input, commandScope),
     mutationFn: async (
       input: AttachManagedAgentToChannelInput & { channelId?: string },
     ) => {

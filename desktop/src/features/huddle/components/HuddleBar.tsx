@@ -638,10 +638,7 @@ export function HuddleBar({
         <AddAgentDialog
           currentAgentPubkeys={barState.agent_pubkeys}
           onClose={() => setShowAddAgent(false)}
-          onAdd={async (
-            pubkey: string,
-            scope,
-          ): Promise<AgentAddResult> => {
+          onAdd={async (pubkey: string, scope): Promise<AgentAddResult> => {
             setAgentAddError(null);
             try {
               const result = await invoke<AgentAddResult>(
