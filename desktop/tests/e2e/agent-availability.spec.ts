@@ -720,14 +720,15 @@ for (const scenario of [
             .__DELETE_EFFECTS__ ?? [],
       );
     if (scenario === "offline") {
-      await expect.poll(effects).toEqual(["delete", "remove-member"]);
+      await expect.poll(effects).toEqual(["remove-member", "delete"]);
       await expect(page.getByTestId("user-profile-panel")).toHaveCount(0);
     } else {
       await expect.poll(effects).toEqual(["shutdown"]);
       await expect(page.getByTestId("user-profile-panel")).toBeVisible();
       // Retry the same user action without healing presence. A successful
       // request permits the explicitly confirmed local deletion, not a claim
-      // of remote termination. No membership write precedes it.
+      // of remote termination. Membership cleanup completes before the local
+      // record is deleted so a failed cleanup remains retriable.
       await page.evaluate(() => {
         (
           window as typeof window & { __DELETE_FAIL_SHUTDOWN__?: boolean }
@@ -737,7 +738,7 @@ for (const scenario of [
       await page.getByTestId("agent-delete-confirm-action").click();
       await expect
         .poll(effects)
-        .toEqual(["shutdown", "shutdown", "delete", "remove-member"]);
+        .toEqual(["shutdown", "shutdown", "remove-member", "delete"]);
       await expect(page.getByTestId("user-profile-panel")).toHaveCount(0);
     }
   });
