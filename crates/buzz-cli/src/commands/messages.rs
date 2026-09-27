@@ -653,7 +653,8 @@ fn read_message_file_or_stdin(path: &str) -> Result<String, CliError> {
     read_bounded_message(file, "message file")
 }
 
-pub async fn cmd_send_message(client: &BuzzClient, p: SendMessageParams) -> Result<(), CliError> {
+#[cfg(test)]
+async fn cmd_send_message(client: &BuzzClient, p: SendMessageParams) -> Result<(), CliError> {
     cmd_send_message_with_input(client, p, true).await
 }
 
