@@ -116,13 +116,7 @@ function markSnapshotDiagnostic(
   ownerPubkey: string,
   diagnostics: ReturnType<typeof inspectChannelSnapshot>["diagnostics"],
 ): void {
-  if (
-    typeof performance === "undefined" ||
-    typeof window === "undefined" ||
-    typeof window.requestAnimationFrame !== "function"
-  ) {
-    return;
-  }
+  if (typeof performance === "undefined") return;
   const key = sidebarMeasurementKey(relayUrl, ownerPubkey);
   if (markedSnapshotKeys.has(key)) return;
   markedSnapshotKeys.add(key);
@@ -137,7 +131,13 @@ function measureFullSidebarPaint(
   ownerPubkey: string,
   channelCount: number,
 ): void {
-  if (typeof performance === "undefined") return;
+  if (
+    typeof performance === "undefined" ||
+    typeof window === "undefined" ||
+    typeof window.requestAnimationFrame !== "function"
+  ) {
+    return;
+  }
   const key = sidebarMeasurementKey(relayUrl, ownerPubkey);
   if (measuredSidebarKeys.has(key) || scheduledSidebarKeys.has(key)) return;
   scheduledSidebarKeys.add(key);
