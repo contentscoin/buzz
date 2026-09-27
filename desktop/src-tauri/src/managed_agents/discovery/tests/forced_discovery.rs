@@ -23,16 +23,18 @@ fn forced_discovery_probes_auth_but_cheap_discovery_reuses_cached_status() {
     let dir = tempfile::tempdir().expect("tempdir");
     let probe_log = dir.path().join("claude-probe.log");
 
-    for name in ["claude-agent-acp", "claude"] {
-        let bin = dir.path().join(name);
-        // The adapter is never executed; only `claude` logs + exits 0.
-        let script = format!(
-            "#!/bin/sh\necho ran >> \"{}\"\nexit 0\n",
-            probe_log.display()
-        );
-        std::fs::write(&bin, script).expect("write fake bin");
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-    }
+    let adapter = dir.path().join("claude-agent-acp");
+    std::fs::write(&adapter, "#!/bin/sh\necho '0.81.2'\nexit 0\n").expect("write fake adapter");
+    std::fs::set_permissions(&adapter, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod adapter");
+
+    let cli = dir.path().join("claude");
+    let cli_script = format!(
+        "#!/bin/sh\necho ran >> \"{}\"\nexit 0\n",
+        probe_log.display()
+    );
+    std::fs::write(&cli, cli_script).expect("write fake cli");
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).expect("chmod cli");
 
     // Start from a clean resolve + auth cache, and a PATH that only sees our fakes.
     clear_resolve_cache();

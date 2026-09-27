@@ -507,7 +507,7 @@ export function AgentDefinitionDialog({
     [globalConfig.env_vars, envVars],
   );
   const {
-    discoveredModelOptions,
+    authoritativeDiscoveredModelOptions: discoveredModelOptions,
     modelDiscoveryLoading,
     modelDiscoveryStatus,
   } = usePersonaModelDiscovery({

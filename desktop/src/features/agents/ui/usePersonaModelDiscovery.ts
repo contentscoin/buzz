@@ -404,6 +404,9 @@ export function usePersonaModelDiscovery({
   });
 
   return {
+    authoritativeDiscoveredModelOptions: modelDiscoverySuccessfulEmpty
+      ? []
+      : discoveredModelOptions,
     discoveredModelOptions,
     modelDiscoveryLoading: modelDiscoveryPending,
     modelDiscoveryStatus:

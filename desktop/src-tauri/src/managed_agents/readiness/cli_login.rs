@@ -2,8 +2,7 @@ use std::path::Path;
 
 use crate::managed_agents::{
     discovery::{
-        classify_runtime, codex_adapter_availability, find_command, resolve_command,
-        KnownAcpRuntime,
+        classify_runtime, cli_adapter_availability, find_command, resolve_command, KnownAcpRuntime,
     },
     AcpAvailabilityStatus,
 };
@@ -27,11 +26,12 @@ pub(super) fn requirements(
 
     let (availability, _cmd, adapter_path) =
         classify_runtime(adapter_result, runtime.underlying_cli, underlying_cli_found);
-    let availability = if runtime.id == "codex" && availability == AcpAvailabilityStatus::Available
+    let availability = if matches!(runtime.id, "codex" | "claude")
+        && availability == AcpAvailabilityStatus::Available
     {
         adapter_path
             .as_deref()
-            .map(|path| codex_adapter_availability(Path::new(path)))
+            .map(|path| cli_adapter_availability(runtime.id, Path::new(path)))
             .unwrap_or(availability)
     } else {
         availability

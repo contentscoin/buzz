@@ -36,6 +36,7 @@ import {
   BLOCK_BUILD_HIDDEN_PROVIDER_IDS,
   CARD_MINT_KEY_ANNOTATIONS,
   CUSTOM_PROVIDER_DROPDOWN_VALUE,
+  getPersonaModelOptions,
   getPersonaProviderOptions,
   getProviderApiKeyEnvVar,
   getProviderApiKeyLabel,
@@ -375,10 +376,25 @@ export function AgentConfigFields({
     provider: providerForDiscovery,
     selectedRuntime,
   });
+  const curatedRuntimeModelOptions = React.useMemo(
+    () =>
+      selectedRuntimeId === "claude" || selectedRuntimeId === "codex"
+        ? getPersonaModelOptions(selectedRuntimeId, providerForDiscovery)
+        : null,
+    [providerForDiscovery, selectedRuntimeId],
+  );
+  // CLI-login adapters remain the live authority when discovery succeeds. The
+  // curated list is a fallback for a missing, outdated, or temporarily
+  // unavailable adapter so the latest supported model IDs stay selectable.
+  // A successful adapter response, including an empty catalog, stays
+  // authoritative for the signed-in account.
+  const effectiveModelOptions = modelDiscoverySuccessfulEmpty
+    ? null
+    : (discoveredModelOptions ?? curatedRuntimeModelOptions);
   const modelControlVisible = shouldRenderModelControl({
     discoveredModelOptions: dependentFieldsDisabled
       ? null
-      : discoveredModelOptions,
+      : effectiveModelOptions,
     modelDiscoveryLoading: dependentFieldsDisabled
       ? false
       : modelDiscoveryLoading,
@@ -411,11 +427,11 @@ export function AgentConfigFields({
       return;
     }
     if ((config.model ?? "").trim().length > 0) return;
-    if (modelDiscoveryLoading || discoveredModelOptions === null) return;
+    if (modelDiscoveryLoading || effectiveModelOptions === null) return;
     const selectionScope = `${selectedRuntimeId}:${trimmedProvider}`;
     if (autoSelectedModelScopeRef.current === selectionScope) return;
 
-    const firstModel = discoveredModelOptions.find(
+    const firstModel = effectiveModelOptions.find(
       (option) => option.id.trim().length > 0,
     );
     if (!firstModel) return;
@@ -425,7 +441,7 @@ export function AgentConfigFields({
     onConfigChange({ ...config, model: firstModel.id });
   }, [
     config,
-    discoveredModelOptions,
+    effectiveModelOptions,
     isCustomProvider,
     modelDiscoveryLoading,
     onConfigChange,
@@ -812,7 +828,7 @@ export function AgentConfigFields({
             disableSelectDuringDiscovery={disableModelSelectDuringDiscovery}
             disabled={dependentFieldsDisabled}
             discoveredModelOptions={
-              dependentFieldsDisabled ? null : discoveredModelOptions
+              dependentFieldsDisabled ? null : effectiveModelOptions
             }
             globalModel={fallbackModel ?? undefined}
             id="global-agent-model"

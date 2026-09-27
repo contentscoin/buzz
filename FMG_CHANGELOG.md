@@ -1,5 +1,24 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.3
+
+Base: FMG live release `0.5.26-fmg.2`.
+
+### Added
+
+- Latest Codex choices for `GPT-6 Sol` and `GPT-6 Luna` in agent model
+  selectors.
+- `Claude Opus 5.5` as the current Claude Code model choice.
+- Curated recovery choices when live ACP model discovery is unavailable, while
+  preserving the signed-in adapter catalog whenever discovery succeeds.
+- Compatibility gates that upgrade Codex ACP below `1.13.1` and Claude ACP
+  below `0.81.2` to the maintained `@agentclientprotocol` adapters.
+
+### Deployment
+
+- This is a desktop-only update. The Hostinger relay, OpenClaw service and
+  pinned `sprig-v0.5.26-fmg.1` agent runtime remain unchanged.
+
 ## 0.5.26-fmg.2
 
 Base: FMG live release `0.5.26-fmg.1`.
