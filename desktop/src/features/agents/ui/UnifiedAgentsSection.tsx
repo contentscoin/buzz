@@ -541,6 +541,7 @@ function StandaloneAgentCard({
   const autoRestartFailure = useAutoRestartFailure(failureScope, agent.pubkey);
   const autoRestartFailureCopy = autoRestartFailure?.message ?? null;
   const isActive = isManagedAgentActive(agent);
+  const opensRuntimeTab = Boolean(friendlyError && !isActive);
 
   const handleErrorAction = () => {
     if (autoRestartFailure?.manualRetryAvailable && commandScope) {
@@ -626,7 +627,10 @@ function StandaloneAgentCard({
         })
       }
       onClick={() => {
-        onOpenAgentProfile(agent.pubkey);
+        onOpenAgentProfile(
+          agent.pubkey,
+          opensRuntimeTab ? { tab: "runtime" } : undefined,
+        );
       }}
       statusBadge={
         autoRestartFailure ? (
