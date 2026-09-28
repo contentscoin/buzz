@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 
+import { useCommunities } from "@/features/communities/useCommunities";
 import { useCustomEmoji } from "@/features/custom-emoji/hooks";
 import { EmojiPicker } from "@/features/custom-emoji/ui/EmojiPicker";
 import { useProfileQuery, useSelfProfileCache } from "@/features/profile/hooks";
@@ -22,6 +23,7 @@ import type { RelayEvent } from "@/shared/api/types";
 import { KIND_HUDDLE_REACTION } from "@/shared/constants/kinds";
 import { cn } from "@/shared/lib/cn";
 import { rewriteRelayUrl } from "@/shared/lib/mediaUrl";
+import { normalizePubkey, truncateNpub } from "@/shared/lib/pubkey";
 import { useDocumentVisible } from "@/shared/lib/useDocumentVisible";
 import { Button } from "@/shared/ui/button";
 import { useEmojiBurst } from "@/shared/ui/EmojiBurstProvider";
@@ -33,7 +35,6 @@ import { AddAgentDialog, type AgentAddResult } from "./AddAgentDialog";
 import type { HuddleAgentVoiceSettings } from "./AgentVoiceMenu";
 import { MicControls, SpeakerControls } from "./MicControls";
 import { HuddleParticipantsControl } from "./ParticipantList";
-import { truncateNpub } from "@/shared/lib/pubkey";
 
 // Mirrors HuddleState in src-tauri/src/huddle/mod.rs.
 type HuddleState = {
@@ -172,6 +173,7 @@ export function HuddleBar({
     setSelectedOutputDevice,
   } = useHuddle();
   const { activeSpeakers, micLevel, speakerLevels } = useHuddleLevels();
+  const { activeCommunity } = useCommunities();
   const customEmoji = useCustomEmoji();
   const identityQuery = useIdentityQuery();
   const profileQuery = useProfileQuery();
@@ -719,9 +721,25 @@ export function HuddleBar({
                   "Remove this agent from the huddle?",
                 );
                 if (!confirmed) return;
+                const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+                  ? activeCommunity.relayUrl
+                  : undefined;
+                const expectedSignerPubkey =
+                  normalizePubkey(identityQuery.data?.pubkey ?? "") ||
+                  undefined;
+                if (!expectedRelayUrl || !expectedSignerPubkey) {
+                  setAgentAddError(
+                    "Buzz is still connecting to this community. Try removing the agent again in a moment.",
+                  );
+                  return;
+                }
+
+                setAgentAddError(null);
                 try {
                   await invoke("remove_agent_from_huddle", {
                     agentPubkey: pubkey,
+                    expectedRelayUrl,
+                    expectedSignerPubkey,
                   });
                   setState((prev) => {
                     if (!prev) return prev;

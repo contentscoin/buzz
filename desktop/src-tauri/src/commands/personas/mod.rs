@@ -3,10 +3,10 @@ use tauri::AppHandle;
 use crate::{
     app_state::AppState,
     managed_agents::{
-        current_instance_id, delete_agent_key, load_managed_agents, load_personas, load_teams,
-        save_managed_agents, save_personas, stop_managed_agent_process,
-        sync_managed_agent_processes, try_regenerate_nest, validate_persona_activation_change,
-        validate_persona_deletion, AgentDefinition, ManagedAgentRecord,
+        current_instance_id, load_managed_agents, load_personas, load_teams, save_managed_agents,
+        save_personas, stop_managed_agent_process, sync_managed_agent_processes,
+        try_regenerate_nest, validate_persona_activation_change, validate_persona_deletion,
+        AgentDefinition, ManagedAgentRecord,
     },
     util::now_iso,
 };
@@ -146,9 +146,34 @@ fn commit_cascade_agents(
 }
 
 #[tauri::command]
-pub async fn delete_persona(id: String, app: AppHandle) -> Result<(), String> {
+pub async fn delete_persona(
+    id: String,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
+    app: AppHandle,
+) -> Result<(), String> {
     use tauri::Manager;
+
+    // Persona deletion can cascade into final managed-agent deletion. Bind the
+    // tenant and signer under the same workspace transaction used by direct
+    // agent deletion before any local record or key is removed.
+    let state = app.state::<AppState>();
+    let _workspace_guard = state.workspace_apply_lock.lock().await;
+    let retention_scope = crate::managed_agents::retention::active_retention_scope(&app, &state)?;
+    crate::relay::assert_expected_relay_scope(
+        expected_relay_url.as_deref(),
+        &crate::relay::relay_http_base_url(&retention_scope.relay_url),
+    )?;
+    crate::relay::assert_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        &retention_scope.owner_keys.public_key().to_hex(),
+    )?;
+    let retention_db_path = retention_scope.db_path;
+    let owner_keys = retention_scope.owner_keys;
+    let delete_app = app.clone();
+
     tokio::task::spawn_blocking(move || {
+        let app = delete_app;
         let state = app.state::<AppState>();
 
         {
@@ -205,6 +230,16 @@ pub async fn delete_persona(id: String, app: AppHandle) -> Result<(), String> {
             // Build the cascade set. HashSet for O(1) membership in Phase 3.
             let cascade: std::collections::HashSet<String> =
                 collect_cascade_pubkeys(&agents, &id).into_iter().collect();
+            let cascade_intents: Vec<super::agents::ManagedAgentDeleteIntent> = agents
+                .iter()
+                .filter(|agent| cascade.contains(&agent.pubkey))
+                .map(|agent| {
+                    super::agents::ManagedAgentDeleteIntent::new(
+                        &agent.pubkey,
+                        agent.persona_id.as_deref(),
+                    )
+                })
+                .collect();
 
             // Remote-agent pre-flight: refuse the cascade before any destructive
             // work while any target is provider-deployed. Nothing in
@@ -242,6 +277,14 @@ pub async fn delete_persona(id: String, app: AppHandle) -> Result<(), String> {
                 }
             }
 
+            // The scoped SQLite journal is the write-ahead record for every
+            // cascade member. It must commit before managed-agents.json or any
+            // key can be removed.
+            super::agents::stage_managed_agent_delete_intents_at(
+                &retention_db_path,
+                &cascade_intents,
+            )?;
+
             // ── Phase 3: Commit ─────────────────────────────────────────────
             //
             // Disk-authoritative writes first, side effects strictly after.
@@ -250,7 +293,8 @@ pub async fn delete_persona(id: String, app: AppHandle) -> Result<(), String> {
             // deletion or tombstone occurs.
             //
             // Failure semantics:
-            //   agent save fails   → nothing destroyed; full cascade retries cleanly
+            //   agent save fails   → journal remains; boot inspects authoritative
+            //                        disk state and clears live-record intents
             //   persona save fails → cascade agents gone, persona survives; a retry
             //                        finds an empty cascade and proceeds cleanly
             // Keys and tombstones are enqueued only after their records leave disk.
@@ -268,15 +312,29 @@ pub async fn delete_persona(id: String, app: AppHandle) -> Result<(), String> {
             save_personas(&app, &personas)?;
 
             // Side effects — strictly after records leave disk.
-            for pk in &cascade {
-                state.clear_agent_session_caches(pk);
-                // Remove nsec from keyring after the record is gone.
-                delete_agent_key(pk);
-                // Tombstone + NIP-IA kind:9035 archive enqueue atomically; the
-                // archive's `persona_id` is derived from the retained 30177 head.
-                super::agents::tombstone_managed_agent_pending(&app, &state, pk);
+            let mut cascade_errors = Vec::new();
+            for intent in &cascade_intents {
+                state.clear_agent_session_caches(&intent.agent_pubkey);
+                if let Err(error) = super::agents::finalize_managed_agent_deletion_at(
+                    &retention_db_path,
+                    &owner_keys,
+                    intent,
+                    crate::managed_agents::try_delete_agent_key,
+                ) {
+                    cascade_errors.push(format!(
+                        "failed to finish deletion for agent {}: {error}",
+                        intent.agent_pubkey
+                    ));
+                }
             }
             tombstone_persona_pending(&app, &state, &d_tag);
+
+            if !cascade_errors.is_empty() {
+                return Err(format!(
+                    "persona deleted with pending managed-agent cleanup; durable intents retained: {}",
+                    cascade_errors.join("; ")
+                ));
+            }
 
             // _store_guard drops here, before try_regenerate_nest.
         }

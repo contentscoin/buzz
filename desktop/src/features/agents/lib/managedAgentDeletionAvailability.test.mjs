@@ -8,6 +8,10 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 const PK = "a".repeat(64);
 const SIBLING = "b".repeat(64);
 const RELAY = "wss://relay.test";
+const SCOPE = {
+  expectedRelayUrl: RELAY,
+  expectedSignerPubkey: PK,
+};
 const agent = {
   pubkey: PK,
   name: "Remote",
@@ -29,6 +33,7 @@ let act,
   QueryClientProvider;
 let useAgentAvailabilityLookup,
   useManagedAgentActions,
+  useDeletePersonaMutation,
   useProfileAgentDeletion,
   CommunitiesProvider;
 let deleteManagedAgentWithRules, deleteManagedAgent, relayClient, originals;
@@ -66,6 +71,7 @@ before(async () => {
   ({ useManagedAgentActions } = await import(
     "../ui/useManagedAgentActions.ts"
   ));
+  ({ useDeletePersonaMutation } = await import("../hooks.ts"));
   ({ useProfileAgentDeletion } = await import(
     "../../profile/ui/UserProfilePanelDeletion.ts"
   ));
@@ -120,6 +126,7 @@ function setup() {
     ["get_identity", () => ({ pubkey: PK })],
     ["get_presence", () => ({ [PK]: "online" })],
     ["delete_managed_agent", () => null],
+    ["delete_persona", () => null],
     ["remove_channel_member", () => null],
     ["send_channel_message", () => ({ event_id: "event", created_at: 0 })],
     ["list_managed_agents", () => []],
@@ -167,8 +174,8 @@ function mount(
         pubkey: row.pubkey,
       })),
       getAvailability: availability.getAvailability,
-      deleteManagedAgent: ({ pubkey, forceRemoteDelete }) =>
-        deleteManagedAgent(pubkey, forceRemoteDelete),
+      deleteManagedAgent,
+      commandScope: SCOPE,
     });
     current = { ...availability, ...deletion };
     return null;
@@ -193,6 +200,48 @@ function effects() {
     ].includes(name),
   );
 }
+
+test("persona cascade deletion forwards the captured workspace scope", async () => {
+  setup();
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: Infinity },
+      mutations: { retry: false, gcTime: 0 },
+    },
+  });
+  clients.push(client);
+  client.setQueryData(["identity"], { pubkey: PK });
+  let deletion;
+  function PersonaDeletionSurface() {
+    deletion = useDeletePersonaMutation();
+    return null;
+  }
+  render(
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(
+        CommunitiesProvider,
+        null,
+        createElement(PersonaDeletionSurface),
+      ),
+    ),
+  );
+
+  await act(() => deletion.mutateAsync("persona"));
+
+  assert.deepEqual(
+    commands.find(([name]) => name === "delete_persona"),
+    [
+      "delete_persona",
+      {
+        id: "persona",
+        expectedRelayUrl: RELAY,
+        expectedSignerPubkey: PK,
+      },
+    ],
+  );
+});
 
 for (const owner of ["agents", "profile"]) {
   for (const scenario of [
@@ -268,6 +317,8 @@ for (const owner of ["agents", "profile"]) {
         {
           pubkey: PK,
           forceRemoteDelete: true,
+          expectedRelayUrl: RELAY,
+          expectedSignerPubkey: PK,
         },
       );
       if (owner === "agents") {
@@ -353,8 +404,8 @@ test("unknown waits for shutdown before confirmation/delete; cancellation retain
     channels: [channel],
     relayAgents: directory,
     getAvailability: () => undefined,
-    deleteManagedAgent: ({ pubkey, forceRemoteDelete }) =>
-      deleteManagedAgent(pubkey, forceRemoteDelete),
+    deleteManagedAgent,
+    scope: SCOPE,
   });
   await waitFor(() => assert.equal(typeof release, "function"));
   assert.deepEqual(confirms, []);
@@ -367,14 +418,14 @@ test("unknown waits for shutdown before confirmation/delete; cancellation retain
 
 test("no channel warns without claiming process state; local deletion ignores presence", async () => {
   setup();
-  const remove = ({ pubkey, forceRemoteDelete }) =>
-    deleteManagedAgent(pubkey, forceRemoteDelete);
+  const remove = deleteManagedAgent;
   await deleteManagedAgentWithRules({
     agent,
     channels: [],
     relayAgents: [],
     getAvailability: () => undefined,
     deleteManagedAgent: remove,
+    scope: SCOPE,
   });
   assert.match(confirms[0], /may still be running/);
   assert.doesNotMatch(confirms[0], /will keep running|offline/i);
@@ -392,9 +443,18 @@ test("no channel warns without claiming process state; local deletion ignores pr
       throw new Error("must not consult presence");
     },
     deleteManagedAgent: remove,
+    scope: SCOPE,
   });
   assert.deepEqual(effects(), [
-    ["delete_managed_agent", { pubkey: PK, forceRemoteDelete: null }],
+    [
+      "delete_managed_agent",
+      {
+        pubkey: PK,
+        forceRemoteDelete: null,
+        expectedRelayUrl: RELAY,
+        expectedSignerPubkey: PK,
+      },
+    ],
   ]);
   assert.deepEqual(confirms, []);
 });

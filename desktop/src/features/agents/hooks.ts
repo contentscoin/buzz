@@ -601,9 +601,13 @@ export function useUpdatePersonaMutation() {
 
 export function useDeletePersonaMutation() {
   const queryClient = useQueryClient();
+  const commandScope = useManagedAgentCommandScopeSnapshot();
 
   return useMutation({
-    mutationFn: (id: string) => deletePersona(id),
+    mutationFn: (id: string) => {
+      const scope = resolveManagedAgentCommandScope({}, commandScope);
+      return deletePersona({ id, ...scope });
+    },
     onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: personasQueryKey }),
@@ -736,10 +740,20 @@ export function useDeleteManagedAgentMutation() {
     mutationFn: ({
       pubkey,
       forceRemoteDelete,
+      expectedRelayUrl,
+      expectedSignerPubkey,
     }: {
       pubkey: string;
       forceRemoteDelete?: boolean;
-    }) => deleteManagedAgent(pubkey, forceRemoteDelete),
+      expectedRelayUrl: string;
+      expectedSignerPubkey: string;
+    }) =>
+      deleteManagedAgent({
+        pubkey,
+        forceRemoteDelete,
+        expectedRelayUrl,
+        expectedSignerPubkey,
+      }),
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey });
       await queryClient.invalidateQueries({ queryKey: relayAgentsQueryKey });

@@ -5,7 +5,7 @@ use std::sync::{atomic::Ordering, Arc};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::{app_state::AppState, events, relay::submit_event};
+use crate::{app_state::AppState, events, relay::submit_event_at_with_keys};
 
 use super::pipeline::start_auto_enabled_transcription;
 use super::relay_api::MAX_HUDDLE_AGENTS;
@@ -51,8 +51,18 @@ pub fn interrupt_huddle_speech(
 #[tauri::command]
 pub async fn remove_agent_from_huddle(
     agent_pubkey: String,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _workspace_guard = state.workspace_apply_lock.lock().await;
+    let relay_base = crate::relay::relay_api_base_url_with_override(&state);
+    crate::relay::assert_expected_relay_scope(expected_relay_url.as_deref(), &relay_base)?;
+    let signing_keys = state.signing_keys()?;
+    crate::relay::assert_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        &signing_keys.public_key().to_hex(),
+    )?;
     validate_pubkey_hex(&agent_pubkey)?;
 
     let (ephemeral_channel_id, huddle_generation) = {
@@ -82,9 +92,11 @@ pub async fn remove_agent_from_huddle(
 
     let ephemeral_channel_uuid =
         Uuid::parse_str(&ephemeral_channel_id).map_err(|error| error.to_string())?;
-    submit_event(
+    submit_event_at_with_keys(
         events::build_remove_member(ephemeral_channel_uuid, &agent_pubkey)?,
         &state,
+        &relay_base,
+        &signing_keys,
     )
     .await?;
 

@@ -30,7 +30,11 @@ pub(super) fn workspace_owner_hex(state: &AppState) -> Result<String, String> {
 mod pending;
 #[cfg(test)]
 use pending::build_agent_archive_request;
-pub(crate) use pending::{retain_managed_agent_pending, tombstone_managed_agent_pending};
+pub(crate) use pending::{
+    finalize_managed_agent_deletion_at, stage_managed_agent_delete_intents_at,
+    ManagedAgentDeleteIntent,
+};
+pub(crate) use pending::{recover_managed_agent_delete_intents, retain_managed_agent_pending};
 
 /// Build a summary from fresh disk state (personas, teams, global config).
 /// For one-shot command paths only — the 5s list poll calls
@@ -1153,10 +1157,33 @@ fn run_managed_agent_deletion<T>(
 pub async fn delete_managed_agent(
     pubkey: String,
     force_remote_delete: Option<bool>,
+    expected_relay_url: Option<String>,
+    expected_signer_pubkey: Option<String>,
     app: AppHandle,
 ) -> Result<(), String> {
     use tauri::Manager;
+
+    // Serialize the complete destructive operation against workspace changes.
+    // The UI-captured tenant and signer are checked before any local record or
+    // key can be removed, then the exact scoped retention DB and owner keys are
+    // carried into the blocking delete body.
+    let state = app.state::<AppState>();
+    let _workspace_guard = state.workspace_apply_lock.lock().await;
+    let retention_scope = crate::managed_agents::retention::active_retention_scope(&app, &state)?;
+    crate::relay::assert_expected_relay_scope(
+        expected_relay_url.as_deref(),
+        &crate::relay::relay_http_base_url(&retention_scope.relay_url),
+    )?;
+    crate::relay::assert_expected_signer(
+        expected_signer_pubkey.as_deref(),
+        &retention_scope.owner_keys.public_key().to_hex(),
+    )?;
+    let retention_db_path = retention_scope.db_path;
+    let owner_keys = retention_scope.owner_keys;
+    let delete_app = app.clone();
+
     tokio::task::spawn_blocking(move || {
+        let app = delete_app;
         let state = app.state::<AppState>();
         {
             let _store_guard = state
@@ -1191,21 +1218,25 @@ pub async fn delete_managed_agent(
             // invariant — a buggy or compromised IPC caller cannot silently orphan a live
             // remote deployment. The frontend sends force_remote_delete: true only after
             // the user confirms the orphan warning.
-            if let Some(record) = records.iter().find(|r| r.pubkey == pubkey) {
-                if record.backend != BackendKind::Local
-                    && record.backend_agent_id.is_some()
-                    && !force_remote_delete.unwrap_or(false)
-                {
-                    return Err(
-                        "cannot delete a deployed remote agent without force_remote_delete: true"
-                            .to_string(),
-                    );
-                }
+            let record = records
+                .iter()
+                .find(|record| record.pubkey == pubkey)
+                .ok_or_else(|| format!("agent {pubkey} not found"))?;
+            if record.backend != BackendKind::Local
+                && record.backend_agent_id.is_some()
+                && !force_remote_delete.unwrap_or(false)
+            {
+                return Err(
+                    "cannot delete a deployed remote agent without force_remote_delete: true"
+                        .to_string(),
+                );
             }
 
-            if !records.iter().any(|record| record.pubkey == pubkey) {
-                return Err(format!("agent {pubkey} not found"));
-            }
+            let intent = ManagedAgentDeleteIntent::new(&pubkey, record.persona_id.as_deref());
+            stage_managed_agent_delete_intents_at(
+                &retention_db_path,
+                std::slice::from_ref(&intent),
+            )?;
             run_managed_agent_deletion(&base_dir, &pubkey, &mut records, |records| {
                 if let Some(record) = records.iter_mut().find(|record| record.pubkey == pubkey) {
                     stop_managed_agent_process(&app, record, &mut runtimes)?;
@@ -1214,13 +1245,16 @@ pub async fn delete_managed_agent(
                 records.retain(|record| record.pubkey != pubkey);
                 save_managed_agents(&app, records)
             })?;
-            crate::managed_agents::delete_agent_key(&pubkey);
-            // Tombstone after confirmed removal (inside lock; every published
-            // agent tombstones). The NIP-IA kind:9035 archive request — which
-            // stops the identity appearing in member pickers and autocomplete —
-            // is enqueued in the SAME transaction, its `persona_id` derived from
-            // the retained 30177 head.
-            tombstone_managed_agent_pending(&app, &state, &pubkey);
+
+            // Keep the intent until BOTH local key removal and the atomic
+            // tombstone+archive enqueue succeed. Any failure propagates while
+            // leaving a boot-recoverable retry witness in the scoped DB.
+            finalize_managed_agent_deletion_at(
+                &retention_db_path,
+                &owner_keys,
+                &intent,
+                crate::managed_agents::try_delete_agent_key,
+            )?;
         }
         try_regenerate_nest(&app);
         Ok(())
