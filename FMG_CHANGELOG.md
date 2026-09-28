@@ -1,5 +1,44 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.5
+
+Base: FMG live release `0.5.26-fmg.4`.
+
+### Fixed
+
+- Automatic local-agent restarts now record a durable, scope-isolated process
+  generation before stop/start, preventing the same drift edge from replaying
+  after FMG Buzz restarts.
+- FMG Center and thread work-report views subscribe before history backfill,
+  deduplicate events and repair their bounded history after relay reconnects.
+- Managed-agent, persona and Huddle removal now remains bound to the captured
+  community and signer, journals intent before local removal, and recovers the
+  relay tombstone and identity archive after interruption.
+- Project Git commands now enforce whole-process-tree containment, bounded
+  output and explicit deadlines, including cleanup of credential and transport
+  helpers.
+- ACP messaging guidance now uses UTF-8 content files for multiline Korean,
+  emoji and other shell-sensitive text on every supported operating system.
+
+### Release engineering
+
+- Fork Sprig image publication now defaults to the current repository owner's
+  GHCR namespace.
+- The FMG release receipt now records descriptor schema 2 and validates the
+  pinned relay, Sprig, OpenClaw channel and repository-owned Buzz Admin
+  identities before build or promotion.
+- OpenClaw runtime installers and the live gate verify immutable package and
+  executable hashes, the active Gateway generation, exact agent tool grants
+  and rollback state.
+
+### Deployment
+
+- Hostinger now runs the official Buzz channel with the repository-owned
+  `buzz-admin` `0.2.1` plugin and the pinned `sprig-v0.5.26-fmg.1` runtime.
+- The full no-delivery live gate passed against the deployed OpenClaw runtime.
+  The pinned relay digest and Sprig binary are unchanged for this desktop
+  installer release.
+
 ## 0.5.26-fmg.4
 
 Base: FMG live release `0.5.26-fmg.3`.

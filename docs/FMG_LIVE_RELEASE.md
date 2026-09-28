@@ -2,16 +2,16 @@
 
 This runbook publishes FMG Buzz without changing the upstream release ledger.
 The release descriptor is [`.release/fmg-live.json`](../.release/fmg-live.json).
-The initial live desktop version was `0.5.26-fmg.1`; the current desktop-only
-update is `0.5.26-fmg.4`.
+The initial live desktop version was `0.5.26-fmg.1`; the current integrated
+release is `0.5.26-fmg.5`.
 
 ## Release identity
 
 | Item | Value |
 | --- | --- |
 | Upstream base | `desktop-v0.5.25` / `c8f73213089cbd5a0f1e675d3193558280d46e10` |
-| Desktop version | `0.5.26-fmg.4` |
-| Desktop tag | `fmg-desktop-v0.5.26-fmg.4` |
+| Desktop version | `0.5.26-fmg.5` |
+| Desktop tag | `fmg-desktop-v0.5.26-fmg.5` |
 | Windows app identity | `Buzz` / `xyz.block.buzz.app` |
 | Managed Git | Git for Windows MinGit `2.55.0.5`, pinned by SHA-256 in `scripts/windows-managed-git.json` |
 | Relay image | `ghcr.io/contentscoin/buzz@sha256:eb2113d717d3c0d352f5d14793e0a3638a20597734d3756db040cbdf90430f39` |
@@ -21,17 +21,19 @@ update is `0.5.26-fmg.4`.
 | Official Buzz runtime | `@openclaw/buzz@2026.9.6`, managed package tree SHA-256 `1e3ce21a8e32d54bda8d9ec3b6791477c28ba8136ef74fbe03c1d3cd5ad9aab7`, entry SHA-256 `67559e787eb7aaa459d69519b2c9b4c24ea0779557fc067047fef028ed7bbdb0` |
 | Public relay | `wss://buzz-dnb0.srv2006121.hstgr.cloud` |
 
-`0.5.26-fmg.4` is greater than the installed `0.5.26-fmg.3`, so the NSIS
+`0.5.26-fmg.5` is greater than the installed `0.5.26-fmg.4`, so the NSIS
 installer follows the normal in-place upgrade path. Keeping the application
 identifier preserves the existing desktop community and identity storage.
 
 ### Release scope
 
-`0.5.26-fmg.4` changes only the Windows desktop app. Run the desktop candidate
-and publish procedure below, but do not redeploy the relay, OpenClaw service, or
-Sprig runtime for this version. The relay and agent-runtime procedures apply
-only when a future release descriptor assigns them a new immutable image digest
-or a new uniquely named runtime release.
+`0.5.26-fmg.5` delivers the Windows fixes listed in `FMG_CHANGELOG.md` and
+records the completed, attested OpenClaw Buzz deployment. The official Buzz
+channel, `buzz-admin` `0.2.1` and the dedicated no-delivery live-gate agent are
+already deployed. Publishing the desktop candidate must not reinstall them.
+The relay image and Sprig runtime remain pinned to their existing immutable
+identities; change either only when a future descriptor assigns a new digest or
+uniquely named runtime release.
 
 ## Implemented rollout controls
 
@@ -52,7 +54,7 @@ The release does not declare environment flags that the application ignores.
 3. Run once with `publish=false`. Download the workflow artifact and install it
    over the existing Buzz installation. Record the candidate run ID and the
    installer SHA-256 printed in the workflow summary.
-4. Confirm the installed version is `0.5.26-fmg.4`, the **FMG 센터** entry is
+4. Confirm the installed version is `0.5.26-fmg.5`, the **FMG 센터** entry is
    visible, the existing communities remain available, and the Hostinger
    community reconnects. In **Settings → Agents**, confirm Codex offers
    `GPT-6 Sol` and `GPT-6 Luna`, Claude offers `Claude Opus 5.5`, and both
@@ -70,7 +72,7 @@ The release does not declare environment flags that the application ignores.
    the recorded `candidate_run_id` and `candidate_sha256`. The publish job does
    not rebuild. It downloads that immutable Actions artifact, verifies its
    receipt, source commit and hash, then creates
-   `fmg-desktop-v0.5.26-fmg.4`.
+   `fmg-desktop-v0.5.26-fmg.5`.
 6. If the tag or release already exists, the workflow resolves the tag to its
    commit and byte-compares the existing assets. It succeeds only when they are
    identical; it never replaces an existing release asset.
@@ -78,9 +80,9 @@ The release does not declare environment flags that the application ignores.
 The workflow creates a non-updating, unsigned x64 NSIS installer. It does not
 promote the build into the upstream `buzz-desktop-latest` updater channel.
 
-## Build and deploy the relay (not part of 0.5.26-fmg.4)
+## Build and deploy the relay (not part of 0.5.26-fmg.5)
 
-Skip this section for `0.5.26-fmg.4`. Use it only for a release that explicitly
+Skip this section for `0.5.26-fmg.5`. Use it only for a release that explicitly
 changes the relay image recorded in the release descriptor.
 
 1. Let the existing **Docker image** workflow complete for the same `main`
@@ -94,7 +96,7 @@ changes the relay image recorded in the release descriptor.
 5. Redeploy the project and record the running image digest with the desktop
    receipt. Do not use a mutable `main` or `latest` tag as the deployment record.
 
-## Build and deploy the ACP agent runtime (not part of 0.5.26-fmg.4)
+## OpenClaw Buzz deployment and future ACP runtime rollout
 
 The live integration uses OpenClaw's official `@openclaw/buzz` channel. There
 is no separate `buzz-openclaw-agent` Compose service. The immutable Sprig
@@ -103,10 +105,12 @@ and the repository-owned `buzz-admin` plugin exposes the narrow operational
 tools needed by an OpenClaw agent. Replacing only the relay image does not
 update this Gateway runtime.
 
-Skip this section for `0.5.26-fmg.4`. `sprig-v0.5.26-fmg.1` is an existing
-immutable release and must not be recreated, moved, or replaced. A future agent
-runtime rollout must first record a new unique Sprig tag, asset, source commit,
-and SHA-256 in the release descriptor.
+For `0.5.26-fmg.5`, the `buzz-admin` `0.2.1` deployment described below is
+already complete and the live gate has passed. Do not repeat it during desktop
+promotion. `sprig-v0.5.26-fmg.1` is an existing immutable release and must not
+be recreated, moved, or replaced. A future agent runtime rollout must first
+record a new unique Sprig tag, asset, source commit and SHA-256 in the release
+descriptor.
 
 1. Read the new Sprig tag and source commit from the release descriptor. Create
    that previously unused tag at the recorded commit, then verify the tag
