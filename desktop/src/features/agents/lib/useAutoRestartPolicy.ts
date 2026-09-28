@@ -21,6 +21,12 @@ import {
   type AutoRestartEdgeState,
 } from "./autoRestartPolicy";
 import {
+  clearConsumedAutoRestartGeneration,
+  consumeAutoRestartGeneration,
+  getConsumedAutoRestartGeneration,
+  pruneAutoRestartConsumptionScope,
+} from "./autoRestartConsumptionStore";
+import {
   beginManualRestartRetry,
   clearAutoRestartFailure,
   recordAutomaticRestartFailure,
@@ -37,6 +43,13 @@ const restartAttempts = new Set<string>();
 
 function attemptKey(scope: string, pubkey: string) {
   return `${scope.trim().toLowerCase()}\n${pubkey.trim().toLowerCase()}`;
+}
+
+/** A running process owns one restart edge until it stops or drift clears. */
+export function autoRestartGeneration(
+  agent: Pick<ManagedAgent, "lastStartedAt" | "pid">,
+) {
+  return `${agent.lastStartedAt ?? "unknown"}\n${agent.pid ?? "unknown"}`;
 }
 
 export function getAutoRestartFailureScope(
@@ -202,11 +215,25 @@ export function useAutoRestartPolicy(
   const queryClient = useQueryClient();
   const agents: ManagedAgent[] | undefined = useManagedAgentsQuery().data;
   const edgesRef = React.useRef(new Map<string, AutoRestartEdgeState>());
+  const loadedGenerationsRef = React.useRef(new Set<string>());
+  const loadingGenerationsRef = React.useRef(new Set<string>());
+  const persistedGenerationsRef = React.useRef(
+    new Map<string, string | null>(),
+  );
+  const prunedRosterRef = React.useRef("");
+  const mountedRef = React.useRef(true);
   const failureScope = getAutoRestartFailureScope(scope, expectedSignerPubkey);
   const tenantKey = failureScope ?? "";
   const edgeTenantRef = React.useRef(tenantKey);
   const [, setTick] = React.useState(0);
   const documentVisible = useDocumentVisible();
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Re-evaluate on an interval so the quiescence clock advances even when
   // summaries and observer stores are quiet.
@@ -226,15 +253,85 @@ export function useAutoRestartPolicy(
     const edges = edgesRef.current;
     if (edgeTenantRef.current !== tenantKey) {
       edges.clear();
+      loadedGenerationsRef.current.clear();
+      loadingGenerationsRef.current.clear();
+      persistedGenerationsRef.current.clear();
+      prunedRosterRef.current = "";
       edgeTenantRef.current = tenantKey;
     }
 
+    const rosterKey = `${tenantKey}\n${agents
+      .map((agent) => agent.pubkey.trim().toLowerCase())
+      .sort()
+      .join("\n")}`;
+    if (prunedRosterRef.current !== rosterKey) {
+      prunedRosterRef.current = rosterKey;
+      void pruneAutoRestartConsumptionScope(
+        failureScope,
+        agents.map((agent) => agent.pubkey),
+      );
+    }
+
     for (const agent of agents) {
+      const key = attemptKey(failureScope, agent.pubkey);
+      const generation = autoRestartGeneration(agent);
+      if (!loadedGenerationsRef.current.has(key)) {
+        if (!loadingGenerationsRef.current.has(key)) {
+          loadingGenerationsRef.current.add(key);
+          void getConsumedAutoRestartGeneration(failureScope, agent.pubkey)
+            .then((storedGeneration) => {
+              if (!mountedRef.current || edgeTenantRef.current !== tenantKey)
+                return;
+              persistedGenerationsRef.current.set(key, storedGeneration);
+              edgesRef.current.set(agent.pubkey, {
+                consumed: storedGeneration === generation,
+                armedAt: null,
+              });
+              loadedGenerationsRef.current.add(key);
+              setTick((tick) => tick + 1);
+            })
+            .finally(() => loadingGenerationsRef.current.delete(key));
+        }
+        // Loading is a safety gate: never fire before the durable journal for
+        // this tenant + signer + agent has been checked.
+        continue;
+      }
+
       const isRunning = agent.status === "running";
       const edge = nextEdgeState(edges.get(agent.pubkey), {
         needsRestart: agent.needsRestart,
         isRunning,
       });
+      const persistedGeneration = persistedGenerationsRef.current.get(key);
+
+      const shouldClearPersisted =
+        persistedGeneration !== null &&
+        (!agent.needsRestart ||
+          !isRunning ||
+          persistedGeneration !== generation);
+      if (shouldClearPersisted) {
+        // Retire the old record before this key may arm again. Waiting on the
+        // actual localStorage removal prevents a new-generation consume from
+        // racing an older async clear and being erased after it commits.
+        loadedGenerationsRef.current.delete(key);
+        loadingGenerationsRef.current.add(key);
+        void clearConsumedAutoRestartGeneration(failureScope, agent.pubkey)
+          .then((cleared) => {
+            if (!mountedRef.current || edgeTenantRef.current !== tenantKey)
+              return;
+            if (cleared) {
+              persistedGenerationsRef.current.set(key, null);
+              edgesRef.current.set(agent.pubkey, {
+                consumed: false,
+                armedAt: null,
+              });
+            }
+            loadedGenerationsRef.current.add(key);
+            setTick((tick) => tick + 1);
+          })
+          .finally(() => loadingGenerationsRef.current.delete(key));
+        continue;
+      }
 
       const working = getAgentWorkingState(agent.pubkey);
       const observer = getAgentObserverSnapshot(agent.pubkey, true);
@@ -271,37 +368,55 @@ export function useAutoRestartPolicy(
       }
 
       // decision === "fire"
-      const key = attemptKey(failureScope, agent.pubkey);
       if (restartAttempts.has(key)) continue;
       restartAttempts.add(key);
-      // The in-flight set prevents duplicate attempts. Reset continuity now,
-      // but consume the edge only if the pre-fire recheck reaches a restart or
-      // fails. A transient recheck that returns false must be able to re-arm.
-      edges.set(agent.pubkey, { consumed: false, armedAt: null });
+      // The durable journal is the commit point. It must land before stop/start
+      // so a renderer or app restart cannot replay the same process generation.
+      edges.set(agent.pubkey, { consumed: true, armedAt: null });
 
       void (async () => {
         try {
+          const consumption = await consumeAutoRestartGeneration(
+            failureScope,
+            agent.pubkey,
+            generation,
+          );
+          if (consumption === "already-consumed") {
+            persistedGenerationsRef.current.set(key, generation);
+            return;
+          }
+          if (consumption === "unavailable") {
+            // Fail closed: automatic stop/start is unsafe if its one-shot
+            // journal cannot be made durable. The existing explicit retry is
+            // still offered through the failure store.
+            recordAutomaticRestartFailure(failureScope, agent.pubkey);
+            return;
+          }
+          persistedGenerationsRef.current.set(key, generation);
+
           const restarted = await performAutomaticRestart(
             scope,
             agent.pubkey,
             expectedSignerPubkey,
           );
-          if (edgeTenantRef.current === tenantKey) {
-            edgesRef.current.set(agent.pubkey, {
-              consumed: restarted,
-              armedAt: null,
-            });
-          }
           if (restarted) {
             clearAutoRestartFailure(failureScope, agent.pubkey);
+          } else {
+            // No stop/start happened: release the journal so a transient gate
+            // change can complete a fresh three-minute continuity window.
+            await clearConsumedAutoRestartGeneration(
+              failureScope,
+              agent.pubkey,
+            );
+            persistedGenerationsRef.current.set(key, null);
+            if (edgeTenantRef.current === tenantKey) {
+              edgesRef.current.set(agent.pubkey, {
+                consumed: false,
+                armedAt: null,
+              });
+            }
           }
         } catch {
-          if (edgeTenantRef.current === tenantKey) {
-            edgesRef.current.set(agent.pubkey, {
-              consumed: true,
-              armedAt: null,
-            });
-          }
           // Keep the edge consumed and publish a durable renderer-level
           // failure with exactly one explicit user retry. There is no timer or
           // effect that consumes that retry, so persistent failures cannot
@@ -321,6 +436,11 @@ export function useAutoRestartPolicy(
     for (const pubkey of edges.keys()) {
       if (!known.has(pubkey)) {
         edges.delete(pubkey);
+        const key = attemptKey(failureScope, pubkey);
+        loadedGenerationsRef.current.delete(key);
+        loadingGenerationsRef.current.delete(key);
+        persistedGenerationsRef.current.delete(key);
+        void clearConsumedAutoRestartGeneration(failureScope, pubkey);
         clearAutoRestartFailure(failureScope, pubkey);
       }
     }
