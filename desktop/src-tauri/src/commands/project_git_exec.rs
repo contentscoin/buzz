@@ -4,12 +4,17 @@
 //! the identity nsec is handed to `git-credential-nostr` via environment
 //! variables so nothing key-related ever touches disk or global git config.
 
-use crate::{app_state::AppState, managed_agents::resolve_command};
+use crate::{
+    app_state::AppState,
+    managed_agents::{resolve_command, BoundedChild},
+};
 use nostr::{Keys, ToBech32};
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use url::Url;
 
@@ -19,6 +24,15 @@ use url::Url;
 const LOCAL_GIT_TIMEOUT: Duration = Duration::from_secs(60);
 const REMOTE_GIT_TIMEOUT: Duration = Duration::from_secs(300);
 const MIN_NOSTR_GIT_VERSION: (u64, u64, u64) = (2, 46, 0);
+
+/// Maximum payload retained from each of stdout and stderr. The fixed-size
+/// truncation marker is appended outside this budget, so each captured stream
+/// remains bounded by this value plus a short diagnostic.
+const GIT_STREAM_CAPTURE_LIMIT: usize = 4 * 1024 * 1024;
+const GIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+#[cfg(unix)]
+const GIT_DRAIN_IDLE_POLL: Duration = Duration::from_millis(5);
 
 #[derive(Clone)]
 struct GitExecutable {
@@ -220,13 +234,178 @@ pub(crate) struct GitAuthConfig {
     allow_file_transport: bool,
 }
 
-fn read_pipe_lossy(pipe: Option<impl Read>) -> String {
-    let Some(mut pipe) = pipe else {
-        return String::new();
+#[derive(Debug)]
+struct CapturedGitStream {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+#[derive(Debug)]
+struct GitCommandOutput {
+    status: ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+/// Drain a child stream while retaining at most `capture_limit` bytes.
+///
+/// The reader keeps draining after the retention cap so a finite, chatty Git
+/// command can still finish. After teardown raises `stop`, Unix drains all
+/// already-buffered output until `WouldBlock`; a continuously-writing process
+/// group escapee is cut off once it crosses the capture cap. Windows waits for
+/// EOF because descendants cannot escape the non-breakaway Job Object.
+fn spawn_git_drain<R: Read + Send + 'static>(
+    mut reader: R,
+    capture_limit: usize,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<std::io::Result<CapturedGitStream>> {
+    #[cfg(windows)]
+    let _ = &stop;
+    std::thread::spawn(move || {
+        let mut bytes = Vec::with_capacity(capture_limit.min(64 * 1024));
+        let mut truncated = false;
+        let mut chunk = [0u8; 8192];
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => return Ok(CapturedGitStream { bytes, truncated }),
+                Ok(read) => {
+                    let remaining = capture_limit.saturating_sub(bytes.len());
+                    let keep = remaining.min(read);
+                    bytes.extend_from_slice(&chunk[..keep]);
+                    truncated |= keep < read;
+                    #[cfg(unix)]
+                    if stop.load(Ordering::Relaxed) && truncated {
+                        return Ok(CapturedGitStream { bytes, truncated });
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                #[cfg(unix)]
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    if stop.load(Ordering::Relaxed) {
+                        return Ok(CapturedGitStream { bytes, truncated });
+                    }
+                    std::thread::sleep(GIT_DRAIN_IDLE_POLL);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    })
+}
+
+fn render_git_stream(mut capture: CapturedGitStream, capture_limit: usize) -> String {
+    if capture.truncated {
+        capture.bytes.extend_from_slice(
+            format!("\n[output truncated by Buzz after {capture_limit} bytes]\n").as_bytes(),
+        );
+    }
+    String::from_utf8_lossy(&capture.bytes).to_string()
+}
+
+fn join_git_drain(
+    drain: JoinHandle<std::io::Result<CapturedGitStream>>,
+    stream: &str,
+    diagnostic: &str,
+    capture_limit: usize,
+) -> Result<String, String> {
+    let capture = drain
+        .join()
+        .map_err(|_| format!("{diagnostic} {stream} reader panicked"))?
+        .map_err(|error| format!("failed to read {diagnostic} {stream}: {error}"))?;
+    Ok(render_git_stream(capture, capture_limit))
+}
+
+enum GitWaitOutcome {
+    Exited(ExitStatus),
+    TimedOut,
+    Failed(std::io::Error),
+}
+
+fn run_contained_git_command_with_limit(
+    mut command: Command,
+    diagnostic: &str,
+    timeout: Duration,
+    capture_limit: usize,
+) -> Result<GitCommandOutput, String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::util::configure_no_window(&mut command);
+
+    let mut child = BoundedChild::try_spawn(command)
+        .map_err(|error| format!("failed to run {diagnostic}: {error}"))?;
+    let Some(stdout_pipe) = child.take_stdout() else {
+        child.kill_tree();
+        child.reap();
+        return Err(format!("failed to capture {diagnostic} stdout"));
     };
-    let mut bytes = Vec::new();
-    let _ = pipe.read_to_end(&mut bytes);
-    String::from_utf8_lossy(&bytes).to_string()
+    let Some(stderr_pipe) = child.take_stderr() else {
+        child.kill_tree();
+        child.reap();
+        return Err(format!("failed to capture {diagnostic} stderr"));
+    };
+
+    #[cfg(unix)]
+    if !(crate::managed_agents::set_bounded_command_pipe_nonblocking(&stdout_pipe)
+        && crate::managed_agents::set_bounded_command_pipe_nonblocking(&stderr_pipe))
+    {
+        child.kill_tree();
+        child.reap();
+        return Err(format!(
+            "failed to configure bounded output capture for {diagnostic}"
+        ));
+    }
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stdout_drain = spawn_git_drain(stdout_pipe, capture_limit, stop.clone());
+    let stderr_drain = spawn_git_drain(stderr_pipe, capture_limit, stop.clone());
+
+    let deadline = Instant::now() + timeout;
+    let outcome = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break GitWaitOutcome::Exited(status),
+            Ok(None) if Instant::now() >= deadline => {
+                child.terminate_timed_out();
+                break GitWaitOutcome::TimedOut;
+            }
+            Ok(None) => std::thread::sleep(GIT_POLL_INTERVAL),
+            Err(error) => {
+                child.kill_tree();
+                break GitWaitOutcome::Failed(error);
+            }
+        }
+    };
+
+    // Even a successful Git root may have launched a background credential or
+    // transport helper. Tear down the owned tree before joining readers, then
+    // tell nonblocking Unix drains that no more output is required.
+    child.kill_tree();
+    child.reap();
+    stop.store(true, Ordering::Relaxed);
+
+    let stdout = join_git_drain(stdout_drain, "stdout", diagnostic, capture_limit);
+    let stderr = join_git_drain(stderr_drain, "stderr", diagnostic, capture_limit);
+
+    match outcome {
+        GitWaitOutcome::TimedOut => Err(format!(
+            "{diagnostic} timed out after {}s",
+            timeout.as_secs()
+        )),
+        GitWaitOutcome::Failed(error) => Err(format!("failed to wait for {diagnostic}: {error}")),
+        GitWaitOutcome::Exited(status) => Ok(GitCommandOutput {
+            status,
+            stdout: stdout?,
+            stderr: stderr?,
+        }),
+    }
+}
+
+fn run_contained_git_command(
+    command: Command,
+    diagnostic: &str,
+    timeout: Duration,
+) -> Result<GitCommandOutput, String> {
+    run_contained_git_command_with_limit(command, diagnostic, timeout, GIT_STREAM_CAPTURE_LIMIT)
 }
 
 pub(crate) fn run_git(
@@ -246,62 +425,20 @@ pub(crate) fn run_git(
         LOCAL_GIT_TIMEOUT
     };
     configure_git_auth(&mut command, auth, needs_credentials);
-    command.stdin(Stdio::null());
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    crate::util::configure_no_window(&mut command);
 
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("failed to run {}: {error}", auth.git_diagnostic))?;
-
-    // Drain the pipes on background threads so a chatty git process can't
-    // deadlock on a full pipe while we poll for exit below.
-    let stdout_pipe = child.stdout.take();
-    let stderr_pipe = child.stderr.take();
-    let stdout_thread = std::thread::spawn(move || read_pipe_lossy(stdout_pipe));
-    let stderr_thread = std::thread::spawn(move || read_pipe_lossy(stderr_pipe));
-
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if started.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = stdout_thread.join();
-                    let _ = stderr_thread.join();
-                    return Err(format!(
-                        "{} timed out after {}s",
-                        auth.git_diagnostic,
-                        timeout.as_secs()
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!(
-                    "failed to wait for {}: {error}",
-                    auth.git_diagnostic
-                ));
-            }
-        }
-    };
-
-    let stdout = stdout_thread.join().unwrap_or_default();
-    let stderr = stderr_thread.join().unwrap_or_default();
-    if !status.success() {
-        let stderr = stderr.trim().to_string();
+    let output = run_contained_git_command(command, &auth.git_diagnostic, timeout)?;
+    if !output.status.success() {
+        let stderr = output.stderr.trim().to_string();
         return Err(if stderr.is_empty() {
-            format!("{} exited with status {status}", auth.git_diagnostic)
+            format!(
+                "{} exited with status {}",
+                auth.git_diagnostic, output.status
+            )
         } else {
             format!("{} failed: {stderr}", auth.git_diagnostic)
         });
     }
-    Ok(stdout)
+    Ok(output.stdout)
 }
 
 fn configure_git_auth(command: &mut Command, auth: &GitAuthConfig, needs_credentials: bool) {
@@ -593,11 +730,134 @@ fn validate_clone_url_against_relay(clone_url: &str, relay_base: &str) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        clean_branch, clean_target_ref, credential_helper_config_value, git_needs_credentials,
-        git_subcommand, validate_clone_url, validate_clone_url_against_relay,
-        validate_local_clone_url,
-    };
+    use super::*;
+
+    const GIT_FIXTURE_MODE: &str = "BUZZ_PROJECT_GIT_EXEC_FIXTURE";
+
+    fn git_fixture_command(mode: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().expect("current test executable"));
+        command.args(["git_subprocess_fixture", "--nocapture", "--test-threads=1"]);
+        command.env(GIT_FIXTURE_MODE, mode);
+        command
+    }
+
+    /// Subprocess fixture for the production command runner. Invoking the test
+    /// executable avoids shell-specific quoting and gives every platform the
+    /// same descendant and large-output behavior.
+    #[test]
+    fn git_subprocess_fixture() {
+        use std::io::Write as _;
+
+        let Ok(mode) = std::env::var(GIT_FIXTURE_MODE) else {
+            return;
+        };
+        match mode.as_str() {
+            "large-output" => {
+                std::io::stdout()
+                    .write_all(&[b'o'; 4096])
+                    .expect("write fixture stdout");
+                std::io::stdout().flush().expect("flush fixture stdout");
+                std::io::stderr()
+                    .write_all(&[b'e'; 4096])
+                    .expect("write fixture stderr");
+                std::io::stderr().flush().expect("flush fixture stderr");
+            }
+            "descendant" => loop {
+                std::thread::sleep(Duration::from_millis(100));
+            },
+            "root-success" | "root-timeout" => {
+                let child = git_fixture_command("descendant")
+                    .spawn()
+                    .expect("spawn fixture descendant");
+                drop(child);
+                if mode == "root-timeout" {
+                    loop {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
+            }
+            other => panic!("unknown Git subprocess fixture mode: {other}"),
+        }
+    }
+
+    #[test]
+    fn command_capture_bounds_and_marks_both_streams() {
+        let output = run_contained_git_command_with_limit(
+            git_fixture_command("large-output"),
+            "Git output fixture",
+            Duration::from_secs(10),
+            128,
+        )
+        .expect("large finite output should complete");
+        let marker = "\n[output truncated by Buzz after 128 bytes]\n";
+        assert!(output.status.success());
+        assert!(output.stdout.ends_with(marker));
+        assert!(output.stderr.ends_with(marker));
+        assert!(output.stdout.len() <= 128 + marker.len());
+        assert!(output.stderr.len() <= 128 + marker.len());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn successful_root_reaps_descendant_before_reader_join() {
+        let command = git_fixture_command("root-success");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = run_contained_git_command_with_limit(
+                command,
+                "Git descendant fixture",
+                Duration::from_secs(10),
+                4096,
+            );
+            let _ = tx.send(result);
+        });
+        let result = rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("reader joins must not wait on a background descendant")
+            .expect("the fixture root exits successfully");
+        assert!(result.status.success());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn timeout_reaps_descendant_and_returns_without_reader_hang() {
+        let command = git_fixture_command("root-timeout");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = run_contained_git_command_with_limit(
+                command,
+                "Git timeout fixture",
+                Duration::from_secs(3),
+                4096,
+            );
+            let _ = tx.send(result);
+        });
+        let error = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("timeout teardown and reader joins must remain bounded")
+            .expect_err("the fixture must hit the command deadline");
+        assert!(error.contains("timed out after 3s"), "{error}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn containment_setup_failure_is_an_error() {
+        let result = BoundedChild::try_spawn_windows_with(
+            git_fixture_command("large-output"),
+            |_| -> Option<crate::managed_agents::JobHandle> { None },
+            |_| true,
+        );
+        let error = match result {
+            Ok(_) => panic!("Git must not run without whole-tree containment"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("whole-process-tree Job Object containment setup failed"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn credential_helper_config_value_shell_quotes_forward_slash_path() {

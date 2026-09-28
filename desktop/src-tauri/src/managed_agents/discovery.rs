@@ -10,6 +10,9 @@ use crate::managed_agents::{
 };
 mod auth_status_cache;
 mod bounded_command;
+#[cfg(unix)]
+pub(crate) use bounded_command::set_nonblocking as set_bounded_command_pipe_nonblocking;
+pub(crate) use bounded_command::BoundedChild;
 pub(crate) mod command_search;
 mod login_shell;
 mod presets;

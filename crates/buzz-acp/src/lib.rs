@@ -5305,11 +5305,17 @@ mod agent_draft_prompt_tests {
     }
 
     #[test]
-    fn shared_base_prompt_teaches_real_newlines_for_multiline_messages() {
+    fn shared_base_prompt_teaches_os_neutral_utf8_content_files() {
         let prompt = include_str!("base_prompt.md");
-        assert!(prompt.contains("pass real newline bytes through stdin"));
-        assert!(prompt.contains("single-quoted shell strings preserve `\\n` literally"));
-        assert!(prompt.contains("buzz messages send ... --content -"));
+        assert!(prompt.contains("the same CLI form works on every supported OS"));
+        assert!(prompt.contains("`--content-file <PATH>`"));
+        assert!(prompt.contains("[System.IO.File]::WriteAllText"));
+        assert!(prompt.contains("[System.Text.UTF8Encoding]::new($false)"));
+        assert!(prompt.contains("Korean, emoji"));
+        assert!(prompt.contains("첫 줄`n`n둘째 줄 👋"));
+        assert!(prompt.contains("Do not put literal `\\n` escapes in `--content`"));
+        assert!(!prompt.contains("printf 'first\\n\\nsecond\\n'"));
+        assert!(!prompt.contains("pass real newline bytes through stdin"));
     }
 
     #[test]

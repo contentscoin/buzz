@@ -77,6 +77,9 @@ pub(crate) use definition_validation::{
     validate_agent_definition_text, validate_agent_description_text,
     validate_managed_agent_definition_text, validate_visible_text,
 };
+#[cfg(unix)]
+pub(crate) use discovery::set_bounded_command_pipe_nonblocking;
+pub(crate) use discovery::BoundedChild;
 pub use discovery::*;
 pub use env_vars::*;
 #[cfg(windows)]
