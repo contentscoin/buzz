@@ -55,7 +55,7 @@ export function useProfileAgentDeletion({
 }: UseProfileAgentDeletionInput) {
   const queryClient = useQueryClient();
   const captureCommandScope = React.useCallback(() => {
-    if (commandScope === null) {
+    if (!commandScope) {
       throw new Error(
         "Buzz is still connecting to this community. Try again in a moment.",
       );

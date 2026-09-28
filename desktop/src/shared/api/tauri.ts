@@ -779,13 +779,21 @@ export async function createManagedAgent(input: CreateManagedAgentInput) {
   };
 }
 
+export type DeleteManagedAgentInput = {
+  pubkey: string;
+  forceRemoteDelete?: boolean;
+  expectedRelayUrl: string;
+  expectedSignerPubkey: string;
+};
+
 export async function deleteManagedAgent(
-  pubkey: string,
-  forceRemoteDelete?: boolean,
+  input: DeleteManagedAgentInput,
 ): Promise<void> {
   await invokeTauri("delete_managed_agent", {
-    pubkey,
-    forceRemoteDelete: forceRemoteDelete ?? null,
+    pubkey: input.pubkey,
+    forceRemoteDelete: input.forceRemoteDelete ?? null,
+    expectedRelayUrl: input.expectedRelayUrl,
+    expectedSignerPubkey: input.expectedSignerPubkey,
   });
 }
 

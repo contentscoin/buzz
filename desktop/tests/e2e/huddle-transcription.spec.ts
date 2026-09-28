@@ -1189,7 +1189,48 @@ test("keeps the huddle avatar strip compact and exposes the full roster", async 
   );
 });
 
-test("removes an agent from its menu without showing an extra participant control", async ({
+test("removes an agent from the main drawer with the captured workspace scope", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    huddle: {
+      parentChannelId: HUDDLE_PARENT_ID,
+      ephemeralChannelId: HUDDLE_CHANNEL_ID,
+      members: [
+        { pubkey: TEST_IDENTITIES.tyler.pubkey, role: "member" },
+        { pubkey: TEST_IDENTITIES.alice.pubkey, role: "bot" },
+      ],
+    },
+  });
+  await page.goto("/");
+
+  await page.getByTestId("huddle-agent-voice-menu-trigger").click();
+  const removeButton = page.getByRole("button", {
+    name: "Remove alice from huddle",
+  });
+  page.once("dialog", (dialog) => dialog.accept());
+  await removeButton.click({ force: true });
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window.__BUZZ_E2E_COMMAND_LOG__ ?? []).findLast(
+            (entry) => entry.command === "remove_agent_from_huddle",
+          )?.payload ?? null,
+      ),
+    )
+    .toEqual({
+      agentPubkey: TEST_IDENTITIES.alice.pubkey,
+      expectedRelayUrl: "ws://localhost:3000",
+      expectedSignerPubkey: "deadbeef".repeat(8),
+    });
+  await expect(page.getByTestId("huddle-agent-voice-menu-trigger")).toHaveCount(
+    0,
+  );
+});
+
+test("removes an agent from its room menu with the captured workspace scope", async ({
   page,
 }) => {
   await installMockBridge(page, {
@@ -1219,13 +1260,18 @@ test("removes an agent from its menu without showing an extra participant contro
 
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        (window.__BUZZ_E2E_COMMAND_LOG__ ?? []).some(
-          (entry) => entry.command === "remove_agent_from_huddle",
-        ),
+      page.evaluate(
+        () =>
+          (window.__BUZZ_E2E_COMMAND_LOG__ ?? []).findLast(
+            (entry) => entry.command === "remove_agent_from_huddle",
+          )?.payload ?? null,
       ),
     )
-    .toBe(true);
+    .toEqual({
+      agentPubkey: TEST_IDENTITIES.alice.pubkey,
+      expectedRelayUrl: "ws://localhost:3000",
+      expectedSignerPubkey: "deadbeef".repeat(8),
+    });
   await expect(page.getByTestId("huddle-agent-voice-menu-trigger")).toHaveCount(
     0,
   );

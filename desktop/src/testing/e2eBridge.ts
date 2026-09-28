@@ -9044,7 +9044,16 @@ async function applyMockPersonaUpdate(
   return persona;
 }
 
-async function handleDeletePersona(args: { id: string }): Promise<void> {
+async function handleDeletePersona(
+  args: {
+    id: string;
+    expectedRelayUrl?: string | null;
+    expectedSignerPubkey?: string | null;
+  },
+  config: E2eConfig | undefined,
+): Promise<void> {
+  assertExpectedRelayScope(args.expectedRelayUrl, config);
+  assertExpectedSigner(args.expectedSignerPubkey, config);
   const persona = mockPersonas.find((candidate) => candidate.id === args.id);
   if (!persona) {
     throw new Error(`agent ${args.id} not found`);
@@ -9889,10 +9898,17 @@ async function handleStopManagedAgent(args: {
   return cloneManagedAgent(agent);
 }
 
-async function handleDeleteManagedAgent(args: {
-  pubkey: string;
-  forceRemoteDelete?: boolean | null;
-}): Promise<void> {
+async function handleDeleteManagedAgent(
+  args: {
+    pubkey: string;
+    forceRemoteDelete?: boolean | null;
+    expectedRelayUrl?: string | null;
+    expectedSignerPubkey?: string | null;
+  },
+  config: E2eConfig | undefined,
+): Promise<void> {
+  assertExpectedRelayScope(args.expectedRelayUrl, config);
+  assertExpectedSigner(args.expectedSignerPubkey, config);
   // Model the backend invariant: reject deletion of deployed remote agents
   // unless force_remote_delete is true.
   const agent = mockManagedAgents.find((a) => a.pubkey === args.pubkey);
@@ -12286,7 +12302,14 @@ export function maybeInstallE2eTauriMocks() {
         return structuredClone(result);
       }
       case "remove_agent_from_huddle": {
-        const agentPubkey = (payload as { agentPubkey?: string })?.agentPubkey;
+        const request = payload as {
+          agentPubkey?: string;
+          expectedRelayUrl?: string | null;
+          expectedSignerPubkey?: string | null;
+        };
+        assertExpectedRelayScope(request.expectedRelayUrl, activeConfig);
+        assertExpectedSigner(request.expectedSignerPubkey, activeConfig);
+        const agentPubkey = request.agentPubkey;
         if (!mockHuddle || !agentPubkey) {
           throw new Error("No active huddle agent to remove.");
         }
@@ -13687,6 +13710,7 @@ export function maybeInstallE2eTauriMocks() {
       case "delete_persona":
         return handleDeletePersona(
           payload as Parameters<typeof handleDeletePersona>[0],
+          activeConfig,
         );
       case "reconcile_inbound_persona_event": {
         const nostrEvent = JSON.parse(
@@ -14118,6 +14142,7 @@ export function maybeInstallE2eTauriMocks() {
       case "delete_managed_agent":
         return handleDeleteManagedAgent(
           payload as Parameters<typeof handleDeleteManagedAgent>[0],
+          activeConfig,
         );
       case "get_managed_agent_log":
         return handleGetManagedAgentLog(

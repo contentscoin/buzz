@@ -18,6 +18,11 @@ pub fn run_event_sync(
     owner_keys: &nostr::Keys,
     db_path: &Path,
 ) -> Result<(), String> {
+    // Complete any managed-agent deletion whose JSON/key cleanup committed but
+    // whose tombstone + identity archive enqueue was interrupted. The durable
+    // intent is the authorization to retract a 30177 head; absence alone is not
+    // enough because another device may legitimately own that agent.
+    crate::commands::recover_managed_agent_delete_intents(app, owner_keys, db_path)?;
     // Persona and agent legs stay best-effort: they log and swallow, and their
     // failure does not undo the boot team-membership repair. The team leg is
     // fatal — it establishes the superseding local head (a monotonic
@@ -686,9 +691,9 @@ fn reconcile_deleted_heads(app: &tauri::AppHandle, keys: &nostr::Keys, db_path: 
 /// (agents carry device-local secrets that can't come from a relay event), so a
 /// retained 30177 head with no matching record is the normal cross-device state
 /// for every agent created on another device — NOT a lost deletion. Sweeping it
-/// would tombstone and archive another device's live agents at boot. Agent
-/// deletion-retry therefore stays a pre-existing gap; the direct delete path
-/// still owns the atomic 30177 tombstone + 9035 archive.
+/// would tombstone and archive another device's live agents at boot. Managed
+/// deletion recovery therefore consumes only the explicit scope-local delete
+/// intents replayed at the start of [`run_event_sync`].
 fn reconcile_deleted_heads_at(
     base_dir: &Path,
     keys: &nostr::Keys,

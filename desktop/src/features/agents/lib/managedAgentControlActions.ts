@@ -6,6 +6,8 @@ import { normalizePubkey } from "@/shared/lib/pubkey";
 type DeleteManagedAgentInput = {
   pubkey: string;
   forceRemoteDelete?: boolean;
+  expectedRelayUrl: string;
+  expectedSignerPubkey: string;
 };
 
 export type ManagedAgentCommandScope = {
@@ -203,7 +205,7 @@ export async function deleteManagedAgentWithRules({
   agent: ManagedAgent;
   deleteManagedAgent: DeleteManagedAgent;
   beforeDelete?: () => Promise<void>;
-  scope?: ManagedAgentCommandScope;
+  scope: ManagedAgentCommandScope;
   skipRemoteDeleteConfirm?: boolean;
 } & ManagedAgentActionContext): Promise<ManagedAgentActionResult> {
   if (agent.backend.type === "provider" && agent.backendAgentId) {
@@ -229,8 +231,8 @@ export async function deleteManagedAgentWithRules({
           undefined,
           undefined,
           undefined,
-          scope?.expectedRelayUrl,
-          scope?.expectedSignerPubkey,
+          scope.expectedRelayUrl,
+          scope.expectedSignerPubkey,
         );
 
         if (!skipRemoteDeleteConfirm) {
@@ -276,6 +278,8 @@ export async function deleteManagedAgentWithRules({
   await deleteManagedAgent({
     pubkey: agent.pubkey,
     forceRemoteDelete: isDeployedRemote ? true : undefined,
+    expectedRelayUrl: scope.expectedRelayUrl,
+    expectedSignerPubkey: scope.expectedSignerPubkey,
   });
 
   return {};

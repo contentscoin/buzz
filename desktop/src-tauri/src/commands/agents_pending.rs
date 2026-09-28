@@ -4,7 +4,10 @@
 //! retention seam; every function runs inside the
 //! `managed_agents_store_lock`-held body and NEVER across an `.await`.
 
-use tauri::AppHandle;
+use std::collections::HashSet;
+
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use tauri::{AppHandle, Manager};
 
 use crate::{app_state::AppState, managed_agents::ManagedAgentRecord};
 
@@ -42,53 +45,156 @@ pub(crate) fn retain_managed_agent_pending(
     }
 }
 
-/// Purge a deleted agent's pending row and enqueue a NIP-09 tombstone, both
-/// inside the `managed_agents_store_lock`-held delete body and NEVER across an
-/// `.await`.
-///
-/// Mirrors `commands::personas::tombstone_persona_pending`: the agent row at
-/// `(30177, owner, agent_pubkey)` is purged first so an unpublished edit can
-/// never resurrect it after the tombstone publishes, then the kind:5 tombstone
-/// is retained at its own `(5, owner, agent_pubkey)` coordinate with
-/// `pending_sync = 1`. The `d_tag` is the agent's pubkey. Best-effort: a
-/// failure is logged and swallowed so a retention hiccup never blocks the
-/// disk-authoritative delete.
-pub(crate) fn tombstone_managed_agent_pending(
-    app: &AppHandle,
-    state: &AppState,
-    agent_pubkey: &str,
-) {
-    let result = (|| -> Result<(), String> {
-        let scope = crate::managed_agents::retention::active_retention_scope(app, state)?;
-        tombstone_managed_agent_at(&scope.db_path, &scope.owner_keys, agent_pubkey)
-    })();
-    if let Err(e) = result {
-        eprintln!("buzz-desktop: agent-tombstone: {e}");
+/// Name of the scope-local SQLite table that journals committed agent
+/// deletions until both relay effects are durably queued.
+const DELETE_INTENT_TABLE: &str = "managed_agent_delete_intents";
+
+/// Durable witness that an agent record is being deleted from one scoped
+/// workspace. The row is written before the JSON record or key is removed and
+/// is deleted in the same SQLite transaction that enqueues the kind:5 and
+/// kind:9035 events.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ManagedAgentDeleteIntent {
+    pub agent_pubkey: String,
+    pub persona_id: Option<String>,
+}
+
+impl ManagedAgentDeleteIntent {
+    pub(crate) fn new(agent_pubkey: &str, persona_id: Option<&str>) -> Self {
+        Self {
+            agent_pubkey: agent_pubkey.trim().to_ascii_lowercase(),
+            persona_id: persona_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        }
     }
 }
 
-/// Scope-free core of [`tombstone_managed_agent_pending`], so the atomic
-/// purge-and-enqueue and its future-dated-head domination can be asserted
-/// directly against a retention database (mirrors
-/// `personas::tombstone_persona_at`).
+fn ensure_delete_intent_table(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch(&format!(
+        "CREATE TABLE IF NOT EXISTS {DELETE_INTENT_TABLE} (
+             agent_pubkey TEXT PRIMARY KEY,
+             persona_id TEXT
+         );"
+    ))
+    .map_err(|error| format!("failed to create managed-agent delete journal: {error}"))
+}
+
+/// Stage one or more deletions durably before their local records or keys are
+/// removed. A persona cascade stages the whole set in one transaction.
+pub(crate) fn stage_managed_agent_delete_intents_at(
+    db_path: &std::path::Path,
+    intents: &[ManagedAgentDeleteIntent],
+) -> Result<(), String> {
+    use crate::managed_agents::retention::open_retention_db;
+
+    if intents.is_empty() {
+        return Ok(());
+    }
+    let mut conn = open_retention_db(db_path)?;
+    ensure_delete_intent_table(&conn)?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| format!("failed to begin managed-agent delete journal: {error}"))?;
+    for intent in intents {
+        transaction
+            .execute(
+                &format!(
+                    "INSERT INTO {DELETE_INTENT_TABLE} (agent_pubkey, persona_id)
+                     VALUES (?1, ?2)
+                     ON CONFLICT(agent_pubkey) DO UPDATE SET
+                         persona_id = excluded.persona_id"
+                ),
+                params![&intent.agent_pubkey, intent.persona_id.as_deref()],
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to stage managed-agent deletion for {}: {error}",
+                    intent.agent_pubkey
+                )
+            })?;
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("failed to commit managed-agent delete journal: {error}"))
+}
+
+fn load_managed_agent_delete_intents(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<ManagedAgentDeleteIntent>, String> {
+    ensure_delete_intent_table(conn)?;
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT agent_pubkey, persona_id
+             FROM {DELETE_INTENT_TABLE}
+             ORDER BY agent_pubkey"
+        ))
+        .map_err(|error| format!("failed to read managed-agent delete journal: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ManagedAgentDeleteIntent {
+                agent_pubkey: row.get(0)?,
+                persona_id: row.get(1)?,
+            })
+        })
+        .map_err(|error| format!("failed to query managed-agent delete journal: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to decode managed-agent delete journal: {error}"))
+}
+
+/// Remove staged intents whose local record is still live. Recovery makes this
+/// decision from authoritative disk state, so an ambiguous write failure never
+/// drops the only witness for a deletion that may actually have committed.
+fn clear_managed_agent_delete_intents_at(
+    db_path: &std::path::Path,
+    agent_pubkeys: &[String],
+) -> Result<(), String> {
+    use crate::managed_agents::retention::open_retention_db;
+
+    if agent_pubkeys.is_empty() {
+        return Ok(());
+    }
+    let mut conn = open_retention_db(db_path)?;
+    ensure_delete_intent_table(&conn)?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| {
+            format!("failed to begin managed-agent delete-journal cleanup: {error}")
+        })?;
+    for pubkey in agent_pubkeys {
+        transaction
+            .execute(
+                &format!("DELETE FROM {DELETE_INTENT_TABLE} WHERE agent_pubkey = ?1"),
+                [pubkey.trim().to_ascii_lowercase()],
+            )
+            .map_err(|error| {
+                format!("failed to clear managed-agent delete intent for {pubkey}: {error}")
+            })?;
+    }
+    transaction
+        .commit()
+        .map_err(|error| format!("failed to commit managed-agent delete-journal cleanup: {error}"))
+}
+
+/// Scope-free core for the atomic purge-and-enqueue operation, so its
+/// future-dated-head domination and durable intent consumption can be asserted
+/// directly against a retention database.
 ///
 /// Enqueues TWO durable effects for the deleted agent in ONE transaction: the
 /// NIP-09 kind:5 tombstone AND the NIP-IA kind:9035 archive request that stops
 /// the identity appearing in member pickers. They were previously two
 /// independent best-effort calls — a crash between them could tombstone the
 /// 30177 head while leaving the identity live, with no boot path to reconstruct
-/// the archive. The archive's `persona_id` payload is derived from the retained
-/// 30177 head's content (where it lives as owner-signed historical alias data),
-/// NOT the deleted record. Unlike personas/teams, managed agents are NOT
-/// re-enqueued by the boot deletion sweep ([`crate::event_sync`]) — a retained
-/// 30177 head with no local record is the normal cross-device state, so a crash
-/// after the disk-authoritative record is removed but before this
-/// tombstone+archive transaction commits leaves agent deletion-retry a
-/// pre-existing gap owned by this direct delete path alone.
+/// the archive. The archive's `persona_id` comes from the staged delete intent,
+/// falling back to the retained 30177 head for legacy callers. Managed-agent
+/// heads cannot be swept by absence alone because another device may own the
+/// local key; only this explicit journal authorizes boot-time recovery.
 pub(crate) fn tombstone_managed_agent_at(
     db_path: &std::path::Path,
     keys: &nostr::Keys,
     agent_pubkey: &str,
+    persona_id: Option<&str>,
 ) -> Result<(), String> {
     use crate::managed_agents::{
         agent_events::build_agent_delete,
@@ -104,7 +210,8 @@ pub(crate) fn tombstone_managed_agent_at(
     const KIND_DELETE: u32 = 5;
 
     let owner_pubkey = keys.public_key().to_hex();
-    let conn = open_retention_db(db_path)?;
+    let mut conn = open_retention_db(db_path)?;
+    ensure_delete_intent_table(&conn)?;
     // Single transaction: a kill between the head purge and the tombstone
     // enqueue would otherwise leave the 30177 head live with no local retry
     // witness. Reading the head's `created_at` inside the same `BEGIN
@@ -113,26 +220,50 @@ pub(crate) fn tombstone_managed_agent_at(
     // (`retain_agent_record` bumps a same-second re-publish past the prior
     // head) so it cannot survive its own tombstone once the head row is
     // purged. Mirrors the persona/team tombstone helpers.
-    conn.execute_batch("BEGIN IMMEDIATE")
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| format!("failed to begin managed-agent tombstone transaction: {e}"))?;
     let result = (|| -> Result<(), String> {
-        let prior_head =
-            get_retained_event(&conn, KIND_MANAGED_AGENT, &owner_pubkey, agent_pubkey)?;
+        let prior_head = get_retained_event(
+            &transaction,
+            KIND_MANAGED_AGENT,
+            &owner_pubkey,
+            agent_pubkey,
+        )?;
         let event = build_agent_delete(agent_pubkey, &owner_pubkey)?
             .custom_created_at(monotonic_created_at(
                 prior_head.as_ref().map(|row| row.created_at),
             ))
             .sign_with_keys(keys)
             .map_err(|e| format!("failed to sign managed-agent tombstone: {e}"))?;
-        // Recover the archive's `persona_id` from the head that is about to be
-        // purged, where it survives as owner-signed historical alias data.
-        let persona_id = prior_head
-            .as_ref()
-            .and_then(|row| persona_id_from_head(&row.content));
+        // Prefer the command's staged record snapshot. The retained head is a
+        // compatibility fallback for callers that predate the delete journal.
+        let journal_persona_id = transaction
+            .query_row(
+                &format!("SELECT persona_id FROM {DELETE_INTENT_TABLE} WHERE agent_pubkey = ?1"),
+                [agent_pubkey.trim().to_ascii_lowercase()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|error| format!("failed to read managed-agent delete intent: {error}"))?
+            .flatten();
+        let persona_id = persona_id
+            .map(str::to_string)
+            .or(journal_persona_id)
+            .or_else(|| {
+                prior_head
+                    .as_ref()
+                    .and_then(|row| persona_id_from_head(&row.content))
+            });
         let archive = build_agent_archive_request(keys, agent_pubkey, persona_id.as_deref())?;
-        delete_retained_event(&conn, KIND_MANAGED_AGENT, &owner_pubkey, agent_pubkey)?;
+        delete_retained_event(
+            &transaction,
+            KIND_MANAGED_AGENT,
+            &owner_pubkey,
+            agent_pubkey,
+        )?;
         retain_event(
-            &conn,
+            &transaction,
             &RetainedEvent {
                 kind: KIND_DELETE,
                 pubkey: owner_pubkey.clone(),
@@ -146,7 +277,7 @@ pub(crate) fn tombstone_managed_agent_at(
             },
         )?;
         retain_event(
-            &conn,
+            &transaction,
             &RetainedEvent {
                 kind: KIND_IA_ARCHIVE_REQUEST,
                 pubkey: owner_pubkey.clone(),
@@ -156,17 +287,116 @@ pub(crate) fn tombstone_managed_agent_at(
                 raw_event: archive.as_json(),
                 pending_sync: true,
             },
-        )
+        )?;
+        transaction
+            .execute(
+                &format!("DELETE FROM {DELETE_INTENT_TABLE} WHERE agent_pubkey = ?1"),
+                [agent_pubkey.trim().to_ascii_lowercase()],
+            )
+            .map_err(|error| format!("failed to complete managed-agent delete intent: {error}"))?;
+        Ok(())
     })();
     match result {
-        Ok(()) => conn
-            .execute_batch("COMMIT")
+        Ok(()) => transaction
+            .commit()
             .map_err(|e| format!("failed to commit managed-agent tombstone transaction: {e}")),
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            Err(e)
+        Err(e) => Err(e),
+    }
+}
+
+/// Finish an already committed local deletion. The journal row remains until
+/// both key removal and the atomic relay enqueue succeed, so every error is
+/// safe to retry at boot.
+pub(crate) fn finalize_managed_agent_deletion_at(
+    db_path: &std::path::Path,
+    keys: &nostr::Keys,
+    intent: &ManagedAgentDeleteIntent,
+    delete_key: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    delete_key(&intent.agent_pubkey).map_err(|error| {
+        format!(
+            "failed to delete agent {} key: {error}",
+            intent.agent_pubkey
+        )
+    })?;
+    tombstone_managed_agent_at(
+        db_path,
+        keys,
+        &intent.agent_pubkey,
+        intent.persona_id.as_deref(),
+    )
+}
+
+/// Replay durable delete intents for the active workspace at boot.
+///
+/// A live local record means the command crashed or failed before its
+/// authoritative JSON save, so the staged intent is discarded. An absent
+/// record means deletion committed: retry key removal and atomically enqueue
+/// the tombstone/archive before clearing the intent.
+pub(crate) fn recover_managed_agent_delete_intents_at(
+    db_path: &std::path::Path,
+    keys: &nostr::Keys,
+    live_pubkeys: &HashSet<String>,
+    mut delete_key: impl FnMut(&str) -> Result<(), String>,
+) -> Result<u32, String> {
+    use crate::managed_agents::retention::open_retention_db;
+
+    let conn = open_retention_db(db_path)?;
+    let intents = load_managed_agent_delete_intents(&conn)?;
+    drop(conn);
+
+    let mut recovered = 0;
+    let mut errors = Vec::new();
+    for intent in intents {
+        if live_pubkeys.contains(&intent.agent_pubkey) {
+            if let Err(error) = clear_managed_agent_delete_intents_at(
+                db_path,
+                std::slice::from_ref(&intent.agent_pubkey),
+            ) {
+                errors.push(error);
+            }
+            continue;
+        }
+        match finalize_managed_agent_deletion_at(db_path, keys, &intent, |pubkey| {
+            delete_key(pubkey)
+        }) {
+            Ok(()) => recovered += 1,
+            Err(error) => errors.push(format!(
+                "failed to recover deletion for {}: {error}",
+                intent.agent_pubkey
+            )),
         }
     }
+
+    if errors.is_empty() {
+        Ok(recovered)
+    } else {
+        Err(format!(
+            "managed-agent deletion recovery incomplete; durable intents retained: {}",
+            errors.join("; ")
+        ))
+    }
+}
+
+/// App-backed boot seam used by event sync after the workspace relay and owner
+/// have been applied and while the workspace apply lock is still held.
+pub(crate) fn recover_managed_agent_delete_intents(
+    app: &AppHandle,
+    keys: &nostr::Keys,
+    db_path: &std::path::Path,
+) -> Result<u32, String> {
+    let state = app.state::<AppState>();
+    let _store_guard = state
+        .managed_agents_store_lock
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let live_pubkeys = crate::managed_agents::load_managed_agents(app)?
+        .into_iter()
+        .map(|record| record.pubkey.to_ascii_lowercase())
+        .collect();
+    recover_managed_agent_delete_intents_at(db_path, keys, &live_pubkeys, |pubkey| {
+        crate::managed_agents::try_delete_agent_key(pubkey)
+    })
 }
 
 /// Extract `persona_id` from a retained kind:30177 head's content projection.
@@ -282,7 +512,7 @@ mod tests {
         let future = nostr::Timestamp::now().as_secs() as i64 + 86_400;
         seed_agent_head(&db_path, &owner, future);
 
-        tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY).unwrap();
+        tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY, None).unwrap();
 
         let conn = open_retention_db(&db_path).unwrap();
         let tombstone = get_pending_sync(&conn)
@@ -327,7 +557,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let err = tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY)
+        let err = tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY, None)
             .expect_err("tombstone with INSERT trigger must fail");
         assert!(
             err.contains("insert blocked by test trigger") || err.contains("blocked"),
@@ -365,7 +595,7 @@ mod tests {
             r#"{"name":"Agent","persona_id":"persona-abc"}"#,
         );
 
-        tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY).unwrap();
+        tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY, None).unwrap();
 
         let conn = open_retention_db(&db_path).unwrap();
         let pending = get_pending_sync(&conn).unwrap();
@@ -413,7 +643,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let err = tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY)
+        let err = tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY, None)
             .expect_err("tombstone must fail when the archive enqueue is blocked");
         assert!(
             err.contains("archive insert blocked") || err.contains("blocked"),
@@ -433,6 +663,120 @@ mod tests {
                 .iter()
                 .all(|row| row.kind != 5),
             "no kind:5 tombstone may be committed when the archive enqueue fails"
+        );
+    }
+
+    #[test]
+    fn failed_archive_enqueue_keeps_intent_for_boot_recovery() {
+        use buzz_core_pkg::kind::KIND_IA_ARCHIVE_REQUEST;
+
+        let dir = tempfile::tempdir().unwrap();
+        let keys = nostr::Keys::generate();
+        let owner = keys.public_key().to_hex();
+        let db_path = dir.path().join("retention.sqlite3");
+        seed_agent_head(&db_path, &owner, nostr::Timestamp::now().as_secs() as i64);
+        stage_managed_agent_delete_intents_at(
+            &db_path,
+            &[ManagedAgentDeleteIntent::new(
+                AGENT_PUBKEY,
+                Some("persona-from-intent"),
+            )],
+        )
+        .unwrap();
+
+        let conn = open_retention_db(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER block_archive_insert BEFORE INSERT ON persona_events
+             WHEN NEW.kind = 9035
+             BEGIN
+                 SELECT RAISE(ABORT, 'archive insert blocked by recovery test');
+             END;",
+        )
+        .unwrap();
+        drop(conn);
+
+        tombstone_managed_agent_at(&db_path, &keys, AGENT_PUBKEY, None)
+            .expect_err("the first enqueue is intentionally blocked");
+        let conn = open_retention_db(&db_path).unwrap();
+        assert_eq!(
+            load_managed_agent_delete_intents(&conn).unwrap(),
+            vec![ManagedAgentDeleteIntent::new(
+                AGENT_PUBKEY,
+                Some("persona-from-intent")
+            )],
+            "the failed transaction must retain its durable retry witness"
+        );
+        conn.execute_batch("DROP TRIGGER block_archive_insert;")
+            .unwrap();
+        drop(conn);
+
+        let mut deleted_keys = Vec::new();
+        let recovered =
+            recover_managed_agent_delete_intents_at(&db_path, &keys, &HashSet::new(), |pubkey| {
+                deleted_keys.push(pubkey.to_string());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(recovered, 1);
+        assert_eq!(deleted_keys, vec![AGENT_PUBKEY.to_string()]);
+
+        let conn = open_retention_db(&db_path).unwrap();
+        assert!(load_managed_agent_delete_intents(&conn).unwrap().is_empty());
+        let archive = get_pending_sync(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.kind == KIND_IA_ARCHIVE_REQUEST)
+            .expect("boot recovery enqueues the archive request");
+        assert!(archive.content.contains("persona-from-intent"));
+    }
+
+    #[test]
+    fn boot_recovery_discards_staged_intent_when_record_is_still_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let keys = nostr::Keys::generate();
+        let db_path = dir.path().join("retention.sqlite3");
+        stage_managed_agent_delete_intents_at(
+            &db_path,
+            &[ManagedAgentDeleteIntent::new(AGENT_PUBKEY, None)],
+        )
+        .unwrap();
+        let live_pubkeys = HashSet::from([AGENT_PUBKEY.to_string()]);
+
+        let recovered =
+            recover_managed_agent_delete_intents_at(&db_path, &keys, &live_pubkeys, |_| {
+                panic!("a live record must never lose its key during recovery")
+            })
+            .unwrap();
+
+        assert_eq!(recovered, 0);
+        let conn = open_retention_db(&db_path).unwrap();
+        assert!(load_managed_agent_delete_intents(&conn).unwrap().is_empty());
+        assert!(get_pending_sync(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn key_deletion_failure_keeps_intent_and_skips_relay_enqueue() {
+        let dir = tempfile::tempdir().unwrap();
+        let keys = nostr::Keys::generate();
+        let db_path = dir.path().join("retention.sqlite3");
+        let intent = ManagedAgentDeleteIntent::new(AGENT_PUBKEY, Some("persona-key-failure"));
+        stage_managed_agent_delete_intents_at(&db_path, std::slice::from_ref(&intent)).unwrap();
+
+        let error = finalize_managed_agent_deletion_at(&db_path, &keys, &intent, |_| {
+            Err("keyring unavailable".to_string())
+        })
+        .expect_err("keyring failure must fail the deletion finalizer");
+        assert!(error.contains("keyring unavailable"));
+
+        let conn = open_retention_db(&db_path).unwrap();
+        assert_eq!(
+            load_managed_agent_delete_intents(&conn).unwrap(),
+            vec![intent],
+            "the durable intent must survive a keyring failure"
+        );
+        assert!(
+            get_pending_sync(&conn).unwrap().is_empty(),
+            "relay deletion must not enqueue before key removal succeeds"
         );
     }
 }

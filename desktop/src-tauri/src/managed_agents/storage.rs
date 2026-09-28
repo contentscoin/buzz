@@ -598,14 +598,6 @@ pub(crate) fn try_delete_agent_key(pubkey: &str) -> Result<(), String> {
     }
 }
 
-/// Remove an agent's key from the keyring (best-effort). Called when an agent
-/// is deleted so its secret does not linger in the OS store.
-pub fn delete_agent_key(pubkey: &str) {
-    if let Err(e) = try_delete_agent_key(pubkey) {
-        eprintln!("buzz-desktop: failed to delete agent {pubkey} key from keyring: {e}");
-    }
-}
-
 /// Atomic, symlink-preserving JSON write.
 /// Resolves symlinks so the tmp+rename happens at the real target path,
 /// preserving any symlink at `path`.

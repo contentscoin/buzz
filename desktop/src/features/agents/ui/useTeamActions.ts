@@ -40,6 +40,7 @@ import type {
   CreateTeamInput,
   UpdateTeamInput,
 } from "@/shared/api/types";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import { deriveImportToast } from "./teamSnapshotImport.lib";
 import { teamShareNotice } from "./teamLibraryCopy";
 
@@ -222,9 +223,21 @@ export function useTeamActions(
   }
 
   async function handleDeleteRemovedPersonas(personaIds: string[]) {
+    const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+      ? activeCommunity.relayUrl
+      : undefined;
+    const expectedSignerPubkey =
+      normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
     for (const id of personaIds) {
       try {
-        await deletePersona(id);
+        if (!expectedRelayUrl || !expectedSignerPubkey) {
+          throw new Error("Community scope is unavailable");
+        }
+        await deletePersona({
+          id,
+          expectedRelayUrl,
+          expectedSignerPubkey,
+        });
       } catch {
         // Best-effort: persona may already be deleted or in use elsewhere.
       }

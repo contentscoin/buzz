@@ -338,6 +338,19 @@ with a TypeScript lookup table or an id comparison in a component.
     possible. Keep the Codex and Claude adapter version floors aligned with the
     packages that understand those IDs; an older resolved adapter must be
     offered the maintained `@agentclientprotocol` replacement before spawn.
+21. **Final managed-agent deletion is a scoped, journaled transaction.** Every
+    UI deletion captures the active relay URL and signer before its first
+    await; direct agent deletion and persona cascade pass both through IPC. The
+    Rust command holds `workspace_apply_lock`, verifies both values, and carries
+    that exact retention database and owner key through local removal. Before
+    deleting the JSON record or agent key, write a scope-local SQLite delete
+    intent containing the agent pubkey and persona id. Consume that intent only
+    in the same transaction that removes the retained kind:30177 head and
+    enqueues both kind:5 and kind:9035. Enqueue or keyring failure propagates
+    and leaves the intent for boot recovery; recovery clears an intent without
+    side effects when the local record is still live. Never infer managed-agent
+    deletion from a missing local record alone because another device can own
+    the retained agent head.
 
 ## Channel-only runtime controls
 
@@ -412,6 +425,9 @@ buzz messages send --channel <channel-id> --reply-to <thread-root-id> \
 - Rust: `runtime_metadata_env_vars` tests pin spawn-time key application.
 - Rust: persona sharing/retention tests pin relay+owner scoping, durable
   enqueue errors, relay rejection/unavailability, and accepted publication.
+- `lib/managedAgentDeletionAvailability.test.mjs` and Rust
+  `agents_pending` tests pin deletion scope forwarding, atomic
+  tombstone/archive enqueue, and delete-intent boot recovery.
 - Rust: `definition_validation` and inbound persona tests pin the shared
   Unicode/control-character policy at local, import, publish, and sync gates.
 

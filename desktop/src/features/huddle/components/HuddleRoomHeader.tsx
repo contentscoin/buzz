@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as React from "react";
 
+import { useCommunities } from "@/features/communities/useCommunities";
 import { useProfileQuery, useSelfProfileCache } from "@/features/profile/hooks";
 import { useIdentityQuery } from "@/shared/api/hooks";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import { useHuddle, useHuddleLevels } from "../HuddleContext";
 import { useHuddleParticipantRoster } from "../hooks/useHuddleParticipantRoster";
 import type { HuddleAgentVoiceSettings } from "./AgentVoiceMenu";
@@ -33,6 +35,7 @@ function isVisible(state: HuddleRosterState | null) {
 export function HuddleRoomHeader() {
   const { interruptAgentSpeech, isMuted, micConnected } = useHuddle();
   const { activeSpeakers, micLevel, speakerLevels } = useHuddleLevels();
+  const { activeCommunity } = useCommunities();
   const identityQuery = useIdentityQuery();
   const profileQuery = useProfileQuery();
   const selfProfileCache = useSelfProfileCache();
@@ -53,29 +56,46 @@ export function HuddleRoomHeader() {
     }
     return levels;
   }, [currentPubkey, isMuted, micConnected, micLevel, speakerLevels]);
-  const handleRemoveAgent = React.useCallback(async (pubkey: string) => {
-    if (!window.confirm("Remove this agent from the huddle?")) return;
-    try {
-      await invoke("remove_agent_from_huddle", {
-        agentPubkey: pubkey,
-      });
-      setState((current) =>
-        current
-          ? {
-              ...current,
-              participants: current.participants.filter(
-                (member) => member !== pubkey,
-              ),
-              agent_pubkeys: current.agent_pubkeys.filter(
-                (agent) => agent !== pubkey,
-              ),
-            }
-          : current,
-      );
-    } catch (error) {
-      console.error("Failed to remove agent from huddle:", error);
-    }
-  }, []);
+  const handleRemoveAgent = React.useCallback(
+    async (pubkey: string) => {
+      if (!window.confirm("Remove this agent from the huddle?")) return;
+      const expectedRelayUrl = activeCommunity?.relayUrl?.trim()
+        ? activeCommunity.relayUrl
+        : undefined;
+      const expectedSignerPubkey =
+        normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
+      if (!expectedRelayUrl || !expectedSignerPubkey) {
+        console.error(
+          "Failed to remove agent from huddle: Buzz is still connecting to this community.",
+        );
+        return;
+      }
+
+      try {
+        await invoke("remove_agent_from_huddle", {
+          agentPubkey: pubkey,
+          expectedRelayUrl,
+          expectedSignerPubkey,
+        });
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                participants: current.participants.filter(
+                  (member) => member !== pubkey,
+                ),
+                agent_pubkeys: current.agent_pubkeys.filter(
+                  (agent) => agent !== pubkey,
+                ),
+              }
+            : current,
+        );
+      } catch (error) {
+        console.error("Failed to remove agent from huddle:", error);
+      }
+    },
+    [activeCommunity?.relayUrl, identityQuery.data?.pubkey],
+  );
 
   React.useEffect(() => {
     let disposed = false;
