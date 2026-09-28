@@ -14,8 +14,11 @@ update is `0.5.26-fmg.4`.
 | Desktop tag | `fmg-desktop-v0.5.26-fmg.4` |
 | Windows app identity | `Buzz` / `xyz.block.buzz.app` |
 | Managed Git | Git for Windows MinGit `2.55.0.5`, pinned by SHA-256 in `scripts/windows-managed-git.json` |
-| Relay image | `ghcr.io/contentscoin/buzz` pinned by digest |
-| Agent runtime | `sprig-v0.5.26-fmg.1` release asset pinned by SHA-256 |
+| Relay image | `ghcr.io/contentscoin/buzz@sha256:eb2113d717d3c0d352f5d14793e0a3638a20597734d3756db040cbdf90430f39` |
+| Relay source | `598d6aad833c755dbdedcddfeca8efaed0defb49` |
+| Agent runtime | `sprig-v0.5.26-fmg.1`, archive SHA-256 `0d4c4fd86621734c6f3b640deab3eb6cd00e647eeb7639441ea37f3a40c4bfb0`, executable SHA-256 `c0dc492a5fd9eb1543472cfd57daa6a25da68707e3efcbfeef0cf342a821c773` |
+| OpenClaw | `2026.9.6`, official Buzz channel plus `buzz-admin` `0.2.1` |
+| Official Buzz runtime | `@openclaw/buzz@2026.9.6`, managed package tree SHA-256 `1e3ce21a8e32d54bda8d9ec3b6791477c28ba8136ef74fbe03c1d3cd5ad9aab7`, entry SHA-256 `67559e787eb7aaa459d69519b2c9b4c24ea0779557fc067047fef028ed7bbdb0` |
 | Public relay | `wss://buzz-dnb0.srv2006121.hstgr.cloud` |
 
 `0.5.26-fmg.4` is greater than the installed `0.5.26-fmg.3`, so the NSIS
@@ -93,9 +96,12 @@ changes the relay image recorded in the release descriptor.
 
 ## Build and deploy the ACP agent runtime (not part of 0.5.26-fmg.4)
 
-The Hostinger `buzz-openclaw-agent` service downloads `buzz-acp` from a Sprig
-release when the container starts. Replacing only the relay image does not
-update this agent runtime.
+The live integration uses OpenClaw's official `@openclaw/buzz` channel. There
+is no separate `buzz-openclaw-agent` Compose service. The immutable Sprig
+archive supplies the `buzz` CLI inside the persistent OpenClaw `/data` volume,
+and the repository-owned `buzz-admin` plugin exposes the narrow operational
+tools needed by an OpenClaw agent. Replacing only the relay image does not
+update this Gateway runtime.
 
 Skip this section for `0.5.26-fmg.4`. `sprig-v0.5.26-fmg.1` is an existing
 immutable release and must not be recreated, moved, or replaced. A future agent
@@ -112,37 +118,107 @@ and SHA-256 in the release descriptor.
    calculate the archive SHA-256, and record it as `BUZZ_SPRIG_SHA256`. Record
    the descriptor's runtime source commit as `BUZZ_SPRIG_GIT_SHA` and its
    runtime version as `BUZZ_SPRIG_VERSION` in Hostinger.
-3. In the Hostinger Compose command for `buzz-openclaw-agent`, replace the
-   rolling `sprig-latest/sprig-x86_64-unknown-linux-musl.tar.gz` URL with that
-   new versioned asset URL. Keep its identity volume, owner,
-   OpenClaw gateway token and all other environment values unchanged. Add the
-   three `BUZZ_SPRIG_*` controls from
-   [`deploy/fmg/hostinger.env.example`](../deploy/fmg/hostinger.env.example).
-4. Make the startup command download the archive to a file and fail before
-   extraction unless this check succeeds:
+3. Wait for current Buzz tool calls to finish. If `buzz-admin` is present, run
+   `openclaw plugins disable buzz-admin`; an absent plugin is already quiesced.
+   Then confirm this authoritative Gateway query succeeds:
+
+   ```bash
+   openclaw gateway call plugins.list --params '{}' --json \
+     --expect-url ws://127.0.0.1:18789
+   ```
+
+   Its result must contain either no `buzz-admin` entry or exactly one with
+   `enabled: false` and `runtime.state` equal to `disabled` or `unloaded`. Set
+   `FMG_OPENCLAW_GATEWAY_URL` to the exact `ws://127.0.0.1:<port>` loopback URL
+   when the Gateway uses a non-default port. Keep the running Gateway and the
+   plugin quiesced during the runtime installation; the disable lifecycle waits
+   for admitted plugin work to drain. Copy the reviewed release descriptor into
+   the OpenClaw container and run `scripts/install-openclaw-buzz-runtime.sh`
+   there. The installer obtains the same authoritative Gateway inventory and
+   fails if that RPC is unavailable or reports an active plugin. It downloads
+   the versioned archive, verifies its independently recorded SHA-256, rejects
+   unexpected or unsafe tar members before extracting selected regular files,
+   checks `sprig.json`, and verifies the `sprig` executable SHA-256. A new
+   version directory is published once, then `/data/.openclaw/bin/buzz` is
+   activated with a temporary symlink and atomic rename. An exact rerun keeps
+   the immutable directory and repairs the public link. A same-version
+   executable or metadata mismatch fails closed; publish a new unique runtime
+   version for a repair. Keep the OpenClaw identity volume, channel SecretRef
+   and all provider credentials unchanged. On any later failure, leave
+   `buzz-admin` disabled until the runtime and plugin checks succeed.
+4. The installer fails before extraction unless this check succeeds:
 
    ```bash
    printf '%s  %s\n' "$BUZZ_SPRIG_SHA256" "$archive" | sha256sum -c -
    ```
 
-   After extraction, fail unless `sprig.json` contains the exact
-   `BUZZ_SPRIG_VERSION` and `BUZZ_SPRIG_GIT_SHA`, then execute `buzz-acp`.
+   After extraction, it fails unless `sprig.json` contains the exact
+   `BUZZ_SPRIG_VERSION` and `BUZZ_SPRIG_GIT_SHA` and the executable bytes match
+   `agent_runtime.executable_sha256`.
    Reading the `.sha256` file again from the same release is not a substitute
    for the separately recorded Hostinger value.
-5. Redeploy so Compose recreates `buzz-openclaw-agent`. Confirm the running
-   container's `/tmp/buzz-sprig/sprig.json` matches both controls, then confirm
-   ACP reconnects to the existing channel.
+5. Copy `deploy/openclaw/buzz-admin` from the same reviewed repository commit
+    into the container and run `scripts/install-openclaw-buzz-admin-plugin.sh`.
+    The installer verifies the descriptor-pinned source tree before executing
+    package scripts, uses the committed lockfile, runs tests and OpenClaw
+    validation, verifies the compiled entrypoint hash and npm-pack SHA-512
+    integrity, and installs the package
+    through OpenClaw's managed `npm-pack:` route with explicit capability
+    acceptance. The private pack directory is created under `/data/.openclaw`
+    and owned by that state tree's numeric UID:GID so the running Gateway can
+    read it even when the installer is executed as root. It removes only the
+    exact legacy `plugin-src/buzz-admin` load
+    path and preserves that directory under `plugin-rollbacks` when present.
+    If a managed lifecycle command reports an error, inspect the authoritative
+    `plugins.list` and `plugins.inspect` results before retrying because OpenClaw
+    may already have persisted the package while leaving it disabled. When the
+    exact descriptor-pinned package, version and integrity are present in that
+    disabled/unloaded state, resume with the scoped `plugins enable buzz-admin`
+    lifecycle and verify the live record; do not force a second install. The
+    installer never restores only a stale config snapshot over a possibly
+    committed managed install.
+    Restart only the OpenClaw Gateway after both managed package installs are
+    complete. The live gate requires the Gateway process start time to be at or
+    after the newest official Buzz package mtime, so an in-place install without
+    a subsequent Gateway restart fails closed. Then confirm the official Buzz
+    channel reconnects to the existing room. The plugin passes
+    the resolved channel credential only to the short-lived `buzz` child
+    process; it does not print or persist the value as an environment setting.
+6. Agents with a restrictive tool profile need the three exact Buzz tool names
+   in `agents.entries.<id>.tools.alsoAllow`. Add them with `openclaw config set`
+   for each FMG agent that publishes reports, then restart the Gateway. Avoid a
+   broad `group:plugins` grant when only these tools are required.
+7. Create a dedicated `fmg-live-gate` agent, pin its model to
+   `openai/gpt-6-sol`, set that model's `agentRuntime.id` to `openclaw` and
+   `codeMode` to `false`, and set its absolute
+   `agents.entries.fmg-live-gate.tools.allow` list to exactly
+   `["buzz_runtime_check"]`. Do not add `alsoAllow` at that scope. The live gate
+    refuses to run through a general-purpose agent. The plugin marks only the
+    read-only `buzz_runtime_check` tool as `catalogMode: "direct-only"`, keeping
+    the single intended call model-visible without changing global Tool Search
+    behavior for operational agents.
 
 ## Live checks
 
 After deployment, confirm all of the following before treating the release as
 live:
 
+- `node scripts/validate-fmg-live-release.mjs` succeeds.
+- `scripts/fmg-hostinger-live-gate.sh` succeeds with the exact SSH target and
+  container names supplied through its `FMG_*` environment variables. It must
+  report the descriptor's relay digest, OpenClaw version, Buzz channel state,
+  plugin tool set and Sprig version without printing credentials. Remote checks
+  are mandatory unless the operator explicitly sets `FMG_PUBLIC_ONLY=1` for an
+  endpoint-only probe.
 - `GET /` and `GET /health` return success.
 - WebSocket upgrades succeed on the relay root and `/pair`.
 - CORS echoes each configured origin: the public HTTPS origin,
   `tauri://localhost`, and `http://tauri.localhost`.
-- OpenClaw ACP reconnects and reports the expected community and channel.
+- OpenClaw reports the expected community and channel, and the dedicated
+  `fmg-live-gate` agent has an absolute one-tool allowlist. Its no-delivery
+  turn is sent through the exact loopback Gateway transport, invokes
+  `buzz_runtime_check`, and
+  returns `credentialReady: true` and `workReportReady: true`.
 - Desktop can post and receive a normal message.
 - A signed work report appears as a result card on desktop.
 - For a confirmed agent-authored work report, the ACP agent attempts one
@@ -151,20 +227,67 @@ live:
   mobile work-report card and programmatic delivery guarantee are later client
   enhancements.
 
+### Official Buzz active-code evidence
+
+OpenClaw `2026.9.6` does not expose the active plugin registry's source path or
+source digest through a read-only Gateway RPC. The gate therefore uses the
+descriptor's `gateway-pid-started-after-package-and-stable-generation` policy:
+
+- authoritative `plugins.list` must report one active official Buzz record and
+  the same nonzero registry generation before and after the live turn;
+- authoritative `plugins.inspect` must report the exact npm package, version and
+  SHA-512 install integrity;
+- a fresh local loader scan must resolve the exact descriptor-pinned managed
+  install path and `dist/index.js` source. Its persisted npm install record must
+  contain that same path, package, version and integrity, with `resolvedAt` no
+  later than `installedAt` and `installedAt` no later than Gateway process
+  start. The record is checked again after the live turn;
+- the package manifest, runtime entry and deterministic package tree hashes must
+  match the descriptor. The tree hash covers all 1,493 regular package files,
+  including the implementation chunks and bundled dependencies. It excludes
+  only the installer-created `node_modules/openclaw` peer link, whose exact
+  absolute target is checked separately against the pinned OpenClaw image; and
+- the newest package filesystem mtime must be no later than the unchanged Gateway
+  process start time, and the package tree is hashed again after the live turn.
+
+Together these checks show that the pinned package bytes were present before
+the current Gateway process loaded its unchanged active generation, and that a
+fresh loader resolves the same entry. This is the strongest fail-closed bridge
+available without the registry's internal `sourceDigest` being projected by a
+read-only RPC. It is operational provenance rather than in-process memory
+attestation: it assumes the container host and filesystem timestamps are
+trusted. A future OpenClaw endpoint that returns the active root, entry and
+`sourceDigest` should replace this bridge.
+
 ## Rollback
 
 1. Change Hostinger back to the previously recorded image digest and redeploy.
-2. Restore the Sprig rollback URL, SHA-256, version and source commit as one
-   set of `BUZZ_SPRIG_*` controls, then recreate `buzz-openclaw-agent` if the
-   agent runtime must be rolled back. The preserved baseline is release
+2. Execute the descriptor's `disable-and-uninstall` policy for `buzz-admin`:
+   run `openclaw plugins disable buzz-admin`, wait until authoritative
+   `plugins.list` reports it unloaded, then run
+   `openclaw plugins uninstall buzz-admin --force`. Restart the Gateway and
+   verify through `plugins.list` and `plugins.inspect` that `buzz-admin` is
+   absent. Remove all three Buzz Admin names from the five FMG agents'
+   `tools.alsoAllow` lists and remove the dedicated `fmg-live-gate` agent. The
+   official `@openclaw/buzz` channel must remain enabled, active and connected.
+3. Restore the Sprig rollback URL, SHA-256, version and source commit as one
+   set of `BUZZ_SPRIG_*` controls, then run
+   `scripts/install-openclaw-buzz-runtime.sh --rollback /tmp/fmg-live.json`.
+   This reads the distinct `.rollback.agent_runtime` identity, verifies and
+   installs that immutable version when absent, and atomically repoints
+   `/data/.openclaw/bin/buzz`. Keep `buzz-admin` uninstalled: signed work-report
+   publication and its runtime-check tool are intentionally unavailable on this
+   fallback. The preserved baseline is release
    `sprig-rollback-9f47e98`, asset
    `sprig-x86_64-unknown-linux-musl.tar.gz`, SHA-256
    `c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a3687ca26e2a4579cd46`,
+   executable SHA-256
+   `54c9f5419eccc9f8de3a605636d32176204f869b571678ca5cd88b4d153781d8`,
    version `0.1.0+git.9f47e98`, source
    `9f47e983c6212d2ac2837e46b6c263081ffd53c3`.
-3. Reinstall the previous saved desktop installer if the desktop must also be
+4. Reinstall the previous saved desktop installer if the desktop must also be
    rolled back.
-4. Keep the existing volumes and identity material. A rollback changes binaries,
+5. Keep the existing volumes and identity material. A rollback changes binaries,
    not community state.
-5. Record both the failed and restored relay digests and Sprig versions in the
+6. Record both the failed and restored relay digests and Sprig versions in the
    release notes.
