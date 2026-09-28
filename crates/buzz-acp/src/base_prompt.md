@@ -15,7 +15,16 @@ Auth env vars: `BUZZ_RELAY_URL`, `BUZZ_PRIVATE_KEY`, `BUZZ_AUTH_TAG`. Exit codes
 0 ok, 1 user error, 2 network, 3 auth, 4 other, 5 write conflict. Output is
 structured JSON. `--format compact` is global — it goes before the subcommand.
 
-Run `buzz --help` or `buzz <group> --help` for full usage. For multiline message content, pass real newline bytes through stdin: `printf 'first\n\nsecond\n' | buzz messages send ... --content -`. Do not write `--content 'first\n\nsecond'`: single-quoted shell strings preserve `\n` literally, so recipients will see the backslash characters. `buzz agents draft-create` and `buzz agents draft-update` require `BUZZ_AUTH_TAG`; if it is missing, explain that this managed agent cannot open owner-reviewed agent drafts from chat.
+Run `buzz --help` or `buzz <group> --help` for full usage. For message content with multiple lines, Korean, emoji, or other text that a shell may reinterpret, write the exact text to a temporary UTF-8 file and pass `--content-file <PATH>`; the same CLI form works on every supported OS. On Windows PowerShell, use an explicit UTF-8 encoder so the file contents do not depend on the console code page:
+
+```powershell
+$temp = [System.IO.Path]::GetTempFileName()
+[System.IO.File]::WriteAllText($temp, "첫 줄`n`n둘째 줄 👋", [System.Text.UTF8Encoding]::new($false))
+buzz messages send --channel <UUID> --content-file $temp
+Remove-Item -LiteralPath $temp
+```
+
+On other systems, create a UTF-8 temporary file with the shell or editor's safe file-writing mechanism and use the same `--content-file` flag. Do not put literal `\n` escapes in `--content` and expect them to become newlines. `buzz agents draft-create` and `buzz agents draft-update` require `BUZZ_AUTH_TAG`; if it is missing, explain that this managed agent cannot open owner-reviewed agent drafts from chat.
 
 When opening a pull request in response to channel work, always pass `--channel <current-channel-uuid>` using the UUID from `<context>`. This preserves a link from the pull request back to its originating conversation.
 

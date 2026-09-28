@@ -90,7 +90,7 @@ const _: () = {
 ///   makes `taskkill /T <pid>` (a live-root lookup) unfit for the success path.
 ///   This mirrors the Job Object discipline the harness uses to reap its 24
 ///   agent workers (`process_lifecycle.rs`).
-struct BoundedChild {
+pub(crate) struct BoundedChild {
     child: std::process::Child,
     /// The kill-on-close job that owns the whole tree. Taken and dropped by
     /// `kill_tree` so the reap happens exactly once. Spawn is fail-closed: if
@@ -106,67 +106,98 @@ impl BoundedChild {
     /// created, assigned, or the frozen child resumed; in every such case the
     /// child is terminated and reaped before returning, so no unowned process
     /// survives.
-    fn spawn(mut command: Command) -> Option<Self> {
-        // Run the child in its own process group so the whole tree can be torn
-        // down as a unit, not just a direct child that may have forked workers.
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt as _;
-            command.process_group(0);
-        }
+    fn spawn(command: Command) -> Option<Self> {
+        Self::try_spawn(command).ok()
+    }
 
-        // Spawn frozen so the Job Object can take ownership before any child
-        // code runs and forks a descendant that would escape the job. The flags
-        // are set here as the last writer before spawn; `Command::creation_flags`
-        // replaces rather than ORs, so `BOUNDED_CREATION_FLAGS` must itself carry
-        // `CREATE_NO_WINDOW` — a caller's earlier `configure_no_window` would be
-        // clobbered otherwise, flashing a console window on GUI discovery.
+    /// Spawn a contained child and preserve setup failures for callers that
+    /// need to distinguish a failed containment guarantee from child output.
+    /// Discovery keeps its historical `Option` surface through [`Self::spawn`];
+    /// security-sensitive command paths use this result-returning seam and
+    /// fail closed when the Windows Job Object cannot be established.
+    pub(crate) fn try_spawn(command: Command) -> Result<Self, String> {
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt as _;
-            command.creation_flags(BOUNDED_CREATION_FLAGS);
+            return Self::try_spawn_windows_with(
+                command,
+                crate::managed_agents::create_job_for_child,
+                crate::managed_agents::resume_process,
+            );
         }
 
-        // `mut` is used only on the Windows fail-closed path (kill/wait on the
-        // frozen child); Unix moves the child unmodified into `Self`.
-        #[cfg_attr(not(windows), allow(unused_mut))]
-        let mut child = command.spawn().ok()?;
+        #[cfg(not(windows))]
+        {
+            #[cfg_attr(not(unix), allow(unused_mut))]
+            let mut command = command;
 
-        #[cfg(windows)]
-        let job = {
-            // Assign the frozen child to a kill-on-close job, then resume it.
-            // Any failure is fail-closed: terminate + reap the still-owned
-            // child and abort the spawn, never run it unowned to the deadline.
-            let Some(job) = crate::managed_agents::create_job_for_child(child.id()) else {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            };
-            if !crate::managed_agents::resume_process(child.id()) {
-                // Dropping the job kills the still-suspended child via
-                // kill-on-close; reap it so no zombie lingers.
-                drop(job);
-                let _ = child.wait();
-                return None;
+            // Run the child in its own process group so the whole tree can be
+            // torn down as a unit, not just a direct child that may have forked
+            // workers.
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt as _;
+                command.process_group(0);
             }
-            job
-        };
 
-        Some(Self {
+            let child = command
+                .spawn()
+                .map_err(|error| format!("process spawn failed: {error}"))?;
+
+            Ok(Self { child })
+        }
+    }
+
+    /// Windows implementation with injectable containment seams so callers'
+    /// fail-closed behavior can be regression-tested without depending on an
+    /// actual operating-system allocation failure.
+    #[cfg(windows)]
+    pub(crate) fn try_spawn_windows_with<CreateJob, Resume>(
+        mut command: Command,
+        create_job: CreateJob,
+        resume_process: Resume,
+    ) -> Result<Self, String>
+    where
+        CreateJob: FnOnce(u32) -> Option<crate::managed_agents::JobHandle>,
+        Resume: FnOnce(u32) -> bool,
+    {
+        use std::os::windows::process::CommandExt as _;
+        // Spawn frozen so the Job Object can take ownership before any child
+        // code runs. This is the last creation_flags call before spawn and must
+        // retain CREATE_NO_WINDOW as well as CREATE_SUSPENDED.
+        command.creation_flags(BOUNDED_CREATION_FLAGS);
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("process spawn failed: {error}"))?;
+
+        let Some(job) = create_job(child.id()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("whole-process-tree Job Object containment setup failed".to_string());
+        };
+        if !resume_process(child.id()) {
+            // Dropping the job kills the still-suspended root; reap it so no
+            // failed containment setup leaves a process behind.
+            drop(job);
+            let _ = child.wait();
+            return Err(
+                "contained process could not be resumed after Job Object assignment".to_string(),
+            );
+        }
+
+        Ok(Self {
             child,
-            #[cfg(windows)]
             job: Some(job),
         })
     }
 
-    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+    pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
         self.child.try_wait()
     }
 
     /// Timeout teardown: a graceful `SIGTERM` to the group and a bounded grace
     /// period for a clean flush on Unix, then the unconditional forced kill.
     /// Windows has no group signal, so it goes straight to the forced kill.
-    fn terminate_timed_out(&mut self) {
+    pub(crate) fn terminate_timed_out(&mut self) {
         #[cfg(unix)]
         {
             // SAFETY: `killpg` on the group led by the child; an ignored result
@@ -183,7 +214,7 @@ impl BoundedChild {
     /// tree. Runs on every exit path — including success, because a login shell
     /// or auth CLI can background a descendant that outlives the leader while
     /// still holding the captured-output descriptors.
-    fn kill_tree(&mut self) {
+    pub(crate) fn kill_tree(&mut self) {
         #[cfg(unix)]
         // SAFETY: `killpg` on the group led by the child; ignored result is
         // intentional — `ESRCH` on a dead group is the success case.
@@ -201,18 +232,18 @@ impl BoundedChild {
     }
 
     /// Reap the direct child so no zombie lingers after the tree is killed.
-    fn reap(&mut self) {
+    pub(crate) fn reap(&mut self) {
         let _ = self.child.wait();
     }
 
     /// Take the captured stdout pipe. `Some` because [`output_with_timeout`]
     /// configures `Stdio::piped()` before spawn.
-    fn take_stdout(&mut self) -> Option<ChildStdout> {
+    pub(crate) fn take_stdout(&mut self) -> Option<ChildStdout> {
         self.child.stdout.take()
     }
 
     /// Take the captured stderr pipe.
-    fn take_stderr(&mut self) -> Option<ChildStderr> {
+    pub(crate) fn take_stderr(&mut self) -> Option<ChildStderr> {
         self.child.stderr.take()
     }
 }
@@ -221,7 +252,7 @@ impl BoundedChild {
 /// instead of parking when no bytes are available. Returns `false` on any
 /// `fcntl` failure, which the caller treats as fail-closed.
 #[cfg(unix)]
-fn set_nonblocking<F: std::os::unix::io::AsRawFd>(f: &F) -> bool {
+pub(crate) fn set_nonblocking<F: std::os::unix::io::AsRawFd>(f: &F) -> bool {
     let fd = f.as_raw_fd();
     // SAFETY: `fd` is owned by `f` for the duration of this call; `F_GETFL` /
     // `F_SETFL` read and set the descriptor's flags without transferring
