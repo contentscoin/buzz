@@ -22,8 +22,11 @@ MANIFEST="${1:-/tmp/fmg-live.json}"
 RUNTIME_ROOT="${FMG_OPENCLAW_RUNTIME_ROOT:-/data/.openclaw/runtimes/sprig}"
 BIN_ROOT="${FMG_OPENCLAW_BIN_ROOT:-/data/.openclaw/bin}"
 GATEWAY_EXPECT_URL="${FMG_OPENCLAW_GATEWAY_URL:-ws://127.0.0.1:18789}"
+DOWNLOAD_CONNECT_TIMEOUT_SECONDS=15
+DOWNLOAD_TOTAL_TIMEOUT_SECONDS=120
+MAX_ARCHIVE_SIZE_BYTES=$((64 * 1024 * 1024))
 
-for command in chmod cmp cp curl cut flock jq ln mkdir mktemp mv openclaw readlink realpath rm sha256sum tar; do
+for command in chmod cmp cp curl cut flock head jq ln mkdir mktemp mv openclaw readlink realpath rm sha256sum tar wc; do
     command -v "$command" >/dev/null || {
         echo "error: required command is unavailable: $command" >&2
         exit 2
@@ -51,6 +54,7 @@ if [[ "$install_mode" == rollback ]]; then
 fi
 release="$(jq -er "${runtime_selector}.release" "$MANIFEST")"
 asset="$(jq -er "${runtime_selector}.asset" "$MANIFEST")"
+expected_archive_size="$(jq -er "${runtime_selector}.archive_size_bytes | select(type == \"number\" and . == floor)" "$MANIFEST")"
 expected_sha="$(jq -er "${runtime_selector}.sha256" "$MANIFEST")"
 expected_executable_sha="$(jq -er "${runtime_selector}.executable_sha256" "$MANIFEST")"
 expected_version="$(jq -er "${runtime_selector}.version" "$MANIFEST")"
@@ -91,6 +95,11 @@ fi
     echo "error: invalid archive SHA-256" >&2
     exit 2
 }
+if [[ ! "$expected_archive_size" =~ ^[1-9][0-9]*$ ]] ||
+    (( expected_archive_size > MAX_ARCHIVE_SIZE_BYTES )); then
+    echo "error: invalid Sprig archive byte size" >&2
+    exit 2
+fi
 [[ "$expected_executable_sha" =~ ^[0-9a-f]{64}$ && ! "$expected_executable_sha" =~ ^0+$ ]] || {
     echo "error: invalid Sprig executable SHA-256" >&2
     exit 2
@@ -319,7 +328,23 @@ require_buzz_admin_quiesced() {
     fi
 }
 
-curl --fail --location --silent --show-error "$download_url" --output "$archive"
+archive_read_limit=$((expected_archive_size + 1))
+if ! curl --disable --fail --location --max-redirs 5 \
+    --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT_SECONDS" \
+    --max-time "$DOWNLOAD_TOTAL_TIMEOUT_SECONDS" \
+    --max-filesize "$expected_archive_size" \
+    --proto '=https' --proto-redir '=https' \
+    --silent --show-error "$download_url" \
+    | head -c "$archive_read_limit" > "$archive"; then
+    echo "error: bounded Sprig archive download failed" >&2
+    exit 1
+fi
+actual_archive_size="$(wc -c < "$archive")"
+actual_archive_size="${actual_archive_size//[[:space:]]/}"
+[[ "$actual_archive_size" == "$expected_archive_size" ]] || {
+    echo "error: Sprig archive byte size does not match the release descriptor" >&2
+    exit 1
+}
 printf '%s  %s\n' "$expected_sha" "$archive" | sha256sum -c - >/dev/null
 
 # Audit the complete member list before reading any payload bytes. Only the

@@ -34,7 +34,7 @@ Base: FMG live release `0.5.26-fmg.4`.
 ### Deployment
 
 - Hostinger now runs the official Buzz channel with the repository-owned
-  `buzz-admin` `0.2.1` plugin and the pinned `sprig-v0.5.26-fmg.1` runtime.
+  `buzz-admin` `0.2.2` plugin and the pinned `sprig-v0.5.26-fmg.1` runtime.
 - The full no-delivery live gate passed against the deployed OpenClaw runtime.
   The pinned relay digest and Sprig binary are unchanged for this desktop
   installer release.

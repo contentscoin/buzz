@@ -14,7 +14,7 @@ const unsupported = [...new Set(imports)].filter(
 if (unsupported.length > 0) {
   throw new Error(`unbundled runtime imports: ${unsupported.join(", ")}`);
 }
-if (!entry.includes("2ba479459f10626705f13f17a370d6c2aa4ec4309384c38a061738574cc40c87")) {
+if (!entry.includes("0011f1410716da2542868c29a5530088c8601775210d36ae1f9849925c995f2e")) {
   throw new Error("compiled runtime is missing the Buzz Admin build identity");
 }
 process.stdout.write("Buzz Admin runtime bundle verified\n");

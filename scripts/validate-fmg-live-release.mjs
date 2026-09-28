@@ -42,6 +42,7 @@ const manifestShape = {
   agent_runtime: {
     release: true,
     asset: true,
+    archive_size_bytes: true,
     sha256: true,
     executable_sha256: true,
     version: true,
@@ -103,6 +104,7 @@ const manifestShape = {
     agent_runtime: {
       release: true,
       asset: true,
+      archive_size_bytes: true,
       sha256: true,
       executable_sha256: true,
       version: true,
@@ -143,6 +145,11 @@ const stringArrayPaths = new Set([
   "manifest.features.mobile_report_fallback.surfaces",
 ]);
 
+const integerPaths = new Set([
+  "manifest.agent_runtime.archive_size_bytes",
+  "manifest.rollback.agent_runtime.archive_size_bytes",
+]);
+
 const expectedStringArrays = new Map([
   [
     "manifest.openclaw.buzz_admin_plugin.tools",
@@ -175,6 +182,8 @@ function validateExactShape(value, shape, path, errors) {
       validateExactShape(value[key], childShape, childPath, errors);
     } else if (childPath === "manifest.schema") {
       if (!Number.isInteger(value[key])) errors.push(`${childPath} must be an integer`);
+    } else if (integerPaths.has(childPath)) {
+      if (!Number.isSafeInteger(value[key])) errors.push(`${childPath} must be a safe integer`);
     } else if (stringArrayPaths.has(childPath)) {
       if (!Array.isArray(value[key]) || value[key].some((item) => typeof item !== "string")) {
         errors.push(`${childPath} must be an array of strings`);
@@ -256,6 +265,7 @@ export function validateFmgLiveRepositoryArtifacts(manifest, repositoryRoot = ro
 
 export function validateFmgLiveManifest(manifest) {
   const errors = [];
+  const maxSprigArchiveSizeBytes = 64 * 1024 * 1024;
   const hex = (length) => new RegExp(`^[0-9a-f]{${length}}$`, "u");
   const nonzeroHex = (value, length) => hex(length).test(value ?? "") && !/^0+$/u.test(value);
   const digest = /^sha256:[0-9a-f]{64}$/u;
@@ -386,6 +396,13 @@ export function validateFmgLiveManifest(manifest) {
   }
   if (runtime?.asset !== `sprig-${runtime?.version}-x86_64-unknown-linux-musl.tar.gz`) {
     errors.push("agent_runtime.asset must be the exact versioned Linux musl archive basename");
+  }
+  if (
+    !Number.isSafeInteger(runtime?.archive_size_bytes) ||
+    runtime.archive_size_bytes <= 0 ||
+    runtime.archive_size_bytes > maxSprigArchiveSizeBytes
+  ) {
+    errors.push(`agent_runtime.archive_size_bytes must be between 1 and ${maxSprigArchiveSizeBytes}`);
   }
   if (!nonzeroHex(runtime?.sha256, 64)) {
     errors.push("agent_runtime.sha256 must be 64 lowercase hex characters");
@@ -518,6 +535,13 @@ export function validateFmgLiveManifest(manifest) {
   }
   if (rollbackRuntime?.asset !== "sprig-x86_64-unknown-linux-musl.tar.gz") {
     errors.push("rollback.agent_runtime.asset must be the fixed Linux musl archive basename");
+  }
+  if (
+    !Number.isSafeInteger(rollbackRuntime?.archive_size_bytes) ||
+    rollbackRuntime.archive_size_bytes <= 0 ||
+    rollbackRuntime.archive_size_bytes > maxSprigArchiveSizeBytes
+  ) {
+    errors.push(`rollback.agent_runtime.archive_size_bytes must be between 1 and ${maxSprigArchiveSizeBytes}`);
   }
   if (!nonzeroHex(rollbackRuntime?.sha256, 64)) {
     errors.push("rollback.agent_runtime.sha256 must be 64 lowercase hex characters");

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -9,21 +10,210 @@ import {
   validateFmgLiveManifest,
   validateFmgLiveRepositoryArtifacts,
 } from "./validate-fmg-live-release.mjs";
+import { evaluateBuzzAdminReconciliation } from "./openclaw-buzz-admin-reconcile.mjs";
 
 const manifest = JSON.parse(readFileSync(resolve(".release/fmg-live.json"), "utf8"));
 const buzzAdminInstaller = readFileSync(
   resolve("scripts/install-openclaw-buzz-admin-plugin.sh"),
   "utf8",
 );
+const buzzAdminReconcile = readFileSync(
+  resolve("scripts/openclaw-buzz-admin-reconcile.mjs"),
+  "utf8",
+);
+const runtimeInstaller = readFileSync(
+  resolve("scripts/install-openclaw-buzz-runtime.sh"),
+  "utf8",
+);
+const buzzAdminReconcileSha256 = createHash("sha256")
+  .update(buzzAdminReconcile)
+  .digest("hex");
 
 assert.match(buzzAdminInstaller, /openclaw gateway call plugins\.list/u);
 assert.match(buzzAdminInstaller, /--expect-url "\$GATEWAY_URL" --timeout 30000/u);
 assert.match(
   buzzAdminInstaller,
-  /existing buzz-admin must be disabled before installation/u,
+  /GATEWAY_URL="\$\{FMG_OPENCLAW_GATEWAY_URL:-ws:\/\/127\.0\.0\.1:18789\}"/u,
 );
-assert.match(buzzAdminInstaller, /existing buzz-admin runtime is still active/u);
+assert.match(
+  buzzAdminInstaller,
+  /openclaw plugins enable buzz-admin --accept-capabilities/u,
+);
+assert.match(
+  buzzAdminInstaller,
+  /reconciling postconditions for the exact active buzz-admin managed install/u,
+);
+assert.match(
+  buzzAdminInstaller,
+  /resuming the exact disabled buzz-admin managed install/u,
+);
+assert.match(buzzAdminReconcile, /active buzz-admin does not match the release descriptor/u);
+assert.match(buzzAdminReconcile, /buzz-admin lifecycle state is neither quiescent nor active/u);
+assert.match(
+  buzzAdminInstaller,
+  new RegExp(`EXPECTED_RECONCILE_HELPER_SHA256="${buzzAdminReconcileSha256}"`, "u"),
+);
+assert.match(buzzAdminInstaller, /if \(\( needs_install == 1 \)\); then/u);
+assert.match(buzzAdminInstaller, /preinstall_identity.*preinstall_confirm_identity/su);
+assert.match(buzzAdminInstaller, /final_reconciliation.*active_generation/su);
+assert.match(runtimeInstaller, /^DOWNLOAD_CONNECT_TIMEOUT_SECONDS=15$/mu);
+assert.match(runtimeInstaller, /^DOWNLOAD_TOTAL_TIMEOUT_SECONDS=120$/mu);
+assert.match(runtimeInstaller, /^MAX_ARCHIVE_SIZE_BYTES=\$\(\(64 \* 1024 \* 1024\)\)$/mu);
+assert.match(runtimeInstaller, /curl --disable --fail --location --max-redirs 5/u);
+assert.match(runtimeInstaller, /--connect-timeout "\$DOWNLOAD_CONNECT_TIMEOUT_SECONDS"/u);
+assert.match(runtimeInstaller, /--max-time "\$DOWNLOAD_TOTAL_TIMEOUT_SECONDS"/u);
+assert.match(runtimeInstaller, /--max-filesize "\$expected_archive_size"/u);
+assert.match(runtimeInstaller, /head -c "\$archive_read_limit" > "\$archive"/u);
+assert.match(runtimeInstaller, /actual_archive_size="\$\(wc -c < "\$archive"\)"/u);
+assert.match(runtimeInstaller, /Sprig archive byte size does not match the release descriptor/u);
+
+const archiveSizeCheck = runtimeInstaller.indexOf(
+  '[[ "$actual_archive_size" == "$expected_archive_size" ]]',
+);
+assert.ok(archiveSizeCheck >= 0);
+assert.ok(archiveSizeCheck < runtimeInstaller.indexOf("sha256sum -c -"));
+assert.ok(archiveSizeCheck < runtimeInstaller.indexOf('tar -tzf "$archive"'));
+
+const expectedAdmin = {
+  package: manifest.openclaw.buzz_admin_plugin.package,
+  version: manifest.openclaw.buzz_admin_plugin.version,
+  integrity: manifest.openclaw.buzz_admin_plugin.integrity,
+  tools: manifest.openclaw.buzz_admin_plugin.tools,
+};
+const authoritativeList = (state, generation = 7) => ({
+  generation,
+  plugins:
+    state === "absent"
+      ? []
+      : [
+          {
+            id: "buzz-admin",
+            enabled: state === "active",
+            state: state === "active" ? "enabled" : "disabled",
+            runtime: { state: state === "active" ? "active" : "unloaded" },
+          },
+        ],
+});
+const authoritativeInspect = (enabled, overrides = {}) => ({
+  ok: true,
+  plugin: {
+    id: "buzz-admin",
+    installed: true,
+    enabled,
+    version: expectedAdmin.version,
+  },
+  source: {
+    kind: "npm",
+    packageName: expectedAdmin.package,
+    spec: `${expectedAdmin.package}@${expectedAdmin.version}`,
+    integrity: expectedAdmin.integrity,
+    integrityKind: "ssri",
+    ...(overrides.source ?? {}),
+  },
+  declared: {
+    tools: expectedAdmin.tools,
+    dangerousConfigFlags: [],
+    ...(overrides.declared ?? {}),
+  },
+  ...overrides.root,
+});
+const reconcile = (phase, state, inspect, generation) =>
+  evaluateBuzzAdminReconciliation({
+    phase,
+    list: authoritativeList(state, generation),
+    listAfter: authoritativeList(state, generation),
+    inspect,
+    expected: expectedAdmin,
+  });
+
+assert.deepEqual(reconcile("initial", "absent", null), {
+  generation: 7,
+  state: "absent",
+  match: "absent",
+  action: "install",
+});
+assert.equal(reconcile("initial", "active", authoritativeInspect(true)).action, "resume-active");
+assert.equal(reconcile("post", "active", authoritativeInspect(true)).action, "verify");
+assert.equal(reconcile("initial", "disabled", authoritativeInspect(false)).action, "resume-disabled");
+// A persisted cold enabled=true flag is deliberately not an input: the live
+// disabled/unloaded record controls the action and must always request enable.
+assert.equal(reconcile("post", "disabled", authoritativeInspect(false)).action, "enable");
+assert.equal(
+  reconcile(
+    "initial",
+    "disabled",
+    authoritativeInspect(false, { source: { integrity: "sha512-mismatch==" } }),
+  ).action,
+  "install",
+);
+assert.throws(
+  () =>
+    reconcile(
+      "initial",
+      "active",
+      authoritativeInspect(true, { source: { integrity: "sha512-mismatch==" } }),
+    ),
+  /active buzz-admin does not match the release descriptor/u,
+);
+assert.throws(
+  () =>
+    evaluateBuzzAdminReconciliation({
+      phase: "probe",
+      list: {
+        ...authoritativeList("active"),
+        result: authoritativeList("active"),
+      },
+    }),
+  /exactly one supported envelope/u,
+);
+assert.throws(
+  () =>
+    evaluateBuzzAdminReconciliation({
+      phase: "initial",
+      list: authoritativeList("active"),
+      listAfter: authoritativeList("active"),
+      inspect: { ok: true },
+      expected: expectedAdmin,
+    }),
+  /plugins\.inspect plugin must be an object/u,
+);
+assert.throws(
+  () =>
+    evaluateBuzzAdminReconciliation({
+      phase: "initial",
+      list: authoritativeList("disabled", 7),
+      listAfter: authoritativeList("disabled", 8),
+      inspect: authoritativeInspect(false),
+      expected: expectedAdmin,
+    }),
+  /generation or buzz-admin state changed during inspection/u,
+);
+assert.throws(
+  () =>
+    evaluateBuzzAdminReconciliation({
+      phase: "initial",
+      list: authoritativeList("disabled", 7),
+      listAfter: authoritativeList("active", 7),
+      inspect: authoritativeInspect(true),
+      expected: expectedAdmin,
+    }),
+  /generation or buzz-admin state changed during inspection/u,
+);
+assert.throws(
+  () =>
+    evaluateBuzzAdminReconciliation({
+      phase: "initial",
+      list: authoritativeList("disabled", 7),
+      listAfter: authoritativeList("disabled", 7),
+      inspect: authoritativeInspect(true),
+      expected: expectedAdmin,
+    }),
+  /enabled state disagrees with plugins\.list/u,
+);
+
 assert.deepEqual(validateFmgLiveManifest(manifest), []);
+assert.equal(manifest.agent_runtime.archive_size_bytes, 6567959);
+assert.equal(manifest.rollback.agent_runtime.archive_size_bytes, 6567967);
 assert.equal(
   manifest.openclaw.buzz_admin_plugin.source_tree_sha256,
   hashFmgBuzzAdminSourceTree(resolve("deploy/openclaw/buzz-admin")),
@@ -45,6 +235,34 @@ invalidAdminIntegrity.openclaw.buzz_admin_plugin.integrity = "sha512-invalid=";
 assert.match(
   validateFmgLiveManifest(invalidAdminIntegrity).join("\n"),
   /buzz_admin_plugin\.integrity must be an npm SHA-512 integrity value/u,
+);
+
+const nonIntegerRuntimeArchiveSize = structuredClone(manifest);
+nonIntegerRuntimeArchiveSize.agent_runtime.archive_size_bytes = "6567959";
+assert.match(
+  validateFmgLiveManifest(nonIntegerRuntimeArchiveSize).join("\n"),
+  /agent_runtime\.archive_size_bytes must be a safe integer/u,
+);
+
+const emptyRuntimeArchive = structuredClone(manifest);
+emptyRuntimeArchive.agent_runtime.archive_size_bytes = 0;
+assert.match(
+  validateFmgLiveManifest(emptyRuntimeArchive).join("\n"),
+  /agent_runtime\.archive_size_bytes must be between 1 and 67108864/u,
+);
+
+const oversizedRuntimeArchive = structuredClone(manifest);
+oversizedRuntimeArchive.agent_runtime.archive_size_bytes = 67108865;
+assert.match(
+  validateFmgLiveManifest(oversizedRuntimeArchive).join("\n"),
+  /agent_runtime\.archive_size_bytes must be between 1 and 67108864/u,
+);
+
+const emptyRollbackRuntimeArchive = structuredClone(manifest);
+emptyRollbackRuntimeArchive.rollback.agent_runtime.archive_size_bytes = 0;
+assert.match(
+  validateFmgLiveManifest(emptyRollbackRuntimeArchive).join("\n"),
+  /rollback\.agent_runtime\.archive_size_bytes must be between 1 and 67108864/u,
 );
 
 const mutableRelay = structuredClone(manifest);

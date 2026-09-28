@@ -9,7 +9,8 @@ MANIFEST="${2:-/tmp/fmg-live.json}"
 STATE_ROOT="/data/.openclaw"
 LEGACY_PATH="$STATE_ROOT/plugin-src/buzz-admin"
 ROLLBACK_ROOT="$STATE_ROOT/plugin-rollbacks"
-GATEWAY_URL="ws://127.0.0.1:18789"
+GATEWAY_URL="${FMG_OPENCLAW_GATEWAY_URL:-ws://127.0.0.1:18789}"
+EXPECTED_RECONCILE_HELPER_SHA256="0a16b533d852df7c93351b708765da393774da29014e7b96525e710640580388"
 
 [[ -z "${FMG_OPENCLAW_STATE_ROOT:-}" || "$FMG_OPENCLAW_STATE_ROOT" == "$STATE_ROOT" ]] || {
     echo "error: buzz-admin installation is pinned to /data/.openclaw" >&2
@@ -26,12 +27,36 @@ GATEWAY_URL="ws://127.0.0.1:18789"
 export OPENCLAW_STATE_DIR="$STATE_ROOT"
 export OPENCLAW_CONFIG_PATH="$STATE_ROOT/openclaw.json"
 
-for command in chown flock jq node npm openclaw realpath sha256sum stat; do
+[[ "$GATEWAY_URL" =~ ^ws://127\.0\.0\.1:([1-9][0-9]{0,4})$ ]] || {
+    echo "error: FMG_OPENCLAW_GATEWAY_URL must be an exact ws://127.0.0.1:<port> URL" >&2
+    exit 2
+}
+gateway_port="${BASH_REMATCH[1]}"
+(( 10#$gateway_port <= 65535 )) || {
+    echo "error: FMG_OPENCLAW_GATEWAY_URL port is out of range" >&2
+    exit 2
+}
+
+for command in chown cut flock id jq node npm openclaw realpath sha256sum stat; do
     command -v "$command" >/dev/null || {
         echo "error: required command is unavailable: $command" >&2
         exit 2
     }
 done
+installer_path="$(realpath -e -- "${BASH_SOURCE[0]}")"
+installer_root="${installer_path%/*}"
+RECONCILE_HELPER_SOURCE="$installer_root/openclaw-buzz-admin-reconcile.mjs"
+[[ -f "$RECONCILE_HELPER_SOURCE" && ! -L "$RECONCILE_HELPER_SOURCE" &&
+    "$(realpath -e -- "$RECONCILE_HELPER_SOURCE")" == "$RECONCILE_HELPER_SOURCE" ]] || {
+    echo "error: buzz-admin reconciliation helper is missing or unsafe" >&2
+    exit 2
+}
+helper_source_mode="$(stat -Lc '%a' -- "$RECONCILE_HELPER_SOURCE")"
+helper_source_owner="$(stat -Lc '%u' -- "$RECONCILE_HELPER_SOURCE")"
+if [[ "$helper_source_owner" != "$(id -u)" ]] || (( (8#$helper_source_mode & 022) != 0 )); then
+    echo "error: buzz-admin reconciliation helper has an unsafe owner or mode" >&2
+    exit 2
+fi
 [[ -d "$SOURCE" ]] || { echo "error: plugin source directory not found: $SOURCE" >&2; exit 2; }
 [[ -f "$MANIFEST" ]] || { echo "error: descriptor not found: $MANIFEST" >&2; exit 2; }
 
@@ -78,6 +103,7 @@ flock -n 9 || {
 
 stage=""
 pack_root=""
+helper_stage=""
 success=0
 lifecycle_started=0
 config_backup=""
@@ -103,9 +129,28 @@ cleanup() {
     fi
     if [[ -n "${stage:-}" && -d "$stage" ]]; then rm -rf -- "$stage"; fi
     if [[ -n "${pack_root:-}" && -d "$pack_root" ]]; then rm -rf -- "$pack_root"; fi
+    if [[ -n "${helper_stage:-}" && -d "$helper_stage" ]]; then rm -rf -- "$helper_stage"; fi
     exit "$status"
 }
 trap cleanup EXIT
+
+helper_stage="$(mktemp -d "${TMPDIR:-/tmp}/buzz-admin-reconcile.XXXXXX")"
+chmod 0700 "$helper_stage"
+RECONCILE_HELPER="$helper_stage/openclaw-buzz-admin-reconcile.mjs"
+helper_source_identity_before="$(stat -Lc '%d:%i:%s' -- "$RECONCILE_HELPER_SOURCE")"
+helper_source_sha_before="$(sha256sum "$RECONCILE_HELPER_SOURCE" | cut -d' ' -f1)"
+cp -- "$RECONCILE_HELPER_SOURCE" "$RECONCILE_HELPER"
+chmod 0500 "$RECONCILE_HELPER"
+helper_source_identity_after="$(stat -Lc '%d:%i:%s' -- "$RECONCILE_HELPER_SOURCE")"
+helper_source_sha_after="$(sha256sum "$RECONCILE_HELPER_SOURCE" | cut -d' ' -f1)"
+helper_private_sha="$(sha256sum "$RECONCILE_HELPER" | cut -d' ' -f1)"
+[[ "$helper_source_identity_before" == "$helper_source_identity_after" &&
+    "$helper_source_sha_before" == "$EXPECTED_RECONCILE_HELPER_SHA256" &&
+    "$helper_source_sha_before" == "$helper_source_sha_after" &&
+    "$helper_private_sha" == "$helper_source_sha_before" ]] || {
+    echo "error: buzz-admin reconciliation helper changed while it was staged" >&2
+    exit 1
+}
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/buzz-admin-install.XXXXXX")"
 chmod 0700 "$stage"
@@ -302,103 +347,144 @@ NODE
     exit 1
 }
 
-# The managed lifecycle may replace only a quiescent plugin. Consult the live
-# Gateway over its pinned loopback transport, rather than trusting a cold local
-# inventory that cannot prove whether the current generation still has code
-# loaded. Accept both CLI response envelopes, but reject an ambiguous response.
-existing_plugins="$(openclaw gateway call plugins.list --params '{}' --json \
-    --expect-url "$GATEWAY_URL" --timeout 30000)"
-existing_state="$(printf '%s' "$existing_plugins" | jq -er '
-    if type != "object" then error("invalid plugins.list response schema")
-    elif ((.plugins | type) == "array") and
-         ((.result | type) == "object") and
-         ((.result.plugins | type) == "array") then
-      error("ambiguous plugins.list response schema")
-    elif (.plugins | type) == "array" then .
-    elif ((.result | type) == "object") and
-         ((.result.plugins | type) == "array") then .result
-    else error("invalid plugins.list response schema")
-    end |
-    if ((.generation | type) != "number") or
-       (.generation < 1) or (.generation | floor) != .generation then
-      error("plugins.list generation is unavailable")
-    else .
-    end |
-    [.plugins[]? | select(.id == "buzz-admin")] as $matches |
-    if ($matches | length) == 0 then "absent"
-    elif ($matches | length) != 1 then error("duplicate buzz-admin plugin records")
-    elif $matches[0].enabled != false then
-      error("existing buzz-admin must be disabled before installation")
-    elif $matches[0].state != "disabled" then
-      error("existing buzz-admin desired state is not disabled")
-    elif ($matches[0].runtime | type) != "object" or
-         (($matches[0].runtime.state != "disabled") and
-          ($matches[0].runtime.state != "unloaded")) then
-      error("existing buzz-admin runtime is still active")
-    else "disabled"
-    end
-')"
+# Consult the running Gateway for every lifecycle decision. The helper accepts
+# only one documented response envelope, a positive generation and either a
+# fully quiescent or fully active record. Exact installs are resumable after a
+# caller disconnects from an already committed managed lifecycle.
+gateway_plugins_list() {
+    openclaw gateway call plugins.list --params '{}' --json \
+        --expect-url "$GATEWAY_URL" --timeout 30000
+}
 
-mkdir -p "$ROLLBACK_ROOT"
-if [[ -f "$STATE_ROOT/openclaw.json" ]]; then
-    config_backup="$stage/openclaw.json.before-install"
-    cp -p "$STATE_ROOT/openclaw.json" "$config_backup"
-    chmod 0600 "$config_backup"
-fi
-if [[ -f "$STATE_ROOT/openclaw.json" ]] && \
-    jq -e --arg path "$LEGACY_PATH" '(.plugins.load.paths // []) | index($path) != null' \
-        "$STATE_ROOT/openclaw.json" >/dev/null; then
-    remaining_paths="$(jq -c --arg path "$LEGACY_PATH" \
-        '(.plugins.load.paths // []) | map(select(. != $path))' "$STATE_ROOT/openclaw.json")"
-    if [[ "$remaining_paths" == "[]" ]]; then
-        openclaw config unset plugins.load.paths >/dev/null
-    else
-        openclaw config set plugins.load.paths "$remaining_paths" --strict-json --replace >/dev/null
+gateway_plugin_inspect() {
+    openclaw gateway call plugins.inspect --params '{"pluginId":"buzz-admin"}' --json \
+        --expect-url "$GATEWAY_URL" --timeout 30000
+}
+
+classify_gateway_state() {
+    local phase="$1"
+    local list_json list_after_json probe_json probe_state inspect_json payload
+    list_json="$(gateway_plugins_list)"
+    probe_json="$(jq -cn --argjson list "$list_json" '{phase:"probe", list:$list}' |
+        node "$RECONCILE_HELPER")"
+    probe_state="$(printf '%s' "$probe_json" | jq -er '.state')"
+    inspect_json=null
+    if [[ "$probe_state" != "absent" ]]; then
+        inspect_json="$(gateway_plugin_inspect)"
     fi
-fi
-if [[ -d "$LEGACY_PATH" ]]; then
-    legacy_backup="$ROLLBACK_ROOT/buzz-admin.legacy.$(date -u +%Y%m%dT%H%M%SZ)-$$"
-    mv "$LEGACY_PATH" "$legacy_backup"
-    printf 'legacy_rollback_path=%s\n' "$legacy_backup"
-fi
+    list_after_json="$(gateway_plugins_list)"
+    payload="$(jq -cn \
+        --arg phase "$phase" --argjson list "$list_json" \
+        --argjson listAfter "$list_after_json" --argjson inspect "$inspect_json" \
+        --arg package "$expected_package" --arg version "$expected_version" \
+        --arg integrity "$expected_integrity" --argjson tools "$expected_tools_json" \
+        '{phase:$phase, list:$list, listAfter:$listAfter, inspect:$inspect,
+          expected:{package:$package,version:$version,integrity:$integrity,tools:$tools}}')"
+    printf '%s' "$payload" | node "$RECONCILE_HELPER"
+}
 
-if [[ "$existing_state" == "disabled" ]]; then
-    echo "info: existing buzz-admin is disabled; the managed install will be explicitly enabled after replacement" >&2
+initial_reconciliation="$(classify_gateway_state initial)"
+initial_action="$(printf '%s' "$initial_reconciliation" | jq -er '.action')"
+
+needs_install=0
+case "$initial_action" in
+    install)
+        needs_install=1
+        ;;
+    resume-disabled)
+        echo "info: resuming the exact disabled buzz-admin managed install" >&2
+        ;;
+    resume-active)
+        echo "info: reconciling postconditions for the exact active buzz-admin managed install" >&2
+        ;;
+    *)
+        echo "error: unsupported initial buzz-admin reconciliation action" >&2
+        exit 1
+        ;;
+esac
+
+if (( needs_install == 1 )); then
+    mkdir -p "$ROLLBACK_ROOT"
+    if [[ -f "$STATE_ROOT/openclaw.json" ]]; then
+        config_backup="$stage/openclaw.json.before-install"
+        cp -p "$STATE_ROOT/openclaw.json" "$config_backup"
+        chmod 0600 "$config_backup"
+    fi
+    if [[ -f "$STATE_ROOT/openclaw.json" ]] && \
+        jq -e --arg path "$LEGACY_PATH" '(.plugins.load.paths // []) | index($path) != null' \
+            "$STATE_ROOT/openclaw.json" >/dev/null; then
+        remaining_paths="$(jq -c --arg path "$LEGACY_PATH" \
+            '(.plugins.load.paths // []) | map(select(. != $path))' "$STATE_ROOT/openclaw.json")"
+        if [[ "$remaining_paths" == "[]" ]]; then
+            openclaw config unset plugins.load.paths >/dev/null
+        else
+            openclaw config set plugins.load.paths "$remaining_paths" --strict-json --replace >/dev/null
+        fi
+    fi
+    if [[ -d "$LEGACY_PATH" ]]; then
+        legacy_backup="$ROLLBACK_ROOT/buzz-admin.legacy.$(date -u +%Y%m%dT%H%M%SZ)-$$"
+        mv "$LEGACY_PATH" "$legacy_backup"
+        printf 'legacy_rollback_path=%s\n' "$legacy_backup"
+    fi
 fi
 
 # OpenClaw stages dependencies and applies the managed package and runtime
 # generation transactionally. OpenClaw 2026.9.6 resolves npm-pack:<path> to
 # source=npm-pack and reads archivePath in the running Gateway context, which is
 # why the shared owner and mode checks above are part of the install contract.
-lifecycle_started=1
-if ! openclaw plugins install --force --accept-capabilities \
-    --acknowledge-install-policy-warning "npm-pack:$package_archive" >/dev/null; then
-    echo "error: OpenClaw plugin install failed; inspect the managed install before retrying because the lifecycle may have persisted its commit" >&2
-    exit 1
-fi
-
-# A force install preserves the authored enabled state. Only invoke the enable
-# lifecycle when that state is still disabled: a redundant enable races the
-# just-applied Gateway generation and can be rejected while the old generation
-# drains retained work even though the replacement is already active.
-post_install_plugins="$(openclaw plugins list --json)"
-post_install_enabled="$(printf '%s' "$post_install_plugins" | jq -er '
-  if type != "object" or (.plugins | type) != "array" then
-    error("invalid plugins list schema")
-  else .
-  end |
-  [.plugins[]? | select(.id == "buzz-admin")] as $matches |
-  if ($matches | length) != 1 or ($matches[0].enabled | type) != "boolean" then
-    error("buzz-admin enabled state is unavailable")
-  else $matches[0].enabled
-  end
-')"
-if [[ "$post_install_enabled" == "false" ]]; then
-    if ! openclaw plugins enable buzz-admin >/dev/null; then
-        echo "error: managed buzz-admin package was installed but could not be enabled; leave it disabled while inspecting the lifecycle state" >&2
+if (( needs_install == 1 )); then
+    # Re-evaluate twice after every preparatory edit and immediately before the
+    # lifecycle call. This closes the list/inspect gap and refuses a concurrent
+    # generation or state change, including activation by another operator.
+    preinstall_reconciliation="$(classify_gateway_state initial)"
+    preinstall_confirm="$(classify_gateway_state initial)"
+    preinstall_action="$(printf '%s' "$preinstall_reconciliation" | jq -er '.action')"
+    preinstall_confirm_action="$(printf '%s' "$preinstall_confirm" | jq -er '.action')"
+    preinstall_identity="$(printf '%s' "$preinstall_reconciliation" | jq -cer \
+        '[.generation,.state,.match]')"
+    preinstall_confirm_identity="$(printf '%s' "$preinstall_confirm" | jq -cer \
+        '[.generation,.state,.match]')"
+    [[ "$preinstall_action" == "install" &&
+        "$preinstall_confirm_action" == "install" &&
+        "$preinstall_identity" == "$preinstall_confirm_identity" ]] || {
+        echo "error: buzz-admin Gateway generation or quiescent state changed before installation" >&2
+        exit 1
+    }
+    lifecycle_started=1
+    if ! openclaw plugins install --force --accept-capabilities \
+        --acknowledge-install-policy-warning "npm-pack:$package_archive" >/dev/null; then
+        echo "error: OpenClaw plugin install failed; rerun this installer to reconcile an exact committed package or inspect a mismatched lifecycle state" >&2
         exit 1
     fi
 fi
+
+# Make the enable decision from the running Gateway, never from the persisted
+# cold inventory. A failed prior enable can persist desired=true while the live
+# generation is still disabled; this path converges that split view.
+post_lifecycle_reconciliation="$(classify_gateway_state post)"
+post_lifecycle_action="$(printf '%s' "$post_lifecycle_reconciliation" | jq -er '.action')"
+case "$post_lifecycle_action" in
+    enable)
+        lifecycle_started=1
+        if ! openclaw plugins enable buzz-admin --accept-capabilities >/dev/null; then
+            echo "error: managed buzz-admin package could not be enabled; rerun this installer to reconcile the exact committed package" >&2
+            exit 1
+        fi
+        active_reconciliation="$(classify_gateway_state post)"
+        [[ "$(printf '%s' "$active_reconciliation" | jq -er '.action')" == "verify" ]] || {
+            echo "error: live Gateway did not activate the exact buzz-admin package" >&2
+            exit 1
+        }
+        ;;
+    verify)
+        active_reconciliation="$post_lifecycle_reconciliation"
+        ;;
+    *)
+        echo "error: unsupported post-lifecycle buzz-admin reconciliation action" >&2
+        exit 1
+        ;;
+esac
+active_generation="$(printf '%s' "$active_reconciliation" | jq -er '.generation')"
 
 # The cold inventory proves the persisted desired state and dependency health.
 # The runtime inspection then imports the exact installed package, verifies its
@@ -494,6 +580,13 @@ printf '%s' "$installed_gateway_inspect" | jq -e \
   .declared.dangerousConfigFlags == []
 ' >/dev/null || {
     echo "error: live Gateway did not confirm the exact managed buzz-admin source and integrity" >&2
+    exit 1
+}
+
+final_reconciliation="$(classify_gateway_state post)"
+[[ "$(printf '%s' "$final_reconciliation" | jq -er '.action')" == "verify" &&
+    "$(printf '%s' "$final_reconciliation" | jq -er '.generation')" == "$active_generation" ]] || {
+    echo "error: buzz-admin Gateway generation or active state changed during verification" >&2
     exit 1
 }
 success=1

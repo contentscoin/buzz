@@ -23,9 +23,9 @@ import { toolPluginMetadataSymbol } from "openclaw/plugin-sdk/tool-plugin";
 
 const execFile = promisify(execFileCallback);
 
-const PLUGIN_VERSION = "0.2.1";
+const PLUGIN_VERSION = "0.2.2";
 export const BUZZ_ADMIN_BUILD_IDENTITY =
-  "2ba479459f10626705f13f17a370d6c2aa4ec4309384c38a061738574cc40c87";
+  "0011f1410716da2542868c29a5530088c8601775210d36ae1f9849925c995f2e";
 const LOADED_RUNTIME_ENTRY_SHA256 = createHash("sha256")
   .update(readFileSync(fileURLToPath(import.meta.url)))
   .digest("hex");
@@ -221,6 +221,17 @@ function safeJson(value: string): UnknownRecord | undefined {
   } catch {
     return undefined;
   }
+}
+
+function requireAcceptedWriteEventId(value: string): string {
+  const response = safeJson(value);
+  if (response?.accepted !== true) {
+    throw new Error("Buzz CLI did not confirm that the event was accepted.");
+  }
+  if (typeof response.event_id !== "string" || !HEX_EVENT_ID.test(response.event_id)) {
+    throw new Error("Buzz CLI did not return an authoritative event ID.");
+  }
+  return response.event_id.toLowerCase();
 }
 
 function findEventId(value: unknown): string | undefined {
@@ -522,13 +533,13 @@ function createWorkReportTool(
       toolContext.assertInvocationCurrent();
       try {
         const { stdout } = await dependencies.runCommand(buzzCli, args, options);
-        const response = safeJson(stdout.trim());
+        const eventId = requireAcceptedWriteEventId(stdout.trim());
         return agentToolResult({
           ok: true,
           channelId: input.channelId.toLowerCase(),
           threadRoot: input.threadRoot.toLowerCase(),
           status: input.status,
-          eventId: findEventId(response) ?? null,
+          eventId,
         });
       } catch (error) {
         throw cleanError(error, "Buzz work report publication");

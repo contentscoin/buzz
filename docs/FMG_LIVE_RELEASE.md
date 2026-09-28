@@ -16,8 +16,8 @@ release is `0.5.26-fmg.5`.
 | Managed Git | Git for Windows MinGit `2.55.0.5`, pinned by SHA-256 in `scripts/windows-managed-git.json` |
 | Relay image | `ghcr.io/contentscoin/buzz@sha256:eb2113d717d3c0d352f5d14793e0a3638a20597734d3756db040cbdf90430f39` |
 | Relay source | `598d6aad833c755dbdedcddfeca8efaed0defb49` |
-| Agent runtime | `sprig-v0.5.26-fmg.1`, archive SHA-256 `0d4c4fd86621734c6f3b640deab3eb6cd00e647eeb7639441ea37f3a40c4bfb0`, executable SHA-256 `c0dc492a5fd9eb1543472cfd57daa6a25da68707e3efcbfeef0cf342a821c773` |
-| OpenClaw | `2026.9.6`, official Buzz channel plus `buzz-admin` `0.2.1` |
+| Agent runtime | `sprig-v0.5.26-fmg.1`, archive size `6,567,959` bytes, archive SHA-256 `0d4c4fd86621734c6f3b640deab3eb6cd00e647eeb7639441ea37f3a40c4bfb0`, executable SHA-256 `c0dc492a5fd9eb1543472cfd57daa6a25da68707e3efcbfeef0cf342a821c773` |
+| OpenClaw | `2026.9.6`, official Buzz channel plus `buzz-admin` `0.2.2` |
 | Official Buzz runtime | `@openclaw/buzz@2026.9.6`, managed package tree SHA-256 `1e3ce21a8e32d54bda8d9ec3b6791477c28ba8136ef74fbe03c1d3cd5ad9aab7`, entry SHA-256 `67559e787eb7aaa459d69519b2c9b4c24ea0779557fc067047fef028ed7bbdb0` |
 | Public relay | `wss://buzz-dnb0.srv2006121.hstgr.cloud` |
 
@@ -29,7 +29,7 @@ identifier preserves the existing desktop community and identity storage.
 
 `0.5.26-fmg.5` delivers the Windows fixes listed in `FMG_CHANGELOG.md` and
 records the completed, attested OpenClaw Buzz deployment. The official Buzz
-channel, `buzz-admin` `0.2.1` and the dedicated no-delivery live-gate agent are
+channel, `buzz-admin` `0.2.2` and the dedicated no-delivery live-gate agent are
 already deployed. Publishing the desktop candidate must not reinstall them.
 The relay image and Sprig runtime remain pinned to their existing immutable
 identities; change either only when a future descriptor assigns a new digest or
@@ -105,8 +105,8 @@ and the repository-owned `buzz-admin` plugin exposes the narrow operational
 tools needed by an OpenClaw agent. Replacing only the relay image does not
 update this Gateway runtime.
 
-For `0.5.26-fmg.5`, the `buzz-admin` `0.2.1` deployment described below is
-already complete and the live gate has passed. Do not repeat it during desktop
+For `0.5.26-fmg.5`, the `buzz-admin` `0.2.2` deployment described below is
+complete and the full live gate has passed. Do not repeat it during desktop
 promotion. `sprig-v0.5.26-fmg.1` is an existing immutable release and must not
 be recreated, moved, or replaced. A future agent runtime rollout must first
 record a new unique Sprig tag, asset, source commit and SHA-256 in the release
@@ -120,8 +120,10 @@ descriptor.
    the descriptor and its SHA-256 file.
    Download the immutable Actions artifact from that workflow, independently
    calculate the archive SHA-256, and record it as `BUZZ_SPRIG_SHA256`. Record
-   the descriptor's runtime source commit as `BUZZ_SPRIG_GIT_SHA` and its
-   runtime version as `BUZZ_SPRIG_VERSION` in Hostinger.
+   the GitHub release asset byte size as `BUZZ_SPRIG_ARCHIVE_SIZE_BYTES`; it
+   must equal the descriptor's `agent_runtime.archive_size_bytes`. Record the
+   descriptor's runtime source commit as `BUZZ_SPRIG_GIT_SHA` and its runtime
+   version as `BUZZ_SPRIG_VERSION` in Hostinger.
 3. Wait for current Buzz tool calls to finish. If `buzz-admin` is present, run
    `openclaw plugins disable buzz-admin`; an absent plugin is already quiesced.
    Then confirm this authoritative Gateway query succeeds:
@@ -140,19 +142,23 @@ descriptor.
    the OpenClaw container and run `scripts/install-openclaw-buzz-runtime.sh`
    there. The installer obtains the same authoritative Gateway inventory and
    fails if that RPC is unavailable or reports an active plugin. It downloads
-   the versioned archive, verifies its independently recorded SHA-256, rejects
-   unexpected or unsafe tar members before extracting selected regular files,
-   checks `sprig.json`, and verifies the `sprig` executable SHA-256. A new
+   the versioned archive with a 15-second connection timeout, a 120-second
+   total timeout, HTTPS-only redirects and an expected-size hard limit. It
+   requires the downloaded byte count to equal the descriptor before checking
+   SHA-256 or reading the tar archive. It then rejects unexpected or unsafe tar
+   members before extracting selected regular files, checks `sprig.json`, and
+   verifies the `sprig` executable SHA-256. A new
    version directory is published once, then `/data/.openclaw/bin/buzz` is
    activated with a temporary symlink and atomic rename. An exact rerun keeps
    the immutable directory and repairs the public link. A same-version
    executable or metadata mismatch fails closed; publish a new unique runtime
    version for a repair. Keep the OpenClaw identity volume, channel SecretRef
-   and all provider credentials unchanged. On any later failure, leave
-   `buzz-admin` disabled until the runtime and plugin checks succeed.
+   and all provider credentials unchanged. If this Sprig runtime step fails,
+   leave `buzz-admin` disabled until the runtime checks succeed.
 4. The installer fails before extraction unless this check succeeds:
 
    ```bash
+   test "$(wc -c < "$archive" | tr -d '[:space:]')" = "$BUZZ_SPRIG_ARCHIVE_SIZE_BYTES"
    printf '%s  %s\n' "$BUZZ_SPRIG_SHA256" "$archive" | sha256sum -c -
    ```
 
@@ -161,8 +167,11 @@ descriptor.
    `agent_runtime.executable_sha256`.
    Reading the `.sha256` file again from the same release is not a substitute
    for the separately recorded Hostinger value.
-5. Copy `deploy/openclaw/buzz-admin` from the same reviewed repository commit
-    into the container and run `scripts/install-openclaw-buzz-admin-plugin.sh`.
+5. Copy `deploy/openclaw/buzz-admin`,
+    `scripts/install-openclaw-buzz-admin-plugin.sh` and
+    `scripts/openclaw-buzz-admin-reconcile.mjs` from the same reviewed
+    repository commit into the container, keeping both scripts in one
+    directory. Then run `scripts/install-openclaw-buzz-admin-plugin.sh`.
     The installer verifies the descriptor-pinned source tree before executing
     package scripts, uses the committed lockfile, runs tests and OpenClaw
     validation, verifies the compiled entrypoint hash and npm-pack SHA-512
@@ -173,14 +182,11 @@ descriptor.
     read it even when the installer is executed as root. It removes only the
     exact legacy `plugin-src/buzz-admin` load
     path and preserves that directory under `plugin-rollbacks` when present.
-    If a managed lifecycle command reports an error, inspect the authoritative
-    `plugins.list` and `plugins.inspect` results before retrying because OpenClaw
-    may already have persisted the package while leaving it disabled. When the
-    exact descriptor-pinned package, version and integrity are present in that
-    disabled/unloaded state, resume with the scoped `plugins enable buzz-admin`
-    lifecycle and verify the live record; do not force a second install. The
-    installer never restores only a stale config snapshot over a possibly
-    committed managed install.
+    If a managed lifecycle command reports an error, rerun the same installer.
+    It reconciles an exact descriptor-pinned package, version and integrity in
+    either disabled/unloaded or enabled/active state without forcing another
+    install. It refuses to resume mismatched active code and never restores only
+    a stale config snapshot over a possibly committed managed install.
     Restart only the OpenClaw Gateway after both managed package installs are
     complete. The live gate requires the Gateway process start time to be at or
     after the newest official Buzz package mtime, so an in-place install without
@@ -283,7 +289,7 @@ trusted. A future OpenClaw endpoint that returns the active root, entry and
    publication and its runtime-check tool are intentionally unavailable on this
    fallback. The preserved baseline is release
    `sprig-rollback-9f47e98`, asset
-   `sprig-x86_64-unknown-linux-musl.tar.gz`, SHA-256
+   `sprig-x86_64-unknown-linux-musl.tar.gz`, size `6,567,967` bytes, SHA-256
    `c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a3687ca26e2a4579cd46`,
    executable SHA-256
    `54c9f5419eccc9f8de3a605636d32176204f869b571678ca5cd88b4d153781d8`,

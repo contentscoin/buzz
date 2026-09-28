@@ -1,6 +1,6 @@
 {
   "name": "openclaw-plugin-buzz-admin",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Operational Buzz tools for the FMG OpenClaw gateway",
   "type": "module",
   "private": true,

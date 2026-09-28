@@ -4236,8 +4236,8 @@ import {
 import { resolveSecretInputString } from "openclaw/plugin-sdk/secret-input";
 import { toolPluginMetadataSymbol } from "openclaw/plugin-sdk/tool-plugin";
 var execFile = promisify(execFileCallback);
-var PLUGIN_VERSION = "0.2.1";
-var BUZZ_ADMIN_BUILD_IDENTITY = "2ba479459f10626705f13f17a370d6c2aa4ec4309384c38a061738574cc40c87";
+var PLUGIN_VERSION = "0.2.2";
+var BUZZ_ADMIN_BUILD_IDENTITY = "0011f1410716da2542868c29a5530088c8601775210d36ae1f9849925c995f2e";
 var LOADED_RUNTIME_ENTRY_SHA256 = createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex");
 var DEFAULT_BUZZ_CLI = "/data/.openclaw/bin/buzz";
 var DEFAULT_OPENCLAW_CLI = "/usr/local/bin/openclaw";
@@ -4354,6 +4354,16 @@ function safeJson(value) {
   } catch {
     return void 0;
   }
+}
+function requireAcceptedWriteEventId(value) {
+  const response = safeJson(value);
+  if (response?.accepted !== true) {
+    throw new Error("Buzz CLI did not confirm that the event was accepted.");
+  }
+  if (typeof response.event_id !== "string" || !HEX_EVENT_ID.test(response.event_id)) {
+    throw new Error("Buzz CLI did not return an authoritative event ID.");
+  }
+  return response.event_id.toLowerCase();
 }
 function findEventId(value) {
   if (typeof value === "string" && HEX_EVENT_ID.test(value)) return value.toLowerCase();
@@ -4591,13 +4601,13 @@ function createWorkReportTool(_config, toolContext, dependencies) {
       toolContext.assertInvocationCurrent();
       try {
         const { stdout } = await dependencies.runCommand(buzzCli, args, options);
-        const response = safeJson(stdout.trim());
+        const eventId = requireAcceptedWriteEventId(stdout.trim());
         return agentToolResult({
           ok: true,
           channelId: input.channelId.toLowerCase(),
           threadRoot: input.threadRoot.toLowerCase(),
           status: input.status,
-          eventId: findEventId(response) ?? null
+          eventId
         });
       } catch (error) {
         throw cleanError(error, "Buzz work report publication");

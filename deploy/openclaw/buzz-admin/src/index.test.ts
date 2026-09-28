@@ -11,6 +11,7 @@ import entry, {
 
 const CHANNEL_ID = "11111111-1111-4111-8111-111111111111";
 const THREAD_ROOT = "a".repeat(64);
+const EVENT_ID = "b".repeat(64);
 
 type Registration = {
   tool: unknown;
@@ -34,7 +35,11 @@ function registerTools(
   );
 }
 
-function dependenciesWith(runCommand = vi.fn(async () => ({ stdout: "{}" }))) {
+function dependenciesWith(
+  runCommand = vi.fn(async () => ({
+    stdout: JSON.stringify({ accepted: true, event_id: EVENT_ID }),
+  })),
+) {
   return {
     dependencies: {
       runCommand,
@@ -286,7 +291,7 @@ describe("tool authority", () => {
     const guards = new Map<string, ReturnType<typeof vi.fn>>();
     const runCommand = vi.fn(async () => {
       expect([...guards.values()].some((guard) => guard.mock.calls.length === 1)).toBe(true);
-      return { stdout: "{}" };
+      return { stdout: JSON.stringify({ accepted: true, event_id: EVENT_ID }) };
     });
     const { dependencies } = dependenciesWith(runCommand);
     const tools = registerTools(dependencies);
@@ -385,7 +390,7 @@ describe("runtime probe disclosure", () => {
     expect(result.details).toMatchObject({
       plugin: {
         id: "buzz-admin",
-        version: "0.2.1",
+        version: "0.2.2",
         buildIdentity: BUZZ_ADMIN_BUILD_IDENTITY,
       },
       ok: false,
@@ -400,6 +405,52 @@ describe("runtime probe disclosure", () => {
     expect(serialized).not.toContain(roomId);
     expect(serialized).not.toContain(roomName);
     expect(serialized).not.toContain(rawError);
+  });
+});
+
+describe("work report response validation", () => {
+  function reportTool(stdout: string) {
+    const { dependencies, runCommand } = dependenciesWith(
+      vi.fn(async () => ({ stdout })),
+    );
+    const tools = registerTools(dependencies);
+    const descriptor = tools.get("buzz_publish_work_report") as {
+      create: (context: Record<string, unknown>) => {
+        execute: (
+          id: string,
+          params: unknown,
+        ) => Promise<{ details: Record<string, unknown> }>;
+      };
+    };
+    return { tool: descriptor.create(ownerContext()), runCommand };
+  }
+
+  it("returns the authoritative event ID only after explicit acceptance", async () => {
+    const { tool } = reportTool(
+      JSON.stringify({ accepted: true, event_id: EVENT_ID, id: "c".repeat(64) }),
+    );
+
+    const result = await tool.execute("report", validWorkReport());
+
+    expect(result.details).toMatchObject({ ok: true, eventId: EVENT_ID });
+  });
+
+  it.each([
+    ["malformed JSON", "not-json"],
+    ["an explicit rejection", JSON.stringify({ accepted: false, event_id: EVENT_ID })],
+    ["a missing authoritative event ID", JSON.stringify({ accepted: true })],
+    [
+      "a nested non-authoritative event ID",
+      JSON.stringify({ accepted: true, result: { event_id: EVENT_ID } }),
+    ],
+    ["an invalid event ID", JSON.stringify({ accepted: true, event_id: "not-an-event-id" })],
+  ])("rejects %s", async (_case, stdout) => {
+    const { tool, runCommand } = reportTool(stdout);
+
+    await expect(tool.execute("report", validWorkReport())).rejects.toThrow(
+      "Buzz work report publication failed",
+    );
+    expect(runCommand).toHaveBeenCalledOnce();
   });
 });
 

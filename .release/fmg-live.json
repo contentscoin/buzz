@@ -26,6 +26,7 @@
   "agent_runtime": {
     "release": "sprig-v0.5.26-fmg.1",
     "asset": "sprig-0.5.26-fmg.1-x86_64-unknown-linux-musl.tar.gz",
+    "archive_size_bytes": 6567959,
     "sha256": "0d4c4fd86621734c6f3b640deab3eb6cd00e647eeb7639441ea37f3a40c4bfb0",
     "executable_sha256": "c0dc492a5fd9eb1543472cfd57daa6a25da68707e3efcbfeef0cf342a821c773",
     "version": "0.5.26-fmg.1",
@@ -65,12 +66,12 @@
     "buzz_admin_plugin": {
       "id": "buzz-admin",
       "package": "openclaw-plugin-buzz-admin",
-      "version": "0.2.1",
-      "integrity": "sha512-MtpeOuEki3j/uayVVIefMnXHjRNZcueM7Ual2dth1nd/MYLrgDDiSgLQrNYLCNi99h48AofSS14o41YB3kAmgA==",
-      "build_identity": "2ba479459f10626705f13f17a370d6c2aa4ec4309384c38a061738574cc40c87",
+      "version": "0.2.2",
+      "integrity": "sha512-qXbmzThKGoWLVJry0ZG4ZuMkkFMcZntLRV6j7tzY9qJQhqEOXmb7JQlnHNYCdztwQYasUPx2pxSrK+1SA34MVg==",
+      "build_identity": "0011f1410716da2542868c29a5530088c8601775210d36ae1f9849925c995f2e",
       "runtime_dependencies": "bundled-into-entrypoint",
-      "source_tree_sha256": "ca47497c1301de2c71a7929d6d65916fe359319a212f427c7035d0e84c0aedb8",
-      "runtime_entry_sha256": "949e6e0640ad5c942d35b287d603ce6a1ebc7891dbfe9644fbaa9b73517784d4",
+      "source_tree_sha256": "595693c274f2d256c5b433a3d746b3007db7a9f8d42023626667d470902a87da",
+      "runtime_entry_sha256": "9cbf80daa6c059283461cf31e7a8837b6c1378fc6ee997afbfa802da379b3c83",
       "agent_ids": [
         "fmg-planner",
         "fmg-frontend",
@@ -99,6 +100,7 @@
     "agent_runtime": {
       "release": "sprig-rollback-9f47e98",
       "asset": "sprig-x86_64-unknown-linux-musl.tar.gz",
+      "archive_size_bytes": 6567967,
       "sha256": "c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a3687ca26e2a4579cd46",
       "executable_sha256": "54c9f5419eccc9f8de3a605636d32176204f869b571678ca5cd88b4d153781d8",
       "version": "0.1.0+git.9f47e98",
