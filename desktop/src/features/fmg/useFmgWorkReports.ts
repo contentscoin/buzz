@@ -1,18 +1,18 @@
 import * as React from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   reduceWorkReports,
   type WorkReport,
 } from "@/features/messages/lib/workReport";
-import { relayClient } from "@/shared/api/relayClient";
+import {
+  startWorkReportEventSync,
+  type WorkReportEventSync,
+} from "@/features/messages/workReportEventSync";
 import type { RelayEvent } from "@/shared/api/types";
 import { KIND_WORK_REPORT } from "@/shared/constants/kinds";
 
 const RECENT_WORK_REPORT_LIMIT = 200;
-const LIVE_SUBSCRIPTION_MAX_ATTEMPTS = 3;
-const LIVE_SUBSCRIPTION_RETRY_DELAY_MS = 3_000;
-const FMG_WORK_REPORTS_QUERY_KEY = ["fmg", "work-reports"] as const;
+const LIVE_OVERLAP_SECONDS = 5;
 
 export type FmgWorkReportItem = {
   channelId: string;
@@ -68,75 +68,63 @@ function latestReports(events: readonly RelayEvent[]): FmgWorkReportItem[] {
 }
 
 export function useFmgWorkReports() {
-  const queryClient = useQueryClient();
+  const [events, setEvents] = React.useState<readonly RelayEvent[]>([]);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [isFetching, setIsFetching] = React.useState(false);
+  const [error, setError] = React.useState<unknown | null>(null);
   const [liveSubscriptionFailed, setLiveSubscriptionFailed] =
     React.useState(false);
-  const query = useQuery({
-    queryKey: FMG_WORK_REPORTS_QUERY_KEY,
-    queryFn: async () => {
-      const events = await relayClient.fetchEvents({
+  const syncRef = React.useRef<WorkReportEventSync | null>(null);
+
+  React.useEffect(() => {
+    const since = Math.max(
+      0,
+      Math.floor(Date.now() / 1_000) - LIVE_OVERLAP_SECONDS,
+    );
+    const sync = startWorkReportEventSync({
+      liveFilter: {
+        kinds: [KIND_WORK_REPORT],
+        limit: RECENT_WORK_REPORT_LIMIT,
+        since,
+        "#t": ["work-report"],
+      },
+      historyFilter: {
         kinds: [KIND_WORK_REPORT],
         limit: RECENT_WORK_REPORT_LIMIT,
         "#t": ["work-report"],
-      });
-      return latestReports(events);
-    },
-    staleTime: 0,
-  });
-
-  React.useEffect(() => {
-    let disposed = false;
-    let unsubscribe: (() => Promise<void>) | null = null;
-    let attempts = 0;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const subscribe = () => {
-      attempts += 1;
-      void relayClient
-        .subscribeLive(
-          {
-            kinds: [KIND_WORK_REPORT],
-            limit: 0,
-            "#t": ["work-report"],
-          },
-          () => {
-            void queryClient.invalidateQueries({
-              queryKey: FMG_WORK_REPORTS_QUERY_KEY,
-            });
-          },
-        )
-        .then((dispose) => {
-          if (disposed) {
-            void dispose();
-            return;
-          }
-          unsubscribe = dispose;
-          setLiveSubscriptionFailed(false);
-        })
-        .catch(() => {
-          if (disposed) return;
-          if (attempts < LIVE_SUBSCRIPTION_MAX_ATTEMPTS) {
-            retryTimer = setTimeout(
-              subscribe,
-              LIVE_SUBSCRIPTION_RETRY_DELAY_MS * attempts,
-            );
-            return;
-          }
-          setLiveSubscriptionFailed(true);
-        });
-    };
-
-    setLiveSubscriptionFailed(false);
-    subscribe();
+      },
+      maxEvents: RECENT_WORK_REPORT_LIMIT,
+      onSnapshot: setEvents,
+      onInitialLoadingChange: setIsLoading,
+      onFetchingChange: setIsFetching,
+      onHistoryError: setError,
+      onLiveSubscriptionFailed: setLiveSubscriptionFailed,
+    });
+    syncRef.current = sync;
 
     return () => {
-      disposed = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      void unsubscribe?.();
+      if (syncRef.current === sync) syncRef.current = null;
+      sync.dispose();
     };
-  }, [queryClient]);
+  }, []);
 
-  return { ...query, items: query.data ?? [], liveSubscriptionFailed };
+  const items = React.useMemo(() => latestReports(events), [events]);
+  const refetch = React.useCallback(
+    () => syncRef.current?.refresh() ?? Promise.resolve(),
+    [],
+  );
+
+  return {
+    data: items,
+    items,
+    error,
+    isError: error !== null,
+    isFetching,
+    isLoading,
+    isPending: isLoading,
+    liveSubscriptionFailed,
+    refetch,
+  };
 }
 
 export type UseFmgWorkReportsResult = ReturnType<typeof useFmgWorkReports>;
