@@ -1223,7 +1223,7 @@ test("removes an agent from the main drawer with the captured workspace scope", 
     .toEqual({
       agentPubkey: TEST_IDENTITIES.alice.pubkey,
       expectedRelayUrl: "ws://localhost:3000",
-      expectedSignerPubkey: TEST_IDENTITIES.tyler.pubkey,
+      expectedSignerPubkey: "deadbeef".repeat(8),
     });
   await expect(page.getByTestId("huddle-agent-voice-menu-trigger")).toHaveCount(
     0,
@@ -1270,7 +1270,7 @@ test("removes an agent from its room menu with the captured workspace scope", as
     .toEqual({
       agentPubkey: TEST_IDENTITIES.alice.pubkey,
       expectedRelayUrl: "ws://localhost:3000",
-      expectedSignerPubkey: TEST_IDENTITIES.tyler.pubkey,
+      expectedSignerPubkey: "deadbeef".repeat(8),
     });
   await expect(page.getByTestId("huddle-agent-voice-menu-trigger")).toHaveCount(
     0,
