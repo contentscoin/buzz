@@ -1,0 +1,21 @@
+{
+  "id": "buzz-admin",
+  "name": "Buzz Admin",
+  "description": "Inspect Buzz and publish signed work reports from the OpenClaw Gateway.",
+  "version": "0.2.2",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "buzz_runtime_check",
+      "buzz_publish_work_report",
+      "buzz_send_thread_summary"
+    ]
+  }
+}

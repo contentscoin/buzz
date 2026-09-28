@@ -1,9 +1,9 @@
 {
-  "schema": 1,
+  "schema": 2,
   "channel": "fmg-live",
   "desktop": {
-    "version": "0.5.26-fmg.4",
-    "tag": "fmg-desktop-v0.5.26-fmg.4",
+    "version": "0.5.26-fmg.5",
+    "tag": "fmg-desktop-v0.5.26-fmg.5",
     "product_name": "Buzz",
     "identifier": "xyz.block.buzz.app",
     "artifact": "windows-nsis-x86_64",
@@ -16,6 +16,9 @@
   },
   "relay": {
     "image": "ghcr.io/contentscoin/buzz",
+    "digest": "sha256:eb2113d717d3c0d352f5d14793e0a3638a20597734d3756db040cbdf90430f39",
+    "immutable_ref": "ghcr.io/contentscoin/buzz@sha256:eb2113d717d3c0d352f5d14793e0a3638a20597734d3756db040cbdf90430f39",
+    "source_commit": "598d6aad833c755dbdedcddfeca8efaed0defb49",
     "deployment_policy": "digest-pinned",
     "public_origin": "https://buzz-dnb0.srv2006121.hstgr.cloud",
     "websocket_url": "wss://buzz-dnb0.srv2006121.hstgr.cloud"
@@ -23,44 +26,129 @@
   "agent_runtime": {
     "release": "sprig-v0.5.26-fmg.1",
     "asset": "sprig-0.5.26-fmg.1-x86_64-unknown-linux-musl.tar.gz",
+    "archive_size_bytes": 6567959,
+    "sha256": "0d4c4fd86621734c6f3b640deab3eb6cd00e647eeb7639441ea37f3a40c4bfb0",
+    "executable_sha256": "c0dc492a5fd9eb1543472cfd57daa6a25da68707e3efcbfeef0cf342a821c773",
+    "version": "0.5.26-fmg.1",
+    "source_commit": "598d6aad833c755dbdedcddfeca8efaed0defb49",
     "deployment_policy": "versioned-release-sha256-pinned",
-    "hostinger_service": "buzz-openclaw-agent",
+    "deployment_target": "openclaw-gateway-volume",
+    "install_path": "/data/.openclaw/runtimes/sprig/0.5.26-fmg.1",
+    "buzz_cli_path": "/data/.openclaw/bin/buzz",
     "integrity_control": "BUZZ_SPRIG_SHA256",
     "source_control": "BUZZ_SPRIG_GIT_SHA",
     "version_control": "BUZZ_SPRIG_VERSION"
+  },
+  "openclaw": {
+    "version": "2026.9.6",
+    "server_build_id": "2026.9.6-release-eb377ac59e6c-2026-09-23T16-33-12.144Z",
+    "integration": "native-buzz-channel-plus-fmg-tools",
+    "container_image": {
+      "configured_reference": "ghcr.io/hostinger/hvps-openclaw:latest",
+      "immutable_image_id": "sha256:6fc3b1687cd0aa80950324a73567945e2437ab15e119a5ce3f32f33c2f351252",
+      "source_revision": "a6e21fe822eefb121f14da3f64b79d0331765e5c",
+      "deployment_policy": "runtime-image-id-and-source-pinned"
+    },
+    "buzz_channel_plugin": {
+      "package": "@openclaw/buzz",
+      "version": "2026.9.6",
+      "integrity": "sha512-9Phyruxq4eIzjc3iHXoRzZL37bAKqICJtqE9fdPvHSLtoTw6FKlRkdwr1u3nrECt49JesJmXj8/NS5xVhDEh4w==",
+      "install_path": "/data/.openclaw/npm/projects/openclaw-buzz-8413d3ef60/node_modules/@openclaw/buzz",
+      "package_json_sha256": "969b6a89260125572890ca2f719d353c74a1b4d188a7009c4b485f20958c86eb",
+      "package_tree_sha256": "1e3ce21a8e32d54bda8d9ec3b6791477c28ba8136ef74fbe03c1d3cd5ad9aab7",
+      "runtime_entry": "dist/index.js",
+      "runtime_entry_sha256": "67559e787eb7aaa459d69519b2c9b4c24ea0779557fc067047fef028ed7bbdb0",
+      "activation_policy": "gateway-pid-started-after-package-and-stable-generation",
+      "account_id": "default",
+      "required_room_name": "openclaw-workspace",
+      "required_room_id_sha256": "52c3d17ac65bdfaa7648d4fc0241ae614d640d8adde0be428c964fd1309bbc4a"
+    },
+    "buzz_admin_plugin": {
+      "id": "buzz-admin",
+      "package": "openclaw-plugin-buzz-admin",
+      "version": "0.2.2",
+      "integrity": "sha512-qXbmzThKGoWLVJry0ZG4ZuMkkFMcZntLRV6j7tzY9qJQhqEOXmb7JQlnHNYCdztwQYasUPx2pxSrK+1SA34MVg==",
+      "build_identity": "0011f1410716da2542868c29a5530088c8601775210d36ae1f9849925c995f2e",
+      "runtime_dependencies": "bundled-into-entrypoint",
+      "source_tree_sha256": "595693c274f2d256c5b433a3d746b3007db7a9f8d42023626667d470902a87da",
+      "runtime_entry_sha256": "9cbf80daa6c059283461cf31e7a8837b6c1378fc6ee997afbfa802da379b3c83",
+      "agent_ids": [
+        "fmg-planner",
+        "fmg-frontend",
+        "fmg-backend",
+        "fmg-qa",
+        "fmg-release"
+      ],
+      "tools": [
+        "buzz_runtime_check",
+        "buzz_publish_work_report",
+        "buzz_send_thread_summary"
+      ]
+    },
+    "live_gate_agent": {
+      "id": "fmg-live-gate",
+      "model": "openai/gpt-6-sol",
+      "runtime": "openclaw",
+      "code_mode": "disabled",
+      "tools": [
+        "buzz_runtime_check"
+      ]
+    }
   },
   "rollback": {
     "relay_image": "ghcr.io/contentscoin/buzz@sha256:3a501f2f9828a597efb58cd62dc1174167e29511ce56a0b63cac7a19149147c7",
     "agent_runtime": {
       "release": "sprig-rollback-9f47e98",
       "asset": "sprig-x86_64-unknown-linux-musl.tar.gz",
+      "archive_size_bytes": 6567967,
       "sha256": "c3af280e7dbb1dde6bec6623a8730c7d34b0b60a9855a3687ca26e2a4579cd46",
+      "executable_sha256": "54c9f5419eccc9f8de3a605636d32176204f869b571678ca5cd88b4d153781d8",
       "version": "0.1.0+git.9f47e98",
       "source_commit": "9f47e983c6212d2ac2837e46b6c263081ffd53c3"
+    },
+    "buzz_admin_plugin": {
+      "id": "buzz-admin",
+      "action": "disable-and-uninstall",
+      "fallback_integration": "official-buzz-channel"
     }
   },
   "features": {
     "work_reports": {
       "state": "enabled",
-      "surfaces": ["desktop", "relay", "cli", "sdk"],
+      "surfaces": [
+        "desktop",
+        "relay",
+        "cli",
+        "sdk"
+      ],
       "control": "compiled-in"
     },
     "task_graph": {
       "state": "operator-preview",
-      "surfaces": ["desktop-read-only", "cli", "sdk"],
+      "surfaces": [
+        "desktop-read-only",
+        "cli",
+        "sdk"
+      ],
       "control": "issue-label",
       "control_value": "graph"
     },
     "aside_browser": {
       "state": "disabled-by-default",
-      "surfaces": ["desktop-status", "acp"],
+      "surfaces": [
+        "desktop-status",
+        "acp"
+      ],
       "control": "environment",
       "control_name": "BUZZ_ACP_ASIDE_COMMAND",
       "disabled_value": ""
     },
     "mobile_report_fallback": {
       "state": "agent-policy",
-      "surfaces": ["mobile", "acp"],
+      "surfaces": [
+        "mobile",
+        "acp"
+      ],
       "control": "agent-prompt",
       "delivery": "best-effort-ordinary-thread-summary"
     }
