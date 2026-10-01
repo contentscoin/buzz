@@ -108,9 +108,8 @@ fn command_for(task: &GraphTask, scope: &RetentionScope) -> Result<Command, Stri
         &task.issue,
         "--repo-owner",
         &task.repo_owner,
-        "--repo-id",
-        &task.repo_id,
     ]);
+    command.arg(format!("--repo-id={}", task.repo_id));
     Ok(command)
 }
 
@@ -209,17 +208,16 @@ pub(crate) async fn transition_fmg_graph_task(
     };
     let mut command = command_for(&transition.task, &scope)?;
     command.args([
-        "--from",
-        &transition.from,
-        "--to",
-        &transition.to,
-        "--content",
-        &transition.content,
+        format!("--from={}", transition.from),
+        format!("--to={}", transition.to),
+        format!("--content={}", transition.content),
+    ]);
+    command.args([
         "--expected-head",
         transition.expected_head.as_deref().unwrap_or("initial"),
     ]);
     if let Some(gate) = transition.gate.as_deref().filter(|value| !value.is_empty()) {
-        command.args(["--gate", gate]);
+        command.arg(format!("--gate={gate}"));
     }
     tokio::task::spawn_blocking(move || {
         let response = run(command)?;
