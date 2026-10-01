@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-mod graph;
-pub(crate) use graph::{get_fmg_graph_context, transition_fmg_graph_task};
+pub(crate) mod graph;
 
 static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -111,6 +110,9 @@ pub(crate) fn set_fmg_browser_config(
     let config = validate_config(config)?;
     let _guard = CONFIG_LOCK.lock().map_err(|error| error.to_string())?;
     let bytes = serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?;
+    if bytes.len() > 8192 {
+        return Err("Aside 설정 파일이 너무 큽니다".into());
+    }
     crate::managed_agents::storage::atomic_write_json_restricted(&config_path(&app)?, &bytes)
 }
 

@@ -92,12 +92,14 @@ function BrowserForm({
         className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
         disabled={pending}
         value={draft.mode}
-        onChange={(event) =>
+        onChange={(event) => {
+          setMessage("");
+          setError("");
           setDraft({
             ...draft,
             mode: event.target.value as FmgBrowserConfig["mode"],
-          })
-        }
+          });
+        }}
       >
         <option value="environment">앱 실행 환경의 설정 사용</option>
         <option value="custom">설치된 Aside 실행 파일 지정</option>
@@ -114,9 +116,11 @@ function BrowserForm({
             maxLength={4096}
             disabled={pending}
             required
-            onChange={(event) =>
-              setDraft({ ...draft, command: event.target.value })
-            }
+            onChange={(event) => {
+              setMessage("");
+              setError("");
+              setDraft({ ...draft, command: event.target.value });
+            }}
             placeholder="C:\…\aside.exe"
           />
           <p className="text-xs text-muted-foreground">
