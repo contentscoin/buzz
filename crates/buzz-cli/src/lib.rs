@@ -1993,6 +1993,12 @@ pub enum IssuesCmd {
         /// Optional gate slug, such as tests or human-approval
         #[arg(long)]
         gate: Option<String>,
+        /// Inspect the verified graph context without publishing a transition
+        #[arg(long)]
+        inspect: bool,
+        /// Require the observed transition head, or 'initial' for an empty chain
+        #[arg(long)]
+        expected_head: Option<String>,
     },
 }
 

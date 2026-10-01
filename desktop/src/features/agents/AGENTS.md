@@ -450,6 +450,18 @@ uses the fixed agent signer, origin-scoped Blossom auth, no redirects, byte caps
 and hash/descriptor verification; ordinary public external avatars remain
 unauthenticated passthrough. No image-reader proxy or tenant isolation exception.
 
+## Desktop Aside browser configuration
+
+Settings → Agents owns the local Aside command in `fmg-browser.json` under the
+managed-agent directory. A single save atomically writes the selected mode and
+path. Environment mode inherits `BUZZ_ACP_ASIDE_COMMAND`; disabled mode removes
+that variable from the child; custom mode sets the validated absolute executable
+path after descriptor environment merging. Never expose the inherited command
+through IPC. Saved settings apply to the next local managed-agent start; they do
+not restart running agents or configure a remote OpenClaw Gateway. Missing saved
+executables must remain editable, while malformed or oversized storage is an
+explicit error.
+
 ## Keep this file true
 
 **If you change how agent configuration is modeled, rendered, persisted,

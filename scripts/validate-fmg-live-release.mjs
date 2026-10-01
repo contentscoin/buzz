@@ -161,8 +161,8 @@ const expectedStringArrays = new Map([
   ],
   ["manifest.openclaw.live_gate_agent.tools", ["buzz_runtime_check"]],
   ["manifest.features.work_reports.surfaces", ["desktop", "relay", "cli", "sdk"]],
-  ["manifest.features.task_graph.surfaces", ["desktop-read-only", "cli", "sdk"]],
-  ["manifest.features.aside_browser.surfaces", ["desktop-status", "acp"]],
+  ["manifest.features.task_graph.surfaces", ["desktop-transitions", "cli", "sdk"]],
+  ["manifest.features.aside_browser.surfaces", ["desktop-settings", "acp"]],
   ["manifest.features.mobile_report_fallback.surfaces", ["mobile", "acp"]],
 ]);
 

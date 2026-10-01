@@ -22,6 +22,8 @@ import {
 import { useChannelsQuery } from "@/features/channels/hooks";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { useFmgTaskGraph } from "@/features/fmg/useFmgTaskGraph";
+import type { FmgTaskGraphItem } from "@/features/fmg/useFmgTaskGraph";
+import { FmgGraphTransitionDialog } from "./FmgGraphTransitionDialog";
 import { useFmgWorkReports } from "@/features/fmg/useFmgWorkReports";
 import type { WorkReportStatus } from "@/features/messages/lib/workReport";
 import type { ConnectionState } from "@/shared/api/relayClientShared";
@@ -158,6 +160,20 @@ export function FmgDashboard() {
   });
   const [showAllReports, setShowAllReports] = React.useState(false);
   const [showAllGraphItems, setShowAllGraphItems] = React.useState(false);
+  const [transitionTarget, setTransitionTarget] = React.useState<{
+    communityId: string;
+    relayUrl: string;
+    item: FmgTaskGraphItem;
+  } | null>(null);
+
+  React.useEffect(() => {
+    setTransitionTarget((target) =>
+      target?.communityId === activeCommunity?.id &&
+      target?.relayUrl === activeCommunity?.relayUrl
+        ? target
+        : null,
+    );
+  }, [activeCommunity?.id, activeCommunity?.relayUrl]);
 
   const channelsById = React.useMemo(
     () =>
@@ -471,8 +487,8 @@ export function FmgDashboard() {
                   </Button>
                 </div>
               }
-              badge={<Badge variant="warning">미리보기</Badge>}
-              description="graph 라벨 작업, 프로젝트 상태와 의존성을 읽습니다. 그래프 전환 실행과 전환 이력의 상세 검증은 현재 에이전트 또는 buzz CLI에서 합니다."
+              badge={<Badge variant="info">검증 후 전환</Badge>}
+              description="graph 라벨 작업의 상태와 의존성을 확인하고 전환할 수 있습니다. 전환할 때 작업 권한·의존성·최신 전환 이력을 다시 검증합니다."
               icon={<GitBranch />}
               title="작업 그래프"
             >
@@ -522,20 +538,39 @@ export function FmgDashboard() {
                             </p>
                           ) : null}
                         </div>
-                        <Button
-                          aria-label={`${item.title} 프로젝트에서 열기`}
-                          onClick={() =>
-                            void goProject(item.projectId, {
-                              issueId: item.issueId,
-                              repositoryId: item.repositoryId,
-                            })
-                          }
-                          size="icon-xs"
-                          type="button"
-                          variant="ghost"
-                        >
-                          <ChevronRight />
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            aria-label={`${item.title} 그래프 상태 전환`}
+                            disabled={!activeCommunity}
+                            onClick={() => {
+                              if (activeCommunity)
+                                setTransitionTarget({
+                                  communityId: activeCommunity.id,
+                                  relayUrl: activeCommunity.relayUrl,
+                                  item,
+                                });
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            상태 전환
+                          </Button>
+                          <Button
+                            aria-label={`${item.title} 프로젝트에서 열기`}
+                            onClick={() =>
+                              void goProject(item.projectId, {
+                                issueId: item.issueId,
+                                repositoryId: item.repositoryId,
+                              })
+                            }
+                            size="icon-xs"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <ChevronRight />
+                          </Button>
+                        </div>
                       </div>
                     </li>
                   ))}
@@ -563,7 +598,7 @@ export function FmgDashboard() {
                   type="button"
                   variant="outline"
                 >
-                  에이전트 설정 열기
+                  브라우저 설정 열기
                   <ChevronRight />
                 </Button>
               }
@@ -584,8 +619,8 @@ export function FmgDashboard() {
                   : runtimeStatusQuery.isError
                     ? "Aside 설정 여부를 읽지 못했습니다. 에이전트 설정과 앱 실행 환경을 확인하세요."
                     : asideConfigured
-                      ? "이 데스크톱 프로세스에 Aside 명령이 설정되어 ACP 세션에서 브라우저 도구를 주입할 수 있습니다."
-                      : "BUZZ_ACP_ASIDE_COMMAND를 설정하면 ACP 에이전트 세션에 Aside 브라우저 도구를 추가할 수 있습니다."
+                      ? "Aside 명령이 설정되어 새로 시작하는 로컬 ACP 에이전트에서 브라우저 도구를 사용할 수 있습니다."
+                      : "브라우저 설정에서 설치된 Aside 실행 파일을 지정하면 로컬 ACP 에이전트에 브라우저 도구를 추가할 수 있습니다."
               }
               icon={runtimeStatusQuery.isError ? <CircleHelp /> : <Globe2 />}
               title="Aside 브라우저"
@@ -656,6 +691,20 @@ export function FmgDashboard() {
           </div>
         </section>
       </div>
+      {transitionTarget &&
+      activeCommunity &&
+      transitionTarget.communityId === activeCommunity.id &&
+      transitionTarget.relayUrl === activeCommunity.relayUrl ? (
+        <FmgGraphTransitionDialog
+          key={`${activeCommunity.id}:${activeCommunity.relayUrl}:${transitionTarget.item.issueId}`}
+          item={transitionTarget.item}
+          relayUrl={activeCommunity.relayUrl}
+          onClose={() => setTransitionTarget(null)}
+          onAccepted={() => {
+            void taskGraphQuery.workItemsQuery.refetch();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
