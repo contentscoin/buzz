@@ -27,12 +27,14 @@ export type FmgTaskGraphDependency = Readonly<{
   status: ProjectIssue["status"] | null;
 }>;
 
-/** Read-only graph task summary consumed by the FMG dashboard. */
+/** Graph task summary; transitions revalidate authoritative state through the CLI. */
 export type FmgTaskGraphItem = Readonly<{
   projectId: string;
   projectName: string;
   repositoryId: string;
   repositoryName: string;
+  repositoryOwner: string;
+  repositoryDtag: string;
   issueId: string;
   title: string;
   /** NIP-34 issue status; null when status data could not be loaded. */
@@ -92,6 +94,8 @@ function buildTaskGraphItems(
         projectName: project.name,
         repositoryId: repository.id,
         repositoryName: repository.name,
+        repositoryOwner: repository.owner,
+        repositoryDtag: repository.dtag,
         issueId: issue.id,
         title: issue.title,
         status: statusesAvailable ? issue.status : null,
@@ -105,8 +109,8 @@ function buildTaskGraphItems(
 
 /**
  * Loads the existing Projects issue read model and selects graph-labelled tasks
- * for the FMG dashboard. This read-only preview leaves causal transition and
- * dependency-cycle validation to the Buzz CLI.
+ * for the FMG dashboard. Transitions use the packaged Buzz CLI's causal state
+ * and dependency-cycle validation rather than this project status projection.
  */
 export function useFmgTaskGraph() {
   const projectsQuery = useProjectsQuery();

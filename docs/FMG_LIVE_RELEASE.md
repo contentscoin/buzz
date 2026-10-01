@@ -3,15 +3,15 @@
 This runbook publishes FMG Buzz without changing the upstream release ledger.
 The release descriptor is [`.release/fmg-live.json`](../.release/fmg-live.json).
 The initial live desktop version was `0.5.26-fmg.1`; the current integrated
-release is `0.5.26-fmg.5`.
+release is `0.5.26-fmg.6`.
 
 ## Release identity
 
 | Item | Value |
 | --- | --- |
 | Upstream base | `desktop-v0.5.25` / `c8f73213089cbd5a0f1e675d3193558280d46e10` |
-| Desktop version | `0.5.26-fmg.5` |
-| Desktop tag | `fmg-desktop-v0.5.26-fmg.5` |
+| Desktop version | `0.5.26-fmg.6` |
+| Desktop tag | `fmg-desktop-v0.5.26-fmg.6` |
 | Windows app identity | `Buzz` / `xyz.block.buzz.app` |
 | Managed Git | Git for Windows MinGit `2.55.0.5`, pinned by SHA-256 in `scripts/windows-managed-git.json` |
 | Relay image | `ghcr.io/contentscoin/buzz@sha256:eb2113d717d3c0d352f5d14793e0a3638a20597734d3756db040cbdf90430f39` |
@@ -21,13 +21,13 @@ release is `0.5.26-fmg.5`.
 | Official Buzz runtime | `@openclaw/buzz@2026.9.6`, managed package tree SHA-256 `1e3ce21a8e32d54bda8d9ec3b6791477c28ba8136ef74fbe03c1d3cd5ad9aab7`, entry SHA-256 `67559e787eb7aaa459d69519b2c9b4c24ea0779557fc067047fef028ed7bbdb0` |
 | Public relay | `wss://buzz-dnb0.srv2006121.hstgr.cloud` |
 
-`0.5.26-fmg.5` is greater than the installed `0.5.26-fmg.4`, so the NSIS
+`0.5.26-fmg.6` is greater than the installed `0.5.26-fmg.5`, so the NSIS
 installer follows the normal in-place upgrade path. Keeping the application
 identifier preserves the existing desktop community and identity storage.
 
 ### Release scope
 
-`0.5.26-fmg.5` delivers the Windows fixes listed in `FMG_CHANGELOG.md` and
+`0.5.26-fmg.6` delivers graph transition controls and local Aside settings listed in `FMG_CHANGELOG.md` and
 records the completed, attested OpenClaw Buzz deployment. The official Buzz
 channel, `buzz-admin` `0.2.2` and the dedicated no-delivery live-gate agent are
 already deployed. Publishing the desktop candidate must not reinstall them.
@@ -42,8 +42,8 @@ The release does not declare environment flags that the application ignores.
 | Feature | Live state | Actual control |
 | --- | --- | --- |
 | Work reports | Enabled | Compiled desktop, relay, CLI and SDK support |
-| Task graph | Operator preview | Desktop shows a read-only graph preview; the issue must carry the `graph` label before the CLI accepts a transition |
-| Aside browser | Off | `BUZZ_ACP_ASIDE_COMMAND` is empty; set it to the trusted Aside executable to opt in |
+| Task graph | Operator preview | Desktop opens a transition dialog; the issue must carry the `graph` label and pass the packaged CLI preflight and reviewed-head check |
+| Aside browser | Off | Settings → Agents → Aside browser saves an executable, explicit disable or inherited `BUZZ_ACP_ASIDE_COMMAND`; applies on the next local agent start |
 | Mobile report summary | ACP agent policy | After a confirmed report, the agent is instructed to attempt one concise ordinary reply in the same thread |
 
 ## Build and publish the Windows app
@@ -54,7 +54,7 @@ The release does not declare environment flags that the application ignores.
 3. Run once with `publish=false`. Download the workflow artifact and install it
    over the existing Buzz installation. Record the candidate run ID and the
    installer SHA-256 printed in the workflow summary.
-4. Confirm the installed version is `0.5.26-fmg.5`, the **FMG 센터** entry is
+4. Confirm the installed version is `0.5.26-fmg.6`, the **FMG 센터** entry is
    visible, the existing communities remain available, and the Hostinger
    community reconnects. In **Settings → Agents**, confirm Codex offers
    `GPT-6 Sol` and `GPT-6 Luna`, Claude offers `Claude Opus 5.5`, and both
@@ -66,13 +66,13 @@ The release does not declare environment flags that the application ignores.
    `resources/fmg-managed-git/etc/package-versions.txt`; running the installed
    `git.exe --version` must report `2.55.0.windows.5`. In **Tasks**, switch
    between **List** and **Board** and open a card. In **FMG
-   센터**, confirm a `graph` task shows its dependency state in the read-only
-   preview.
+   센터**, confirm a `graph` task shows its dependency state and opens the transition dialog in the
+   preview. Verify an authorized transition in a disposable test task, then confirm a stale reviewed head is rejected. In **Settings → Agents**, verify Aside save and explicit disable; restart a disposable local agent to apply it.
 5. Re-run the workflow on the same `main` commit with `publish=true`, supplying
    the recorded `candidate_run_id` and `candidate_sha256`. The publish job does
    not rebuild. It downloads that immutable Actions artifact, verifies its
    receipt, source commit and hash, then creates
-   `fmg-desktop-v0.5.26-fmg.5`.
+   `fmg-desktop-v0.5.26-fmg.6`.
 6. If the tag or release already exists, the workflow resolves the tag to its
    commit and byte-compares the existing assets. It succeeds only when they are
    identical; it never replaces an existing release asset.
@@ -80,9 +80,9 @@ The release does not declare environment flags that the application ignores.
 The workflow creates a non-updating, unsigned x64 NSIS installer. It does not
 promote the build into the upstream `buzz-desktop-latest` updater channel.
 
-## Build and deploy the relay (not part of 0.5.26-fmg.5)
+## Build and deploy the relay (not part of 0.5.26-fmg.6)
 
-Skip this section for `0.5.26-fmg.5`. Use it only for a release that explicitly
+Skip this section for `0.5.26-fmg.6`. Use it only for a release that explicitly
 changes the relay image recorded in the release descriptor.
 
 1. Let the existing **Docker image** workflow complete for the same `main`
@@ -105,7 +105,7 @@ and the repository-owned `buzz-admin` plugin exposes the narrow operational
 tools needed by an OpenClaw agent. Replacing only the relay image does not
 update this Gateway runtime.
 
-For `0.5.26-fmg.5`, the `buzz-admin` `0.2.2` deployment described below is
+For `0.5.26-fmg.6`, the `buzz-admin` `0.2.2` deployment described below is
 complete and the full live gate has passed. Do not repeat it during desktop
 promotion. `sprig-v0.5.26-fmg.1` is an existing immutable release and must not
 be recreated, moved, or replaced. A future agent runtime rollout must first

@@ -1,5 +1,29 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.6
+
+Base: FMG live release `0.5.26-fmg.5`.
+
+### Added
+
+- FMG Center graph tasks now open a state-transition dialog. The packaged CLI
+  checks authorization, dependency completion, cycles and the latest causal
+  head before publication. Project Open/Closed status remains a separate view.
+- Settings → Agents now saves a local Aside executable path, explicit disable,
+  or inherited environment mode. One atomic save applies to the next local
+  managed-agent start, without restarting running agents.
+
+### Fixed
+
+- Graph publication refuses capped histories and stale reviewed causal heads.
+  Failed desktop requests require refreshing history before another attempt.
+- Desktop graph requests capture the active community and signer, bound child
+  process lifetime/output, and require an accepted relay event receipt.
+
+### Deployment scope
+
+- Desktop update only. Existing relay, OpenClaw and Sprig identities are retained.
+
 ## 0.5.26-fmg.5
 
 Base: FMG live release `0.5.26-fmg.4`.

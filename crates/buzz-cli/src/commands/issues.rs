@@ -630,6 +630,8 @@ pub async fn cmd_transition_issue(
     to: &str,
     content: &str,
     gate: Option<&str>,
+    inspect: bool,
+    expected_head: Option<&str>,
 ) -> Result<(), CliError> {
     validate_hex64(issue)?;
     validate_hex64(repo_owner)?;
@@ -654,6 +656,13 @@ pub async fn cmd_transition_issue(
     let response = client.query_multi(&[root_filter, operation_filter]).await?;
     let mut events = serde_json::from_str::<Vec<AssignmentQueryEvent>>(&response)
         .map_err(|error| CliError::Other(format!("parse task transition context: {error}")))?;
+    if events.iter().filter(|event| event.kind == 1621).count() >= 1000
+        || events.iter().filter(|event| event.kind == 1).count() >= 500
+    {
+        return Err(CliError::Other(
+            "task transition history may be incomplete; refusing to publish".into(),
+        ));
+    }
     let root = events
         .iter()
         .find(|event| event.kind == 1621 && event.id.eq_ignore_ascii_case(issue))
@@ -680,6 +689,11 @@ pub async fn cmd_transition_issue(
             .map_err(|error| {
                 CliError::Other(format!("parse dependency status context: {error}"))
             })?;
+        if status_events.len() >= 1000 {
+            return Err(CliError::Other(
+                "dependency status history may be incomplete; refusing to publish".into(),
+            ));
+        }
         events.append(&mut status_events);
     }
 
@@ -739,6 +753,16 @@ pub async fn cmd_transition_issue(
         .collect::<Vec<_>>();
     let context =
         reduce_task_transitions(&root, repo_owner, &assignment_state.assignees, &operations);
+    if inspect {
+        println!(
+            "{}",
+            serde_json::json!({"state": context.state, "head": context.head})
+        );
+        return Ok(());
+    }
+    if let Some(expected) = expected_head {
+        require_transition_head(expected, context.head.as_deref())?;
+    }
     if context.state.as_deref().is_some_and(|state| state != from) {
         return Err(CliError::Usage(format!(
             "transition from {from} does not match current task state {}",
@@ -764,6 +788,18 @@ pub async fn cmd_transition_issue(
     let event = client.sign_event(with_git_provenance(builder)?)?;
     let resp = client.submit_event(event).await?;
     println!("{resp}");
+    Ok(())
+}
+
+fn require_transition_head(expected: &str, actual: Option<&str>) -> Result<(), CliError> {
+    if expected != "initial" {
+        validate_hex64(expected)?;
+    }
+    if actual.unwrap_or("initial") != expected {
+        return Err(CliError::Usage(
+            "task transition head changed; refresh the task before retrying".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -992,6 +1028,8 @@ pub async fn dispatch(cmd: crate::IssuesCmd, client: &BuzzClient) -> Result<(), 
             to,
             content,
             gate,
+            inspect,
+            expected_head,
         } => {
             cmd_transition_issue(
                 client,
@@ -1002,6 +1040,8 @@ pub async fn dispatch(cmd: crate::IssuesCmd, client: &BuzzClient) -> Result<(), 
                 &to,
                 &content,
                 gate.as_deref(),
+                inspect,
+                expected_head.as_deref(),
             )
             .await
         }
@@ -1010,6 +1050,103 @@ pub async fn dispatch(cmd: crate::IssuesCmd, client: &BuzzClient) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn inspect_never_publishes_and_reviewed_head_guards_the_production_command() {
+        use axum::{routing::post, Json, Router};
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let keys = nostr::Keys::generate();
+        let owner = keys.public_key().to_hex();
+        let roots = serde_json::json!([{
+            "id": ISSUE, "kind":1621, "pubkey":owner, "created_at":1,
+            "tags":[["a",format!("30617:{owner}:repo")],["t","graph"]]
+        }]);
+        let publications = Arc::new(AtomicUsize::new(0));
+        let received = publications.clone();
+        let app = Router::new()
+            .route(
+                "/query",
+                post(move || {
+                    let roots = roots.clone();
+                    async move { Json(roots) }
+                }),
+            )
+            .route(
+                "/events",
+                post(move |Json(event): Json<serde_json::Value>| {
+                    let received = received.clone();
+                    async move {
+                        received.fetch_add(1, Ordering::SeqCst);
+                        Json(serde_json::json!({"accepted":true,"event_id":event["id"]}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener");
+        let url = format!("http://{}", listener.local_addr().expect("address"));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.expect("server") });
+        let client = crate::client::BuzzClient::new(url, keys, None, None).expect("client");
+        super::cmd_transition_issue(
+            &client,
+            ISSUE,
+            &owner,
+            "repo",
+            "pending",
+            "in-progress",
+            "Inspect",
+            None,
+            true,
+            None,
+        )
+        .await
+        .expect("inspect");
+        assert_eq!(publications.load(Ordering::SeqCst), 0);
+        assert!(super::cmd_transition_issue(
+            &client,
+            ISSUE,
+            &owner,
+            "repo",
+            "pending",
+            "in-progress",
+            "Start",
+            None,
+            false,
+            Some(&"a".repeat(64))
+        )
+        .await
+        .is_err());
+        assert_eq!(publications.load(Ordering::SeqCst), 0);
+        super::cmd_transition_issue(
+            &client,
+            ISSUE,
+            &owner,
+            "repo",
+            "pending",
+            "in-progress",
+            "Start",
+            None,
+            false,
+            Some("initial"),
+        )
+        .await
+        .expect("publish");
+        assert_eq!(publications.load(Ordering::SeqCst), 1);
+        server.abort();
+    }
+
+    #[test]
+    fn reviewed_transition_head_must_still_match() {
+        let head = "a".repeat(64);
+        assert!(super::require_transition_head("initial", None).is_ok());
+        assert!(super::require_transition_head(&head, Some(&head)).is_ok());
+        assert!(super::require_transition_head("initial", Some(&head)).is_err());
+        assert!(super::require_transition_head(&head, None).is_err());
+        assert!(super::require_transition_head(&"b".repeat(64), Some(&head)).is_err());
+        assert!(super::require_transition_head("malformed", None).is_err());
+    }
     use std::collections::{HashMap, HashSet};
 
     use super::{
