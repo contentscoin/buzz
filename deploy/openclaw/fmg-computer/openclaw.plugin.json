@@ -1,0 +1,16 @@
+{
+  "id": "fmg-computer",
+  "name": "FMG Server Computer",
+  "version": "0.1.0",
+  "description": "Owner encrypted, read-only Buzz browser viewer.",
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "ownerPubkey": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+      "browserProfile": { "type": "string", "pattern": "^[a-z0-9_-]{1,64}$" }
+    },
+    "required": ["ownerPubkey", "browserProfile"],
+    "additionalProperties": false
+  }
+}

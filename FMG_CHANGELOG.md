@@ -1,5 +1,24 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.7
+
+Base: FMG live release `0.5.26-fmg.6`.
+
+- FMG Center adds Server Computer: owner-only OpenClaw browser status, tabs,
+  text snapshots, encrypted screenshots and recent query receipts.
+- OpenDots observation UX adapted to Buzz NIP44 transport, with explicit
+  refresh and optional visible-only state polling; pending requests and media
+  are cleared on account/community/agent/tab/panel changes.
+- Screenshot encryption and relay/scope/hash verification happen before
+  display. The server broker runs in the existing Gateway process and observes
+  the existing browser profile. No model invocation is needed for these reads.
+- Gateway plugin `fmg-computer` 0.1.0 is a separate server installation.
+  Browser control, terminal/files, job dispatch and GPT dot supervision remain
+  subsequent development stages. Desktop/mobile installation state must be
+  reported separately from source and server plugin state.
+- Candidate builds can run from the explicit FMG development branch. Release
+  promotion still requires main and an exact previously built installer.
+
 ## 0.5.26-fmg.6
 
 Base: FMG live release `0.5.26-fmg.5`.

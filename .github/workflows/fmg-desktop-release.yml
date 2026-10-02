@@ -38,13 +38,13 @@ jobs:
     env:
       TARGET: x86_64-pc-windows-msvc
     steps:
-      - name: Require main
+      - name: Require main or the FMG development candidate branch
         shell: bash
         env:
           SOURCE_REF: ${{ github.ref }}
         run: |
-          if [[ "$SOURCE_REF" != "refs/heads/main" ]]; then
-            echo "::error::FMG releases must run from main; got $SOURCE_REF"
+          if [[ "$SOURCE_REF" != "refs/heads/main" && "$SOURCE_REF" != "refs/heads/feat/fmg-desktop-graph-aside" ]]; then
+            echo "::error::FMG candidates require main or the explicit FMG development branch; got $SOURCE_REF"
             exit 1
           fi
 

@@ -24,6 +24,7 @@ import { useCommunities } from "@/features/communities/useCommunities";
 import { useFmgTaskGraph } from "@/features/fmg/useFmgTaskGraph";
 import type { FmgTaskGraphItem } from "@/features/fmg/useFmgTaskGraph";
 import { FmgGraphTransitionDialog } from "./FmgGraphTransitionDialog";
+import { FmgComputerLauncher } from "./FmgComputerPanel";
 import { useFmgWorkReports } from "@/features/fmg/useFmgWorkReports";
 import type { WorkReportStatus } from "@/features/messages/lib/workReport";
 import type { ConnectionState } from "@/shared/api/relayClientShared";
@@ -402,6 +403,18 @@ export function FmgDashboard() {
             title="FMG 기능"
           />
           <div className="grid gap-4 md:grid-cols-2">
+            <FeatureCard
+              action={<FmgComputerLauncher />}
+              badge={<Badge variant="info">서버 조회</Badge>}
+              description="Hostinger의 OpenClaw 브라우저 상태·탭·본문·화면을 소유자 전용 연결로 조회합니다."
+              icon={<Globe2 />}
+              title="서버 작업 화면"
+            >
+              <p className="text-sm text-muted-foreground">
+                서버 브라우저를 조회할 수 있습니다. 화면 조작과 작업 배정은 준비
+                중입니다.
+              </p>
+            </FeatureCard>
             <FeatureCard
               action={
                 <Button
