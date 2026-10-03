@@ -41,7 +41,7 @@ stored in restricted files in both services, never in the tool response.
 
 One approved task is claimed durably before dispatch. No ambiguous run is
 retried. An expired lease or missing actual terminal Gateway receipt becomes
-`needs_reconcile` and blocks new dispatch until operator investigation.
+`needs_reconcile` and blocks new dispatch until terminal evidence is reconciled or operator investigation resolves the missing evidence.
 Waiting tasks can be canceled before execution. During execution cancellation
 sends a best-effort abort request, and remains unconfirmed without a receipt.
 No automatic result delivery is requested; the role's existing tool permissions
@@ -49,3 +49,18 @@ still apply to its approved instructions. Model fallback is reported through
 actual model metadata when available. Results are untrusted agent text.
 
 Deployment does not create proposals, send Telegram/dot messages or run models.
+
+## Version 0.3 recovery
+
+The Gateway worker records immutable dispatch intent and a stable run ID before
+using the public Gateway SDK. Direct owner `/fmg_task reconcile` commands can
+persist a verified terminal result or cancel a task proven never dispatched.
+Expected revisions prevent stale recovery writes. Previous uncertain results
+and selected evidence are retained in `task_recoveries`. At most twenty
+recovery entries per task and five displayed entries are allowed.
+
+Database migration marks older leased tasks `legacy_unknown`; an absent run ID
+from an older worker is never treated as proof of no execution. Gateway
+`agent.wait` observations are a short-lived cache, not durable history. Missing
+or expired records and bare wait timeouts remain unresolved. No manual success
+marking or automatic rerun tool is exposed to the dot.

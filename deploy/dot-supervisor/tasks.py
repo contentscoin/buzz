@@ -38,6 +38,25 @@ class Tasks:
             status TEXT NOT NULL, revision INTEGER NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
             lease_hash TEXT, lease_until REAL, result TEXT, UNIQUE(client,request_id));
         """)
+        store.db.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {row[1] for row in store.db.execute("PRAGMA table_info(tasks)")}
+            if "run_id" not in columns:
+                store.db.execute("ALTER TABLE tasks ADD COLUMN run_id TEXT")
+            if "dispatch_stage" not in columns:
+                store.db.execute("ALTER TABLE tasks ADD COLUMN dispatch_stage TEXT")
+                # Older workers had no pre-dispatch marker. Absence is not proof of no run.
+                store.db.execute("UPDATE tasks SET dispatch_stage='legacy_unknown' WHERE lease_hash IS NOT NULL")
+            store.db.commit()
+        except Exception:
+            store.db.rollback()
+            raise
+        store.db.executescript("""
+        CREATE TABLE IF NOT EXISTS task_recoveries (
+            id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, revision INTEGER NOT NULL,
+            previous_status TEXT NOT NULL, previous_result TEXT, evidence TEXT NOT NULL, recorded REAL NOT NULL);
+        """)
+        store.db.commit()
 
     def expire(self):
         now = time.time()
@@ -54,7 +73,14 @@ class Tasks:
     def view(self, row):
         proposal = json.loads(row["proposal"])
         return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "proposal": proposal, "proposal_hash": row["proposal_hash"], "result": json.loads(row["result"]) if row["result"] else None,
-                "approve_command": f'/fmg_task approve {row["id"]} {row["proposal_hash"]}', "approval_expires_at": row["created"]+86400, "external_delivery": "not_requested"}
+                "approve_command": f'/fmg_task approve {row["id"]} {row["proposal_hash"]}', "approval_expires_at": row["created"]+86400, "external_delivery": "not_requested",
+                "run_id": row["run_id"], "dispatch_stage": row["dispatch_stage"],
+                "recovery_history": [{"revision": entry["revision"], "previous_status": entry["previous_status"], "evidence": json.loads(entry["evidence"]), "recorded_at": entry["recorded"]} for entry in self.store.db.execute("SELECT * FROM task_recoveries WHERE task_id=? ORDER BY id DESC LIMIT 5", (row["id"],))]}
+
+    def save_recovery(self, row, evidence):
+        if self.store.db.execute("SELECT COUNT(*) FROM task_recoveries WHERE task_id=?", (row["id"],)).fetchone()[0] >= 20:
+            raise ValueError("recovery_capacity")
+        self.store.db.execute("INSERT INTO task_recoveries(task_id,revision,previous_status,previous_result,evidence,recorded) VALUES(?,?,?,?,?,?)", (row["id"], row["revision"], row["status"], row["result"], canonical(evidence), time.time()))
 
     def summary(self, row):
         proposal = json.loads(row["proposal"])
@@ -63,7 +89,7 @@ class Tasks:
     def call(self, name, args, client):
         if not isinstance(args, dict):
             raise ValueError("object_required")
-        with self.store.lock:
+        with self.store.lock, self.store.db:
             snapshot()  # Revoked or expired owner observations also deny stored result access.
             self.expire()
             if name == "fmg_buzz_get_task" and set(args) == {"task_id"}:
@@ -103,12 +129,50 @@ class Tasks:
         args = data.get("arguments", {})
         if not isinstance(args, dict) or set(data) != {"action", "arguments"}:
             raise ValueError("operator_shape_invalid")
-        with self.store.lock:
+        with self.store.lock, self.store.db:
             self.expire()
             if action == "list" and not args:
                 return {"tasks": [self.summary(row) for row in self.store.db.execute("SELECT * FROM tasks ORDER BY created DESC LIMIT 25")], "limit": 25}
             if action == "get" and set(args) == {"task_id"}:
                 return self.view(self.read(args["task_id"]))
+            if action == "checkpoint" and set(args) == {"task_id", "lease"}:
+                row = self.read(args["task_id"])
+                if not row["lease_hash"] or not secrets.compare_digest(row["lease_hash"], digest(text(args["lease"], 100).encode())) or row["status"] != "dispatching":
+                    raise ValueError("dispatch_checkpoint_rejected")
+                if row["dispatch_stage"] is None:
+                    self.store.db.execute("UPDATE tasks SET run_id=id,dispatch_stage='intent_recorded',revision=revision+1,updated=? WHERE id=?", (time.time(), row["id"]))
+                    self.store.db.commit()
+                return self.view(self.read(row["id"]))
+            if action == "reconcile" and set(args) == {"task_id", "proposal_hash", "revision", "result", "evidence"}:
+                row = self.read(args["task_id"])
+                current = snapshot()
+                proposal = json.loads(row["proposal"])
+                if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")):
+                    raise ValueError("audience_changed")
+                if row["status"] != "needs_reconcile" or type(args["revision"]) is not int or row["revision"] != args["revision"] or not isinstance(args["proposal_hash"], str) or not secrets.compare_digest(row["proposal_hash"], args["proposal_hash"]):
+                    raise ValueError("recovery_state_conflict")
+                evidence, result = args["evidence"], args["result"]
+                if not isinstance(evidence, dict) or len(canonical(evidence).encode()) > 3000 or not isinstance(result, dict) or result.get("status") not in ("succeeded", "failed", "canceled") or len(canonical(result).encode()) > 48000 or set(result)-{"status", "run_id", "reply", "requested_model", "actual_model", "error_code"} or any(value is not None and not isinstance(value, str) for value in result.values()):
+                    raise ValueError("recovery_result_invalid")
+                if result.get("requested_model") != proposal["requested_model"]:
+                    raise ValueError("recovery_model_mismatch")
+                if evidence.get("source") == "durable_no_dispatch_intent":
+                    if row["dispatch_stage"] is not None or row["run_id"] is not None or result["status"] != "canceled" or evidence.get("run_id") is not None:
+                        raise ValueError("no_dispatch_not_proven")
+                elif evidence.get("source") == "gateway.agent.wait":
+                    ended = evidence.get("ended_at")
+                    if row["dispatch_stage"] != "intent_recorded" or row["run_id"] != row["id"] or result.get("run_id") != row["run_id"] or evidence.get("run_id") != row["run_id"] or type(ended) not in (int, float) or not row["created"]*1000-5000 <= ended <= time.time()*1000+5000:
+                        raise ValueError("gateway_terminal_evidence_invalid")
+                    if result["status"] == "succeeded" and (evidence.get("gateway_status") != "ok" or not re.fullmatch(r"[0-9a-f]{64}", evidence.get("receipt_hash", ""))):
+                        raise ValueError("success_receipt_missing")
+                    if result["status"] != "succeeded" and evidence.get("gateway_status") != "error":
+                        raise ValueError("failure_receipt_missing")
+                else:
+                    raise ValueError("recovery_evidence_unsupported")
+                self.save_recovery(row, evidence)
+                self.store.db.execute("UPDATE tasks SET status=?,result=?,revision=revision+1,updated=?,lease_until=NULL WHERE id=? AND revision=?", (result["status"], canonical(result), time.time(), row["id"], row["revision"]))
+                self.store.db.commit()
+                return self.view(self.read(row["id"]))
             if action in ("approve", "cancel") and set(args) == {"task_id", "proposal_hash"}:
                 row = self.read(args["task_id"])
                 if not isinstance(args["proposal_hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", args["proposal_hash"]) or not secrets.compare_digest(row["proposal_hash"], args["proposal_hash"]):
@@ -132,7 +196,7 @@ class Tasks:
                 self.store.db.execute("UPDATE tasks SET status=?,revision=revision+1,updated=? WHERE id=? AND revision=?", (status, time.time(), row["id"], row["revision"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))
-            if action == "claim" and not args:
+            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 2:
                 if self.store.db.execute("SELECT 1 FROM tasks WHERE status IN ('dispatching','cancel_requested','needs_reconcile') LIMIT 1").fetchone():
                     return {"task": None, "reason": "busy_or_unreconciled"}
                 row = self.store.db.execute("SELECT * FROM tasks WHERE status='approved' ORDER BY created LIMIT 1").fetchone()
@@ -154,18 +218,27 @@ class Tasks:
                 if not row["lease_hash"] or not secrets.compare_digest(row["lease_hash"], digest(text(args["lease"], 100).encode())):
                     raise ValueError("lease_invalid")
                 result = args["result"]
+                if isinstance(result, dict) and result.get("status") == "needs_reconcile" and row["run_id"] is not None and result.get("run_id") is None:
+                    result = dict(result, run_id=row["run_id"])
                 if not isinstance(result, dict) or set(result)-{"status", "run_id", "reply", "requested_model", "actual_model", "error_code"} or result.get("status") not in ("succeeded", "failed", "canceled", "needs_reconcile") or len(canonical(result).encode()) > 48000:
                     raise ValueError("result_invalid")
                 if any(value is not None and not isinstance(value, str) for value in result.values()):
                     raise ValueError("result_fields_invalid")
                 if row["result"]:
                     if row["result"] != canonical(result):
-                        raise ValueError("result_conflict")
-                    return self.view(row)
+                        if row["status"] in ("succeeded", "failed", "canceled") and result["status"] == "needs_reconcile":
+                            return self.view(row)  # Late ambiguous persistence cannot undo recovery.
+                        if row["status"] != "needs_reconcile" or result["status"] == "needs_reconcile":
+                            raise ValueError("result_conflict")
+                        self.save_recovery(row, {"source": "late_worker_terminal_result", "run_id": result.get("run_id")})
+                    else:
+                        return self.view(row)
                 if row["status"] not in ("dispatching", "cancel_requested", "needs_reconcile"):
                     raise ValueError("task_state_conflict")
                 if result["status"] == "succeeded" and (not isinstance(result.get("run_id"), str) or not result["run_id"]):
                     raise ValueError("success_requires_gateway_run_receipt")
+                if row["run_id"] is not None and result.get("run_id") != row["run_id"]:
+                    raise ValueError("run_binding_mismatch")
                 self.store.db.execute("UPDATE tasks SET status=?,result=?,revision=revision+1,updated=?,lease_until=NULL WHERE id=?", (result["status"], canonical(result), time.time(), row["id"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))

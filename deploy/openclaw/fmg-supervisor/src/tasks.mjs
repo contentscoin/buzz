@@ -1,7 +1,7 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
-import { open, mkdir, writeFile, unlink } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { constants } from "node:fs";
-import { execFile } from "node:child_process";
+import { clean, gateway, reconcileTask } from "./recovery.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
 const tokenFile = "/data/.openclaw/secrets/fmg-supervisor-operator.token";
@@ -15,21 +15,6 @@ const roles = new Set([
 ]);
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const clean = (value, limit) =>
-  typeof value === "string"
-    ? Array.from(value)
-        .filter((char) => {
-          const code = char.codePointAt(0);
-          return (
-            (code >= 32 && code !== 127) ||
-            code === 9 ||
-            code === 10 ||
-            code === 13
-          );
-        })
-        .join("")
-        .slice(0, limit)
-    : null;
 
 async function operator(settings, action, args = {}) {
   if (settings.operatorUrl !== endpoint || settings.tokenFile !== tokenFile)
@@ -116,7 +101,7 @@ function directOwner(context, settings) {
 export function registerTaskCommand(api) {
   api.registerCommand({
     name: "fmg_task",
-    description: "Buzz 작업 제안 조회·승인·취소 (소유자 개인 채팅)",
+    description: "Buzz 작업 조회·승인·취소·완료 기록 복구 (소유자 개인 채팅)",
     channels: ["telegram"],
     acceptsArgs: true,
     requireAuth: true,
@@ -133,7 +118,7 @@ export function registerTaskCommand(api) {
         else if (action === "get" && parts.length === 2 && uuid.test(parts[1]))
           args = { task_id: parts[1] };
         else if (
-          ["approve", "cancel"].includes(action) &&
+          ["approve", "cancel", "reconcile"].includes(action) &&
           parts.length === 3 &&
           uuid.test(parts[1]) &&
           /^[0-9a-f]{64}$/.test(parts[2])
@@ -141,11 +126,18 @@ export function registerTaskCommand(api) {
           args = { task_id: parts[1], proposal_hash: parts[2] };
         else
           return {
-            text: "사용법: /fmg_task list\n/fmg_task get <작업 ID>\n/fmg_task approve <작업 ID> <전체 해시>\n/fmg_task cancel <작업 ID> <전체 해시>\n닷에서 제안 내용을 먼저 확인하세요.",
+            text: "사용법: /fmg_task list\n/fmg_task get <작업 ID>\n/fmg_task approve <작업 ID> <전체 해시>\n/fmg_task cancel <작업 ID> <전체 해시>\n/fmg_task reconcile <작업 ID> <전체 해시>\n닷에서 제안 내용을 먼저 확인하세요.",
           };
         await owner(context.config, settings);
         directOwner(context, settings);
-        const result = await operator(settings, action, args);
+        const result =
+          action === "reconcile"
+            ? await reconcileTask(context, settings, args, {
+                operator,
+                owner,
+                directOwner,
+              })
+            : await operator(settings, action, args);
         if (action === "list")
           return {
             text:
@@ -158,7 +150,7 @@ export function registerTaskCommand(api) {
           };
         const task = result;
         return {
-          text: `작업: ${task.task_id}\n상태: ${task.status}\n역할: ${task.proposal.role_id}\n모델: ${task.proposal.requested_model}\n요청:\n${clean(task.proposal.instructions, 5000)}\n해시: ${task.proposal_hash}\n승인: ${task.approve_command}\n${task.result ? `결과(에이전트 출력):\n${clean(task.result.reply, 18000) ?? task.result.error_code ?? task.result.status}` : "실행 완료 결과가 아직 없습니다."}\n실행 중 취소는 요청 상태이며 종료 확인을 뜻하지 않습니다.`,
+          text: `작업: ${task.task_id}\n상태: ${task.status}\n실행 ID: ${task.run_id ?? "아직 기록 없음"}\n역할: ${task.proposal.role_id}\n모델: ${task.proposal.requested_model}\n요청:\n${clean(task.proposal.instructions, 5000)}\n해시: ${task.proposal_hash}\n승인: ${task.approve_command}\n${task.result ? `결과(에이전트 출력):\n${clean(task.result.reply, 18000) ?? task.result.error_code ?? task.result.status}` : "실행 완료 결과가 아직 없습니다."}\n${task.recovery_note ?? ""}\n실행 중 취소는 요청 상태이며 종료 확인을 뜻하지 않습니다.`,
         };
       } catch {
         return {
@@ -172,15 +164,14 @@ export function registerTaskCommand(api) {
 export async function createTaskWorker(context, settings) {
   if (!settings.telegramOwnerId || !settings.operatorUrl || !settings.tokenFile)
     return async () => {};
-  const root = "/data/.openclaw/fmg-supervisor-task-inputs";
-  await mkdir(root, { recursive: true, mode: 0o700 });
   let stopped = false,
     timer,
     running,
-    activeChild,
+    activeController,
+    activeTask,
     pending;
 
-  async function execute(task) {
+  async function execute(task, lease) {
     const proposal = task.proposal;
     if (
       !uuid.test(task.task_id) ||
@@ -197,116 +188,125 @@ export async function createTaskWorker(context, settings) {
     )
       throw new Error("proposal_invalid");
     await owner(context.config, settings, proposal);
-    if (stopped) throw new Error("worker_stopped_before_dispatch");
-    const file = `${root}/${task.task_id}.txt`;
-    await writeFile(file, proposal.instructions, { mode: 0o600, flag: "wx" });
-    let poll,
+    const admitted = await operator(settings, "get", { task_id: task.task_id });
+    if (stopped || admitted.status !== "dispatching")
+      return {
+        status: "canceled",
+        requested_model: proposal.requested_model,
+        error_code: "canceled_before_gateway_dispatch",
+      };
+    const checkpoint = await operator(settings, "checkpoint", {
+      task_id: task.task_id,
+      lease,
+    });
+    task.run_id = checkpoint.run_id;
+    if (
+      task.run_id !== task.task_id ||
+      checkpoint.dispatch_stage !== "intent_recorded"
+    )
+      throw new Error("dispatch_intent_invalid");
+    if (stopped)
+      return {
+        status: "canceled",
+        run_id: task.run_id,
+        requested_model: proposal.requested_model,
+        error_code: "canceled_before_gateway_dispatch",
+      };
+    const controller = new AbortController();
+    activeController = controller;
+    activeTask = task;
+    let receipt,
+      poll,
       polling = false,
-      canceled = false,
-      raw,
-      transportFailed = false,
       finished = false,
-      child;
+      canceled = false;
     try {
-      const admitted = await operator(settings, "get", {
-        task_id: task.task_id,
-      });
-      if (stopped || admitted.status !== "dispatching")
-        return {
-          status: "canceled",
-          requested_model: proposal.requested_model,
-          error_code: "canceled_before_cli_dispatch",
-        };
-      // The durable claim is written before this call. Never retry an ambiguous run.
-      raw = await new Promise((resolve) => {
-        child = execFile(
-          "/usr/local/bin/openclaw",
-          [
-            "agent",
-            "--agent",
-            proposal.role_id,
-            "--session-key",
-            proposal.session_key,
-            "--message-file",
-            file,
-            "--model",
-            proposal.requested_model,
-            "--thinking",
-            "medium",
-            "--timeout",
-            "120",
-            "--json",
-          ],
-          {
-            timeout: 150000,
-            maxBuffer: 262144,
-            encoding: "utf8",
-            killSignal: "SIGTERM",
-          },
-          (error, stdout) => {
-            finished = true;
-            transportFailed = Boolean(error);
-            resolve(stdout);
-          },
-        );
-        activeChild = child;
-        poll = setInterval(async () => {
-          if (polling) return;
-          polling = true;
-          try {
-            const current = await operator(settings, "get", {
-              task_id: task.task_id,
+      poll = setInterval(async () => {
+        if (polling || finished) return;
+        polling = true;
+        try {
+          const current = await operator(settings, "get", {
+            task_id: task.task_id,
+          });
+          await owner(context.config, settings, proposal);
+          if (!finished && (current.status === "cancel_requested" || stopped)) {
+            canceled = true;
+            await gateway(context.config, "chat.abort", {
+              sessionKey: proposal.session_key,
+              runId: task.run_id,
             });
-            await owner(context.config, settings, proposal);
-            if (
-              !finished &&
-              (current.status === "cancel_requested" || stopped)
-            ) {
-              canceled = true;
-              child.kill("SIGTERM");
-            }
-          } catch {
-            if (!finished) child.kill("SIGTERM");
-          } finally {
-            polling = false;
+            if (!finished) controller.abort();
           }
-        }, 5000);
-      });
-    } finally {
-      clearInterval(poll);
-      activeChild = undefined;
-      await unlink(file).catch(() => {});
-    }
-    let receipt;
-    try {
-      receipt = JSON.parse(raw);
+        } catch {
+          if (!finished) controller.abort();
+        } finally {
+          polling = false;
+        }
+      }, 5000);
+      // The immutable run ID is stored before admission. Execution is never retried.
+      receipt = await gateway(
+        context.config,
+        "agent",
+        {
+          message: proposal.instructions,
+          agentId: proposal.role_id,
+          sessionKey: proposal.session_key,
+          model: proposal.requested_model,
+          thinking: "medium",
+          deliver: false,
+          timeout: 120,
+          idempotencyKey: task.run_id,
+        },
+        controller.signal,
+      );
     } catch {
       receipt = null;
+    } finally {
+      finished = true;
+      clearInterval(poll);
+      activeController = undefined;
+      activeTask = undefined;
     }
-    const runId = clean(receipt?.runId, 160);
+    const meta = receipt?.result?.meta;
     const terminal =
-      !transportFailed &&
-      ["ok", "completed"].includes(receipt?.status) &&
-      receipt?.result?.meta?.aborted !== true &&
-      !receipt?.result?.meta?.error &&
+      receipt?.runId === task.run_id &&
+      ["ok", "completed"].includes(receipt.status) &&
+      typeof receipt?.result === "object" &&
+      Array.isArray(receipt?.result?.payloads) &&
+      !(meta?.pendingToolCalls?.length > 0) &&
+      meta?.aborted !== true &&
+      !meta?.error &&
+      !meta?.yielded &&
+      !meta?.continuationPending &&
+      !meta?.replayInvalid &&
+      ![
+        "tool_calls",
+        "aborted",
+        "restart",
+        "superseded",
+        "rpc",
+        "stop",
+      ].includes(meta?.stopReason) &&
+      !["working", "paused", "blocked", "abandoned"].includes(
+        meta?.livenessState,
+      ) &&
       !receipt?.error &&
-      !receipt?.result?.payloads?.some((item) => item?.isError === true) &&
-      runId;
-    const metadata = receipt?.result?.meta?.agentMeta;
+      !receipt?.result?.payloads?.some((item) => item?.isError === true);
+    const metadata = meta?.agentMeta;
     const actual =
       metadata?.provider && metadata?.model
         ? `${metadata.provider}/${metadata.model}`
         : metadata?.model;
     const reply = Array.isArray(receipt?.result?.payloads)
       ? receipt.result.payloads
-          .map((item) => clean(item?.text, 18000) ?? "")
+          .map((item) => clean(item?.text, 10000) ?? "")
           .filter(Boolean)
           .join("\n")
           .slice(0, 10000)
       : "";
     return {
       status: terminal ? "succeeded" : "needs_reconcile",
-      run_id: runId,
+      run_id: task.run_id,
       reply,
       requested_model: proposal.requested_model,
       actual_model: clean(actual, 160),
@@ -326,16 +326,17 @@ export async function createTaskWorker(context, settings) {
       return;
     }
     await owner(context.config, settings);
-    const claim = await operator(settings, "claim");
+    const claim = await operator(settings, "claim", { worker_protocol: 2 });
     if (!claim.task) return;
     let result;
     try {
-      result = await execute(claim.task);
+      result = await execute(claim.task, claim.lease);
     } catch {
       result = {
         status: "needs_reconcile",
         error_code: "dispatch_preparation_or_run_unconfirmed",
         requested_model: claim.task.proposal.requested_model,
+        run_id: claim.task.run_id,
       };
     }
     pending = { task_id: claim.task.task_id, lease: claim.lease, result };
@@ -361,7 +362,18 @@ export async function createTaskWorker(context, settings) {
   return async () => {
     stopped = true;
     clearTimeout(timer);
-    activeChild?.kill("SIGTERM");
+    if (activeTask) {
+      try {
+        await owner(context.config, settings, activeTask.proposal);
+        await gateway(context.config, "chat.abort", {
+          sessionKey: activeTask.proposal.session_key,
+          runId: activeTask.run_id,
+        });
+      } catch {
+        /* Authority or abort receipt unavailable: preserve uncertain status. */
+      }
+    }
+    activeController?.abort();
     await running;
   };
 }
