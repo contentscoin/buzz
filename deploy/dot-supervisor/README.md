@@ -1,6 +1,14 @@
 # FMG Buzz Supervisor MCP
 
-## Desktop task observations (server 0.3.1)
+## Model binding (server 0.4.0)
+
+Schema 2 proposals show public model IDs and bind the approved role's exact model
+reference through an opaque fingerprint. Protocol 3 claims require both values
+to match the fresh owner snapshot. Changed bindings enter `needs_reconcile` and
+cannot run automatically. Authentication profile suffixes are not exposed in the
+roster, proposals or result model metadata. Desktop 0.5.26-fmg.8 remains compatible.
+
+## Desktop task observations (introduced in server 0.3.1)
 
 The private operator supports `view_list` / `view_get`, requiring the exact
 current owner public key, relay origin and Gateway identity from a fresh snapshot.

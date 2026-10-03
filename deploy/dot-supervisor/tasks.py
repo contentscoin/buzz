@@ -110,12 +110,12 @@ class Tasks:
                 else:
                     current = snapshot()
                     role = next((row for row in current["gateway"]["roles"] if row["role_id"] == args["role_id"]), None)
-                    if not role or role["configured_model"] in (None, "not_reported"):
+                    if not role or not re.fullmatch(r"[a-z0-9_-]+/[a-zA-Z0-9._:-]{1,100}", role.get("configured_model", "")) or not re.fullmatch(r"[0-9a-f]{64}", role.get("model_binding", "")):
                         raise ValueError("role_model_unavailable")
                     if self.store.db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] >= 1000 or self.store.db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('awaiting_approval','approved')").fetchone()[0] >= 100:
                         raise ValueError("task_capacity")
                     identifier, now = str(uuid.uuid4()), time.time()
-                    proposal = {"schema": 1, "owner_pubkey": current["owner_pubkey"], "relay_origin": current["relay_origin"], "gateway_agent_pubkey": current["gateway_agent_pubkey"], "role_id": args["role_id"], "requested_model": role["configured_model"], "instructions": instructions, "session_key": f'agent:{args["role_id"]}:fmg-task:{identifier}', "timeout_seconds": 120, "deliver": False}
+                    proposal = {"schema": 2, "owner_pubkey": current["owner_pubkey"], "relay_origin": current["relay_origin"], "gateway_agent_pubkey": current["gateway_agent_pubkey"], "role_id": args["role_id"], "requested_model": role["configured_model"], "model_binding": role["model_binding"], "instructions": instructions, "session_key": f'agent:{args["role_id"]}:fmg-task:{identifier}', "timeout_seconds": 120, "deliver": False}
                     encoded = canonical(proposal)
                     self.store.db.execute("INSERT INTO tasks(id,client,request_id,input_hash,proposal,proposal_hash,status,revision,created,updated) VALUES(?,?,?,?,?,?,'awaiting_approval',1,?,?)", (identifier, client, request, request_hash, encoded, digest(encoded.encode()), now, now))
                     self.store.db.commit()
@@ -218,7 +218,7 @@ class Tasks:
                 self.store.db.execute("UPDATE tasks SET status=?,revision=revision+1,updated=? WHERE id=? AND revision=?", (status, time.time(), row["id"], row["revision"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))
-            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 2:
+            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 3:
                 if self.store.db.execute("SELECT 1 FROM tasks WHERE status IN ('dispatching','cancel_requested','needs_reconcile') LIMIT 1").fetchone():
                     return {"task": None, "reason": "busy_or_unreconciled"}
                 row = self.store.db.execute("SELECT * FROM tasks WHERE status='approved' ORDER BY created LIMIT 1").fetchone()
@@ -227,7 +227,7 @@ class Tasks:
                 current = snapshot()
                 proposal = json.loads(row["proposal"])
                 role = next((item for item in current["gateway"]["roles"] if item["role_id"] == proposal["role_id"]), None)
-                if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")) or not role or role["configured_model"] != proposal["requested_model"]:
+                if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")) or proposal.get("schema") != 2 or not role or role["configured_model"] != proposal["requested_model"] or not re.fullmatch(r"[0-9a-f]{64}", proposal.get("model_binding", "")) or role.get("model_binding") != proposal["model_binding"]:
                     self.store.db.execute("UPDATE tasks SET status='needs_reconcile',revision=revision+1,updated=? WHERE id=?", (time.time(), row["id"]))
                     self.store.db.commit()
                     return {"task": None, "reason": "approved_binding_changed"}
@@ -246,6 +246,9 @@ class Tasks:
                     raise ValueError("result_invalid")
                 if any(value is not None and not isinstance(value, str) for value in result.values()):
                     raise ValueError("result_fields_invalid")
+                proposal = json.loads(row["proposal"])
+                if result.get("requested_model") != proposal["requested_model"] or (result.get("actual_model") is not None and not re.fullmatch(r"[a-z0-9_-]+/[a-zA-Z0-9._:-]{1,100}", result["actual_model"])):
+                    raise ValueError("result_model_invalid")
                 if row["result"]:
                     if row["result"] != canonical(result):
                         if row["status"] in ("succeeded", "failed", "canceled") and result["status"] == "needs_reconcile":

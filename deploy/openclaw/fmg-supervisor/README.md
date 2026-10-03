@@ -1,5 +1,17 @@
 # FMG supervisor producer
 
+## Version 0.4 model binding
+
+Model observations and proposals export only `provider/model`, without the
+authentication profile suffix. The producer verifies the CLI observation against
+the configured role and records an opaque SHA-256 binding for that role's exact
+model reference. Schema 2 proposals include this binding in the approved hash.
+Protocol 3 workers resolve the current local reference before the dispatch
+checkpoint and again immediately before calling the Gateway. The selected
+authentication profile stays inside the Gateway. Changed model/profile bindings
+and legacy proposals cannot be dispatched automatically. Result model metadata
+also excludes profile suffixes. Existing role tool permissions are unchanged.
+
 OpenClaw 2026.9.6 background service. It reuses the existing Buzz identity in the
 Gateway process and verifies its current signed owner profile before and after
 each observation. No private key is exported to the MCP service.

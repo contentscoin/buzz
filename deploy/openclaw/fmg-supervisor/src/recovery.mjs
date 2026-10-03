@@ -1,5 +1,6 @@
 import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
 import { createHash } from "node:crypto";
+import { publicModel } from "./model-binding.mjs";
 
 export const clean = (value, limit) =>
   typeof value === "string"
@@ -90,10 +91,10 @@ export function recoveredResult(observation, task) {
       return null;
     result.status = "succeeded";
     result.reply = clean(reply.text, 10000) ?? "";
-    result.actual_model = clean(
+    result.actual_model = publicModel(
       `${receipt.effective.provider}/${receipt.effective.responseModel ?? receipt.effective.model}`,
-      160,
     );
+    if (result.actual_model === "not_reported") return null;
     evidence.receipt_hash = createHash("sha256")
       .update(JSON.stringify(receipt))
       .digest("hex");

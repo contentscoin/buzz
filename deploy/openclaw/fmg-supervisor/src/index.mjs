@@ -1,5 +1,6 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
 import { createTaskWorker, registerTaskCommand } from "./tasks.mjs";
+import { roleModel } from "./model-binding.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, rename } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -245,6 +246,11 @@ async function createProducer(context, settings) {
           const rows = sessions.sessions.filter(
             (session) => session.agentId === role.id,
           );
+          const selectedModel = roleModel(context.config, role.id);
+          requireValue(
+            role.model === selectedModel.reference,
+            "gateway_model_observation_changed",
+          );
           const times = rows
             .map((session) => session.updatedAt)
             .filter(
@@ -256,7 +262,8 @@ async function createProducer(context, settings) {
           return {
             role_id: role.id,
             name: label(role.name ?? role.identityName, role.id),
-            configured_model: label(role.model, "not_reported"),
+            configured_model: selectedModel.model,
+            model_binding: selectedModel.binding,
             sampled_sessions: rows.length,
             recent_24h_sessions: times.filter(
               (value) => value >= Date.now() - 86400000,

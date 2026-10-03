@@ -2,6 +2,7 @@ import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
+import { approvedModel, publicModel } from "./model-binding.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
 const tokenFile = "/data/.openclaw/secrets/fmg-supervisor-operator.token";
@@ -188,6 +189,7 @@ export async function createTaskWorker(context, settings) {
     )
       throw new Error("proposal_invalid");
     await owner(context.config, settings, proposal);
+    await approvedModel(proposal);
     const admitted = await operator(settings, "get", { task_id: task.task_id });
     if (stopped || admitted.status !== "dispatching")
       return {
@@ -244,6 +246,8 @@ export async function createTaskWorker(context, settings) {
         }
       }, 5000);
       // The immutable run ID is stored before admission. Execution is never retried.
+      const selectedModel = await approvedModel(proposal);
+      if (stopped) throw new Error("worker_stopped_before_dispatch");
       receipt = await gateway(
         context.config,
         "agent",
@@ -251,7 +255,7 @@ export async function createTaskWorker(context, settings) {
           message: proposal.instructions,
           agentId: proposal.role_id,
           sessionKey: proposal.session_key,
-          model: proposal.requested_model,
+          model: selectedModel,
           thinking: "medium",
           deliver: false,
           timeout: 120,
@@ -309,7 +313,8 @@ export async function createTaskWorker(context, settings) {
       run_id: task.run_id,
       reply,
       requested_model: proposal.requested_model,
-      actual_model: clean(actual, 160),
+      actual_model:
+        publicModel(actual) === "not_reported" ? null : publicModel(actual),
       error_code: terminal
         ? null
         : canceled
@@ -326,7 +331,7 @@ export async function createTaskWorker(context, settings) {
       return;
     }
     await owner(context.config, settings);
-    const claim = await operator(settings, "claim", { worker_protocol: 2 });
+    const claim = await operator(settings, "claim", { worker_protocol: 3 });
     if (!claim.task) return;
     let result;
     try {
