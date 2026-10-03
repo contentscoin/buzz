@@ -1,0 +1,15 @@
+{
+  "id": "fmg-supervisor",
+  "name": "FMG Dot Supervisor",
+  "version": "0.1.0",
+  "description": "Exports bounded owner verified Buzz and Gateway activity summaries for Your dot.",
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "ownerPubkey": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
+    "required": ["ownerPubkey"],
+    "additionalProperties": false
+  }
+}

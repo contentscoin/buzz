@@ -1,0 +1,25 @@
+{
+  "name": "openclaw-plugin-fmg-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "openclaw": "2026.9.6"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.9.6 <2026.10.0"
+    },
+    "build": {
+      "openclawVersion": "2026.9.6"
+    }
+  }
+}
