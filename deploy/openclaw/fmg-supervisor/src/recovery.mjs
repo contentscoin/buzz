@@ -1,16 +1,20 @@
 import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
 import { createHash } from "node:crypto";
 import { publicModel } from "./model-binding.mjs";
+import { completionEvidence } from "./completion.mjs";
 
 export const clean = (value, limit) =>
   typeof value === "string"
     ? Array.from(value)
         .filter((char) => {
           const code = char.codePointAt(0);
-          return (code >= 32 && code !== 127) || [9, 10, 13].includes(code);
+          return (
+            ((code >= 32 && code !== 127) || [9, 10, 13].includes(code)) &&
+            !(code >= 0xd800 && code <= 0xdfff)
+          );
         })
-        .join("")
         .slice(0, limit)
+        .join("")
     : null;
 
 export async function gateway(config, method, params, signal) {
@@ -98,6 +102,13 @@ export function recoveredResult(observation, task) {
     evidence.receipt_hash = createHash("sha256")
       .update(JSON.stringify(receipt))
       .digest("hex");
+    result.completion_evidence = completionEvidence(
+      receipt,
+      task,
+      result,
+      "gateway.agent.wait",
+      observation.endedAt,
+    );
   } else if (
     observation.status === "error" &&
     observation.stopReason !== "tool_calls"

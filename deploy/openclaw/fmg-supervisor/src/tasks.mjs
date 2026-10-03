@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
 import { approvedExecution, publicModel } from "./model-binding.mjs";
+import { completionEvidence } from "./completion.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
 const tokenFile = "/data/.openclaw/secrets/fmg-supervisor-operator.token";
@@ -302,13 +303,15 @@ export async function createTaskWorker(context, settings) {
         ? `${metadata.provider}/${metadata.model}`
         : metadata?.model;
     const reply = Array.isArray(receipt?.result?.payloads)
-      ? receipt.result.payloads
-          .map((item) => clean(item?.text, 10000) ?? "")
-          .filter(Boolean)
-          .join("\n")
-          .slice(0, 10000)
+      ? clean(
+          receipt.result.payloads
+            .map((item) => clean(item?.text, 10000) ?? "")
+            .filter(Boolean)
+            .join("\n"),
+          10000,
+        )
       : "";
-    return {
+    const result = {
       status: terminal ? "succeeded" : "needs_reconcile",
       run_id: task.run_id,
       reply,
@@ -321,6 +324,14 @@ export async function createTaskWorker(context, settings) {
           ? "cancel_requested_no_terminal_receipt"
           : "gateway_terminal_receipt_unconfirmed",
     };
+    if (terminal)
+      result.completion_evidence = completionEvidence(
+        receipt,
+        task,
+        result,
+        "gateway.agent.final",
+      );
+    return result;
   }
 
   async function cycle() {
@@ -331,7 +342,7 @@ export async function createTaskWorker(context, settings) {
       return;
     }
     await owner(context.config, settings);
-    const claim = await operator(settings, "claim", { worker_protocol: 4 });
+    const claim = await operator(settings, "claim", { worker_protocol: 5 });
     if (!claim.task) return;
     let result;
     try {

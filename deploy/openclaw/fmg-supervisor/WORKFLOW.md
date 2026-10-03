@@ -74,6 +74,19 @@ GPT‑6.1 SOL 작업 제안의 effort는 `low`, `medium`, `high`, `xhigh`, `max`
 
 ## 결과와 복구
 
+작업 서버 0.6.0 / Supervisor 플러그인 0.7.0 이후 성공 결과에는 제한된
+`completion_evidence`가 함께 저장된다. 실제 종료 응답과 저장된 응답의
+hash·제안·실행 ID 연결을 기록하며, 이전 성공 작업에 근거를 소급 생성하지 않는다.
+응답 범위는 `stored_summary`이며 모델의 전체 원본 출력이라고 표시하지 않는다.
+
+ChatGPT 작업 MCP의 비공개 문서 도구는 `fmg_buzz_save_document`,
+`fmg_buzz_get_document`, `fmg_buzz_get_document_by_request`,
+`fmg_buzz_list_documents`다. 현재 소유자·커뮤니티·Gateway와 원 제안 계정을
+확인하고 완료 근거가 있는 작업만 저장한다. 같은 요청 UUID·동일 입력은
+원 저장본을 반환한다. 응답을 잃으면 같은 UUID로 조회하며 새 UUID로 재저장하거나
+모델을 다시 실행하지 않는다. 편집은 새 버전이며 이전 버전을 덮어쓰지 않는다.
+이 MCP 이름은 Telegram main의 도구 목록에 자동 등록되지 않는다.
+
 - ChatGPT의 `fmg_buzz_get_task` 또는 데스크탑 작업 상세로 실제 상태를 조회한다.
 - Telegram main은 `fmg_buzz_gateway_get_task`로 실제 상태와 지시문을
   직접 조회할 수 있다. 도구가 현재 대화에 없거나 실패한 경우만 직접

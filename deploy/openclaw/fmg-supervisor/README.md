@@ -1,5 +1,19 @@
 # FMG supervisor producer
 
+## Version 0.7.0 durable completion evidence
+
+Protocol 5 workers attach a bounded `completion_evidence` to successful task
+results. It binds the actual final receipt hash and exact stored reply hash to
+the immutable proposal/run/model/effort and records an honest `stored_summary`
+source. Failed, pending, aborted or continued runs never gain success evidence.
+Normal final responses record observation time without inventing an end time;
+`agent.wait` recovery records its verified real end time and the same contract.
+No raw receipts, transcripts or auth profiles are exported. The task server
+validates and saves result and evidence together; private result documents
+require this proof. Protocol 4 workers cannot claim new work from server 0.6.0.
+Upgrade the server before this plugin with no approved, running or ambiguous
+task, preserve pending proposal hashes, and hot apply when retained work ends.
+
 ## Version 0.6.1 private owner task reads
 
 Adds `fmg_buzz_gateway_get_task` and `fmg_buzz_gateway_list_tasks` for main's

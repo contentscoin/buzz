@@ -1,7 +1,7 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
   "activation": {
     "onStartup": true

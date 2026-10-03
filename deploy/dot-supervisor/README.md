@@ -1,5 +1,41 @@
 # FMG Buzz Supervisor MCP
 
+## Private result documents (server 0.6.0)
+
+The task resource adds `fmg_buzz_save_document`, `fmg_buzz_get_document`,
+`fmg_buzz_get_document_by_request` and `fmg_buzz_list_documents`. Existing
+`buzz:read` grants still expose only the three observation tools. Document
+access uses the original task's proposing `buzz:tasks` client, current verified
+owner/community/Gateway, and a proven succeeded task. No execution, approval,
+publication, sharing or document deletion operation is added.
+
+Protocol 5 workers persist a bounded completion attestation in the task result:
+immutable proposal/run/model/effort binding, receipt hash, exact stored reply
+hash, validation contract and real observation time. Recovery uses the same
+contract with its actual Gateway end time. Attestations come from the existing
+authenticated worker; they are not Gateway signatures. Raw receipts and auth
+profiles are never exported. Replies are explicitly `stored_summary`, not a
+claim of complete model output. Older successful rows without this evidence
+cannot become documents and are never backfilled or rerun.
+
+SQLite stores immutable source records, immutable versions and immutable request
+receipts. A save transaction uses `BEGIN IMMEDIATE`, rechecks OAuth and the live
+owner snapshot before commit, compares the expected head, applies quotas, and
+commits version/head/request together. The same request and input return the
+original version before checking the current head; changed input conflicts.
+Lost responses recover with the original UUID. Store the complete original
+save input with that UUID until confirmation. Do not create a fresh UUID on a
+network error. Version reads check source/result/content hashes.
+
+Limits: exact UTF-8 Markdown 32 KiB per version, 20 versions per document,
+one document per task/client/audience, 1,000 documents and 32 MiB of stored
+source/version content. No automatic eviction. New edits use the document ID,
+new request UUID and exact current version. Missing evidence, capacity,
+conflicts and unavailable documents return bounded error codes; errors never
+become empty success. Schema and contents survive service restarts in the
+existing private WAL database. Desktop .9 retains task reads; document editing
+and signed desktop document writes are a separate subsequent release.
+
 ## Reasoning effort (server 0.5.0)
 
 `fmg_buzz_propose_task` accepts optional `effort`: low, medium, high, xhigh or

@@ -6,6 +6,7 @@ import time
 import uuid
 from store import canonical, digest, text
 from tools import snapshot
+from completion import validate_completion
 
 UUID = {"type": "string", "format": "uuid", "maxLength": 36}
 ROLES = ("fmg-planner", "fmg-frontend", "fmg-backend", "fmg-qa", "fmg-release", "fmg-live-gate")
@@ -178,7 +179,7 @@ class Tasks:
                 if row["status"] != "needs_reconcile" or type(args["revision"]) is not int or row["revision"] != args["revision"] or not isinstance(args["proposal_hash"], str) or not secrets.compare_digest(row["proposal_hash"], args["proposal_hash"]):
                     raise ValueError("recovery_state_conflict")
                 evidence, result = args["evidence"], args["result"]
-                if not isinstance(evidence, dict) or len(canonical(evidence).encode()) > 3000 or not isinstance(result, dict) or result.get("status") not in ("succeeded", "failed", "canceled") or len(canonical(result).encode()) > 48000 or set(result)-{"status", "run_id", "reply", "requested_model", "actual_model", "error_code"} or any(value is not None and not isinstance(value, str) for value in result.values()):
+                if not isinstance(evidence, dict) or len(canonical(evidence).encode()) > 3000 or not isinstance(result, dict) or result.get("status") not in ("succeeded", "failed", "canceled") or len(canonical(result).encode()) > 48000 or set(result)-{"status", "run_id", "reply", "requested_model", "actual_model", "error_code", "completion_evidence"} or any(value is not None and not isinstance(value, str) for key, value in result.items() if key != "completion_evidence"):
                     raise ValueError("recovery_result_invalid")
                 if result.get("requested_model") != proposal["requested_model"]:
                     raise ValueError("recovery_model_mismatch")
@@ -195,6 +196,10 @@ class Tasks:
                         raise ValueError("failure_receipt_missing")
                 else:
                     raise ValueError("recovery_evidence_unsupported")
+                if result["status"] == "succeeded":
+                    completion = validate_completion(row, result)
+                    if completion["source"] != "gateway.agent.wait" or completion["receipt_hash"] != evidence["receipt_hash"] or completion["ended_at"] != evidence["ended_at"]:
+                        raise ValueError("recovery_completion_mismatch")
                 self.save_recovery(row, evidence)
                 self.store.db.execute("UPDATE tasks SET status=?,result=?,revision=revision+1,updated=?,lease_until=NULL WHERE id=? AND revision=?", (result["status"], canonical(result), time.time(), row["id"], row["revision"]))
                 self.store.db.commit()
@@ -222,7 +227,7 @@ class Tasks:
                 self.store.db.execute("UPDATE tasks SET status=?,revision=revision+1,updated=? WHERE id=? AND revision=?", (status, time.time(), row["id"], row["revision"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))
-            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 4:
+            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 5:
                 if self.store.db.execute("SELECT 1 FROM tasks WHERE status IN ('dispatching','cancel_requested','needs_reconcile') LIMIT 1").fetchone():
                     return {"task": None, "reason": "busy_or_unreconciled"}
                 row = self.store.db.execute("SELECT * FROM tasks WHERE status='approved' ORDER BY created LIMIT 1").fetchone()
@@ -246,10 +251,12 @@ class Tasks:
                 result = args["result"]
                 if isinstance(result, dict) and result.get("status") == "needs_reconcile" and row["run_id"] is not None and result.get("run_id") is None:
                     result = dict(result, run_id=row["run_id"])
-                if not isinstance(result, dict) or set(result)-{"status", "run_id", "reply", "requested_model", "actual_model", "error_code"} or result.get("status") not in ("succeeded", "failed", "canceled", "needs_reconcile") or len(canonical(result).encode()) > 48000:
+                if not isinstance(result, dict) or set(result)-{"status", "run_id", "reply", "requested_model", "actual_model", "error_code", "completion_evidence"} or result.get("status") not in ("succeeded", "failed", "canceled", "needs_reconcile") or len(canonical(result).encode()) > 48000:
                     raise ValueError("result_invalid")
-                if any(value is not None and not isinstance(value, str) for value in result.values()):
+                if any(value is not None and not isinstance(value, str) for key, value in result.items() if key != "completion_evidence"):
                     raise ValueError("result_fields_invalid")
+                if result["status"] != "succeeded" and result.get("completion_evidence") is not None:
+                    raise ValueError("unexpected_completion_evidence")
                 proposal = json.loads(row["proposal"])
                 if result.get("requested_model") != proposal["requested_model"] or (result.get("actual_model") is not None and not re.fullmatch(r"[a-z0-9_-]+/[a-zA-Z0-9._:-]{1,100}", result["actual_model"])):
                     raise ValueError("result_model_invalid")
@@ -268,6 +275,8 @@ class Tasks:
                     raise ValueError("success_requires_gateway_run_receipt")
                 if row["run_id"] is not None and result.get("run_id") != row["run_id"]:
                     raise ValueError("run_binding_mismatch")
+                if result["status"] == "succeeded":
+                    validate_completion(row, result)
                 self.store.db.execute("UPDATE tasks SET status=?,result=?,revision=revision+1,updated=?,lease_until=NULL WHERE id=?", (result["status"], canonical(result), time.time(), row["id"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))
