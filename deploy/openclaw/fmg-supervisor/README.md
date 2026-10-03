@@ -71,3 +71,11 @@ untrusted output; existing role tool permissions still apply.
 
 Syntax/bundle/lint and service health checks do not constitute a ChatGPT tool
 invocation, Telegram owner-command verification or completed model task.
+
+`WORKFLOW.md` supplies owner-session guidance for current snapshot reads,
+ChatGPT MCP versus Gateway tool exposure, model/effort binding, direct Telegram
+approval and uncertain-result recovery. Install it with
+`python3 scripts/install-workspace.py EXISTING_MAIN_WORKSPACE`. The installer
+preserves existing guidance and Blender sections, creates private backups and
+a durable progress receipt, then installs `BUZZ_SUPERVISOR.md` before adding its
+managed pointer in `AGENTS.md`. No Gateway restart or tool grant is required.
