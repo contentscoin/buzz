@@ -80,7 +80,7 @@ async function assertScope(scope: ComputerScope, signal: AbortSignal) {
 export async function requestComputer(
   scope: ComputerScope,
   action: string,
-  target: { generation?: string; tabHandle?: string },
+  target: { generation?: string; tabHandle?: string; taskId?: string },
   signal: AbortSignal,
 ) {
   await assertScope(scope, signal);
@@ -177,6 +177,11 @@ export async function requestComputer(
         tab_unavailable: "탭이 닫혔습니다. 상태를 새로 고침하세요.",
         capture_size_limit: "화면 이미지가 2MiB 제한을 초과했습니다.",
         browser_operation_failed: "서버 브라우저 조회에 실패했습니다.",
+        tasks_unavailable: "작업 조회 플러그인이 준비되지 않았습니다.",
+        task_read_failed:
+          "작업을 조회할 수 없습니다. 연결과 작업 소유자를 확인하세요.",
+        response_size_limit: "조회 결과가 크기 제한을 초과했습니다.",
+        rate_limited: "잠시 후 다시 조회하세요.",
       };
       throw new Error(
         errors[response.error ?? ""] ?? "서버 조회가 거부되었습니다.",

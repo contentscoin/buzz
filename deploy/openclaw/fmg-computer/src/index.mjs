@@ -1,4 +1,5 @@
 import { identity, profileOwner } from "./binding.mjs";
+import { taskView } from "./task-view.mjs";
 import {
   randomUUID,
   randomBytes,
@@ -37,6 +38,8 @@ const actions = new Set([
   "tab.read",
   "screen.capture",
   "transcript.list",
+  "tasks.list",
+  "tasks.get",
 ]);
 
 function requireCondition(condition, code) {
@@ -267,6 +270,13 @@ async function createBroker(context, settings) {
     }
   }
   async function run(request) {
+    if (request.action === "tasks.list" || request.action === "tasks.get")
+      return await taskView(
+        context.config,
+        { owner, agent, origin },
+        request,
+        lease.signal,
+      );
     if (request.action === "capabilities.get")
       return {
         actions: [...actions],
@@ -351,11 +361,20 @@ async function createBroker(context, settings) {
           "action",
           "generation",
           "tabHandle",
+          "taskId",
         ].includes(k),
       ),
       "invalid_request",
     );
     const expires = Date.parse(request.expiresAt);
+    requireCondition(
+      request.action === "tasks.get"
+        ? uuid.test(request.taskId) &&
+            request.generation === undefined &&
+            request.tabHandle === undefined
+        : request.taskId === undefined,
+      "invalid_target",
+    );
     requireCondition(
       expires > Date.now() && expires < Date.now() + 60000,
       "request_expired",
@@ -371,6 +390,7 @@ async function createBroker(context, settings) {
         request.action,
         request.generation ?? null,
         request.tabHandle ?? null,
+        request.taskId ?? null,
         request.relay,
       ]),
     );
@@ -562,10 +582,14 @@ export default definePluginEntry({
           "channels.buzz",
           "secrets.providers",
           "plugins.entries.fmg-computer",
+          "plugins.entries.fmg-supervisor",
         ],
       },
       async start(context) {
-        stop = await createBroker(context, api.pluginConfig);
+        stop = await createBroker(
+          context,
+          context.config.plugins.entries["fmg-computer"].config,
+        );
       },
       async stop() {
         await stop?.();

@@ -131,6 +131,28 @@ class Tasks:
             raise ValueError("operator_shape_invalid")
         with self.store.lock, self.store.db:
             self.expire()
+            if action in ("view_list", "view_get"):
+                binding_keys = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
+                expected_keys = set(binding_keys) | ({"task_id"} if action == "view_get" else set())
+                current = snapshot()
+                if set(args) != expected_keys or any(args[key] != current[key] for key in binding_keys):
+                    raise ValueError("audience_changed")
+                def matches(row):
+                    proposal = json.loads(row["proposal"])
+                    return all(proposal[key] == args[key] for key in binding_keys)
+                if action == "view_get":
+                    row = self.read(args["task_id"])
+                    if not matches(row):
+                        raise ValueError("task_unavailable")
+                    return self.view(row)
+                rows = self.store.db.execute("SELECT * FROM tasks ORDER BY created DESC LIMIT 1000")
+                result = []
+                for row in rows:
+                    if matches(row):
+                        result.append(self.summary(row))
+                        if len(result) == 25:
+                            break
+                return {"tasks": result, "limit": 25}
             if action == "list" and not args:
                 return {"tasks": [self.summary(row) for row in self.store.db.execute("SELECT * FROM tasks ORDER BY created DESC LIMIT 25")], "limit": 25}
             if action == "get" and set(args) == {"task_id"}:

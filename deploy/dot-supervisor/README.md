@@ -1,5 +1,14 @@
 # FMG Buzz Supervisor MCP
 
+## Desktop task observations (server 0.3.1)
+
+The private operator supports `view_list` / `view_get`, requiring the exact
+current owner public key, relay origin and Gateway identity from a fresh snapshot.
+Only proposals with that same audience are returned. FMG Computer 0.2.0 uses
+these reads for desktop 0.5.26-fmg.8. The encrypted desktop transport has no task
+write operation. Public MCP result access remains restricted to the original
+proposing OAuth client; no token, scope or consent migration is required.
+
 Your dot reads an owner verified roster and Gateway role/session activity
 summaries through `/dot-supervisor/mcp`. Three read-only tools:
 `fmg_buzz_get_status`, `fmg_buzz_list_agents`, `fmg_buzz_get_activity`.

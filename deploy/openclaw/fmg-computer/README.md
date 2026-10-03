@@ -1,4 +1,4 @@
-# FMG Server Computer 0.1.0
+# FMG Server Computer 0.2.0
 
 First OpenDots-derived slice: Buzz FMG center → server browser observation.
 Uses existing OpenClaw Buzz identity **in the same Gateway process**, owner
@@ -7,7 +7,10 @@ The configured browser profile is observed; this service cannot start, stop,
 navigate, type, execute JavaScript, run shell commands, or dispatch jobs.
 
 Actions: `capabilities.get`, `state.get`, `tabs.list`, `tab.read`,
-`screen.capture`, `transcript.list`. Fixed CLI argv only. Kind:24200/NIP44
+`screen.capture`, `transcript.list`, `tasks.list`, `tasks.get`. Fixed browser CLI
+argv only. Task reads call the existing private Supervisor operator endpoint,
+using only `view_list` / `view_get` with owner, community and Gateway bindings.
+The operator token stays on the server. Kind:24200/NIP44
 request/response transport. Request UUID receipts store encrypted signed response
 events in SQLite WAL (24 hours / at most 1,000 requests); identical IDs return the same event, conflicting arguments
 are rejected. Completed means response recorded, not delivery acknowledged.
@@ -22,6 +25,18 @@ currently follow the relay's normal retention, with no promised automatic TTL.
 The desktop clears pending requests/media on tab, agent, account, community or
 dialog changes. Optional four-second state polling is visible-panel-only,
 completion-spaced; screenshots are refreshed manually. No model invocation.
+
+## Task observations in desktop 0.5.26-fmg.8
+
+FMG center has a separate task-list/result dialog. Reads are manual, recent 25
+tasks only, and old tasks bound to a different owner/community/Gateway are denied.
+Details show instructions, requested/actual model, run ID, state, response text,
+and up to five recovery summaries. Response text is limited to 30KB and reduced
+further if JSON encoding requires it; truncation is explicit. Full results remain
+available to the original proposing OAuth client through FMG Buzz Tasks.
+Approval/recovery commands are displayed as text for the direct Telegram owner;
+the desktop cannot propose, approve, cancel, reconcile or execute a task.
+Requires enabled fmg-supervisor 0.3.0 and dot-supervisor server 0.3.1 or later.
 
 Install: build with `node scripts/build.mjs`, `npm pack`, then OpenClaw's plugin
 installer. Add `fmg-computer` to `plugins.allow`, enable its entry and configure

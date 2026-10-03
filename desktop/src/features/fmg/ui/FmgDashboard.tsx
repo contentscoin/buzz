@@ -25,6 +25,7 @@ import { useFmgTaskGraph } from "@/features/fmg/useFmgTaskGraph";
 import type { FmgTaskGraphItem } from "@/features/fmg/useFmgTaskGraph";
 import { FmgGraphTransitionDialog } from "./FmgGraphTransitionDialog";
 import { FmgComputerLauncher } from "./FmgComputerPanel";
+import { FmgTasksLauncher } from "./FmgTasksPanel";
 import { useFmgWorkReports } from "@/features/fmg/useFmgWorkReports";
 import type { WorkReportStatus } from "@/features/messages/lib/workReport";
 import type { ConnectionState } from "@/shared/api/relayClientShared";
@@ -403,6 +404,18 @@ export function FmgDashboard() {
             title="FMG 기능"
           />
           <div className="grid gap-4 md:grid-cols-2">
+            <FeatureCard
+              action={<FmgTasksLauncher />}
+              badge={<Badge variant="info">작업 조회</Badge>}
+              description="GPT dot에서 제안하고 텔레그램에서 승인한 작업의 상태·지시문·모델·결과를 확인합니다."
+              icon={<Bot />}
+              title="GPT dot · Buzz 작업 목록과 결과"
+            >
+              <p className="text-sm text-muted-foreground">
+                작업을 선택한 뒤 새로 고침하세요. 결과 확인과 복구에 필요한
+                소유자 텔레그램 명령도 표시합니다.
+              </p>
+            </FeatureCard>
             <FeatureCard
               action={<FmgComputerLauncher />}
               badge={<Badge variant="info">서버 조회</Badge>}
