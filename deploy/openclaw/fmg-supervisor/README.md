@@ -18,6 +18,20 @@ session metadata records contribute counts and timestamps only: no transcripts,
 raw session keys, participant identities, credentials or workspace paths.
 Configured models and activity are not proof of model execution or running jobs.
 
-No task dispatch, browser input, message posting, agent creation or stop tools
-are supplied in this release. Syntax/bundle/lint checks do not constitute a
-ChatGPT invocation or full runtime test.
+Version 0.2 also registers a direct Telegram owner command `/fmg_task` and a
+background durable-task worker. Set `telegramOwnerId` from trusted human
+identity, `operatorUrl` to `http://fmg-dot-supervisor:8001/operator`, and
+`tokenFile` to `/data/.openclaw/secrets/fmg-supervisor-operator.token`.
+Other senders, group conversations and non-main routes are rejected.
+
+The worker rechecks the signed owner and immutable community/Gateway binding,
+then invokes the configured role through `openclaw agent` with a fixed session,
+model, 120-second deadline and no automatic delivery. The task database is
+claimed before invoking the CLI. Lost receipts, restart or lease expiry never
+cause an automatic rerun. Temporary instructions are outside the summary
+directory and are removed after execution. Only bounded text and actual run/model
+metadata are stored, with no automatic external publication. Cancellation during
+execution requests an abort but is not reported as confirmed termination.
+
+Syntax/bundle/lint and service health checks do not constitute a ChatGPT tool
+invocation, Telegram owner-command verification or completed model task.

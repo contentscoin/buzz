@@ -111,6 +111,8 @@ class OAuth:
         if not row:
             raise ValueError("authorization expired or already used")
         bound = json.loads(row[0])
+        if bound.get("resource") != self.resource or bound.get("scope") != self.scope:
+            raise AuthError("consent resource mismatch")
         code = secrets.token_urlsafe(32)
         self.store.db.execute("DELETE FROM auth_flows WHERE id=?", (flow,))
         self.store.db.execute("INSERT INTO codes VALUES(?,?,?)", (digest(code.encode()), canonical(bound), now+300))
@@ -144,14 +146,14 @@ class OAuth:
                 raise AuthError("invalid verifier")
             challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
             if (bound["client_id"] != args.get("client_id") or bound["redirect_uri"] != args.get("redirect_uri") or
-                bound["resource"] != args["resource"] or not secrets.compare_digest(challenge, bound["code_challenge"])):
+                bound["resource"] != args["resource"] or bound.get("scope") != self.scope or not secrets.compare_digest(challenge, bound["code_challenge"])):
                 raise AuthError("authorization binding mismatch")
             self.store.db.execute("DELETE FROM codes WHERE hash=?", (code_hash,))
             result = self.issue(bound["client_id"], bound["resource"])
         elif kind == "refresh_token":
             hashed = digest(text(args.get("refresh_token"), 200).encode())
             row = self.store.db.execute("SELECT * FROM tokens WHERE hash=? AND kind IN ('refresh','used_refresh')", (hashed,)).fetchone()
-            if not row or row["client_id"] != args.get("client_id") or row["resource"] != args["resource"]:
+            if not row or row["client_id"] != args.get("client_id") or row["resource"] != args["resource"] or row["scope"] != self.scope:
                 raise AuthError("invalid refresh token")
             if row["kind"] == "used_refresh":
                 self.store.db.execute("DELETE FROM tokens WHERE family=?", (row["family"],))
@@ -180,7 +182,7 @@ class OAuth:
     def revoke(self, args):
         hashed = digest(text(args.get("token"), 200).encode())
         row = self.store.db.execute("SELECT * FROM tokens WHERE hash=?", (hashed,)).fetchone()
-        if row and row["client_id"] == args.get("client_id"):
+        if row and row["client_id"] == args.get("client_id") and row["resource"] == self.resource and row["scope"] == self.scope:
             self.store.db.execute("DELETE FROM tokens WHERE family=?", (row["family"],))
             self.store.db.execute("DELETE FROM subscriptions WHERE client_id=?", (row["client_id"],))
             self.store.db.execute("DELETE FROM workers WHERE client_id=?", (row["client_id"],))

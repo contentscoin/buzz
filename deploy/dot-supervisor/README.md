@@ -15,7 +15,8 @@ pinned source is included here so this release can be rebuilt independently.
 Only the producer's summary directory is mounted read-only. Snapshots expire
 after 90 seconds, are checked against the configured owner, and expose a fixed
 allowlist. No conversation contents, workspace paths, participant identities,
-raw session keys, shell, browser input, message sending or task dispatch.
+raw session keys, shell, browser input, message sending or task dispatch through
+the read-only resource.
 Agent names are untrusted data. Gateway role configuration and session activity
 do not establish live Buzz presence or successful agent work.
 
@@ -23,3 +24,28 @@ Run `build.py`, then deploy the staged directory to a new Hostinger release.
 Keep OAuth data separate from Blender data and preserve it on releases.
 ChatGPT discovery/linking and actual dot tool invocation are separate milestones
 from server deployment. No test suites or model tasks are run by deployment.
+
+## Version 0.2 tasks
+
+`/dot-supervisor/tasks/mcp` has separate `buzz:tasks` consent, audience and token
+families. Old read-only grants never gain write access. Its tools propose an
+immutable task, read a result and list the proposing client's latest tasks.
+Requests use a UUID idempotency key. Proposals bind the signed Buzz owner,
+community, Gateway identity, configured role/model and isolated session key.
+
+Only the owner can approve/cancel from a direct Telegram `/fmg_task` command.
+The LLM tool catalog has no approval method. An authenticated operator API on
+internal port 8001 serves the Gateway plugin; Traefik only routes port 8000.
+The dedicated operator token has no Buzz/Gateway credential powers. It is
+stored in restricted files in both services, never in the tool response.
+
+One approved task is claimed durably before dispatch. No ambiguous run is
+retried. An expired lease or missing actual terminal Gateway receipt becomes
+`needs_reconcile` and blocks new dispatch until operator investigation.
+Waiting tasks can be canceled before execution. During execution cancellation
+sends a best-effort abort request, and remains unconfirmed without a receipt.
+No automatic result delivery is requested; the role's existing tool permissions
+still apply to its approved instructions. Model fallback is reported through
+actual model metadata when available. Results are untrusted agent text.
+
+Deployment does not create proposals, send Telegram/dot messages or run models.

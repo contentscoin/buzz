@@ -28,6 +28,15 @@ if not (data / "owner.hash").exists():
     (data / "initial-connection-password.txt").chmod(0o600)
 os.chown(data, 1000, 1000)
 os.chown(data / "owner.hash", 1000, 1000)
+token_path = data / "operator.token"
+if not token_path.exists():
+    token_path.write_text(secrets.token_urlsafe(48))
+token_path.chmod(0o600)
+os.chown(token_path, 1000, 1000)
+gateway_token = Path("/docker/openclaw-cknk/data/.openclaw/secrets/fmg-supervisor-operator.token")
+gateway_token.write_bytes(token_path.read_bytes())
+gateway_token.chmod(0o600)
+os.chown(gateway_token, 1000, 1000)
 snapshot = Path("/docker/openclaw-cknk/data/.openclaw/fmg-supervisor")
 snapshot.mkdir(exist_ok=True, mode=0o700)
 os.chown(snapshot, 1000, 1000)
@@ -38,7 +47,7 @@ image = existing["Config"]["Image"]
 if "@sha256:" not in image:
     raise ValueError("python_image_not_pinned")
 host = "buzz-dnb0.srv2006121.hstgr.cloud"
-rule = f'Host(`{host}`) && (PathPrefix(`/dot-supervisor`) || Path(`/.well-known/oauth-authorization-server/dot-supervisor`) || Path(`/.well-known/oauth-protected-resource/dot-supervisor/mcp`))'
+rule = f'Host(`{host}`) && (PathPrefix(`/dot-supervisor`) || Path(`/.well-known/oauth-authorization-server/dot-supervisor`) || Path(`/.well-known/oauth-protected-resource/dot-supervisor/mcp`) || Path(`/.well-known/oauth-authorization-server/dot-supervisor/tasks`) || Path(`/.well-known/oauth-protected-resource/dot-supervisor/tasks/mcp`))'
 service = {
     "image": image, "container_name": "fmg-dot-supervisor", "restart": "unless-stopped", "user": "1000:1000",
     "command": ["python", "-u", "/app/server.py"], "working_dir": "/app", "read_only": True,

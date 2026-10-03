@@ -1,13 +1,30 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.1.0",
-  "description": "Exports bounded owner verified Buzz and Gateway activity summaries for Your dot.",
-  "activation": { "onStartup": true },
+  "version": "0.2.0",
+  "description": "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "properties": {
-      "ownerPubkey": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      "ownerPubkey": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "telegramOwnerId": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]{0,19}$"
+      },
+      "operatorUrl": {
+        "type": "string",
+        "const": "http://fmg-dot-supervisor:8001/operator"
+      },
+      "tokenFile": {
+        "type": "string",
+        "const": "/data/.openclaw/secrets/fmg-supervisor-operator.token"
+      }
     },
     "required": ["ownerPubkey"],
     "additionalProperties": false

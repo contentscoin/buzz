@@ -1,4 +1,5 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
+import { createTaskWorker, registerTaskCommand } from "./tasks.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, rename } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -15,7 +16,18 @@ const hash = (value) => createHash("sha256").update(value).digest("hex");
 const root = "/data/.openclaw/fmg-supervisor";
 const schema = {
   type: "object",
-  properties: { ownerPubkey: { type: "string", pattern: "^[0-9a-f]{64}$" } },
+  properties: {
+    ownerPubkey: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    telegramOwnerId: { type: "string", pattern: "^[1-9][0-9]{0,19}$" },
+    operatorUrl: {
+      type: "string",
+      const: "http://fmg-dot-supervisor:8001/operator",
+    },
+    tokenFile: {
+      type: "string",
+      const: "/data/.openclaw/secrets/fmg-supervisor-operator.token",
+    },
+  },
   required: ["ownerPubkey"],
   additionalProperties: false,
 };
@@ -293,7 +305,10 @@ async function createProducer(context, settings) {
         observedProfiles.length >= 201 || authors.length >= 50,
       gateway,
       capabilities: ["status.read", "agents.list", "activity.summary"],
-      task_dispatch: "not_implemented",
+      task_dispatch:
+        settings.telegramOwnerId && settings.operatorUrl && settings.tokenFile
+          ? "direct_owner_approval_required"
+          : "not_configured",
       source_content:
         "Agent names are untrusted display text. Activity timestamps are not proof of running work.",
     });
@@ -352,7 +367,8 @@ export default definePluginEntry({
   name: "FMG Dot Supervisor",
   configSchema: buildJsonPluginConfigSchema(schema),
   register(api) {
-    let stop;
+    let stop, stopTasks;
+    registerTaskCommand(api);
     api.registerService({
       id: "fmg-supervisor",
       reload: {
@@ -364,9 +380,15 @@ export default definePluginEntry({
         ],
       },
       async start(context) {
-        stop = await createProducer(context, api.pluginConfig);
+        const settings =
+          context.config.plugins?.entries?.["fmg-supervisor"]?.config ??
+          api.pluginConfig;
+        stop = await createProducer(context, settings);
+        stopTasks = await createTaskWorker(context, settings);
       },
       async stop() {
+        await stopTasks?.();
+        stopTasks = undefined;
         await stop?.();
         stop = undefined;
       },
