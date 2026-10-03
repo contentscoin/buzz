@@ -5,6 +5,10 @@ import {
   gatewayStatusDefinition,
   registerGatewayStatusTool,
 } from "./gateway-status.mjs";
+import {
+  gatewayTaskDefinitions,
+  registerGatewayTaskTools,
+} from "./gateway-tasks.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, rename } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -384,6 +388,7 @@ const entry = definePluginEntry({
     let stop, stopTasks;
     registerTaskCommand(api);
     registerGatewayStatusTool(api);
+    registerGatewayTaskTools(api);
     api.registerService({
       id: "fmg-supervisor",
       reload: {
@@ -418,7 +423,7 @@ Object.defineProperty(entry, toolPluginMetadataSymbol, {
       "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
     activation: { onStartup: true },
     configSchema: schema,
-    tools: [gatewayStatusDefinition],
+    tools: [gatewayStatusDefinition, ...gatewayTaskDefinitions],
   },
   enumerable: false,
 });

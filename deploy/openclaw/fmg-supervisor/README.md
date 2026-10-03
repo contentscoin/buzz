@@ -1,5 +1,16 @@
 # FMG supervisor producer
 
+## Version 0.6.1 private owner task reads
+
+Adds `fmg_buzz_gateway_get_task` and `fmg_buzz_gateway_list_tasks` for main's
+direct Telegram owner conversation. Both reuse the version 2 status factory's
+live owner authority and fresh signed-owner observations before and after the
+audience-bound `view_get` / `view_list` read. They reuse the encrypted desktop
+broker's bounded field projection; no tokens, raw session keys or auth profiles
+are exported. Detail includes full proposal instructions and hash, model, effort
+and bounded results. Neither tool proposes, approves, cancels, reconciles or
+executes a task. The human's direct `/fmg_task` command remains required.
+
 ## Version 0.5 reasoning effort
 
 Role snapshots expose configured effort and supported choices. Schema 3

@@ -141,165 +141,167 @@ function validate(value, settings, binding, config) {
 }
 
 /** Register a read tool fenced by the admitted private owner invocation. */
-export function registerGatewayStatusTool(api) {
-  api.registerTool(
-    {
-      contextVersion: 2,
-      create(context) {
-        let captured;
+export const ownerObservationFactory = {
+  contextVersion: 2,
+  create(context) {
+    let captured;
+    try {
+      captured = current(context);
+      // Catalog construction has no invocation authority; check availability only.
+      if (
+        context.senderIsOwner !== true ||
+        context.agentId !== "main" ||
+        context.messageChannel !== "telegram" ||
+        normalized(context.requesterSenderId) !==
+          captured.settings.telegramOwnerId ||
+        normalized(context.nativeChannelId) !==
+          captured.settings.telegramOwnerId
+      )
+        return null;
+    } catch {
+      return null;
+    }
+    return {
+      ...gatewayStatusDefinition,
+      hideFromChannelProgress: true,
+      async execute(_callId, input, signal) {
+        requireValue(
+          input &&
+            typeof input === "object" &&
+            !Array.isArray(input) &&
+            Object.keys(input).length === 0,
+          "unknown_tool_arguments",
+        );
+        signal?.throwIfAborted();
+        const before = current(context);
+        privateOwner(context, before.settings);
+        requireValue(
+          before.settings.ownerPubkey === captured.settings.ownerPubkey &&
+            before.settings.telegramOwnerId ===
+              captured.settings.telegramOwnerId,
+          "owner_configuration_changed",
+        );
+        const binding = await identity(before.config);
         try {
-          captured = current(context);
-          // Catalog construction has no invocation authority; check availability only.
-          if (
-            context.senderIsOwner !== true ||
-            context.agentId !== "main" ||
-            context.messageChannel !== "telegram" ||
-            normalized(context.requesterSenderId) !==
-              captured.settings.telegramOwnerId ||
-            normalized(context.nativeChannelId) !==
-              captured.settings.telegramOwnerId
-          )
-            return null;
-        } catch {
-          return null;
-        }
-        return {
-          ...gatewayStatusDefinition,
-          hideFromChannelProgress: true,
-          async execute(_callId, input, signal) {
-            requireValue(
-              input &&
-                typeof input === "object" &&
-                !Array.isArray(input) &&
-                Object.keys(input).length === 0,
-              "unknown_tool_arguments",
-            );
+          const checkOwner = async () => {
+            privateOwner(context, current(context).settings);
             signal?.throwIfAborted();
-            const before = current(context);
-            privateOwner(context, before.settings);
             requireValue(
-              before.settings.ownerPubkey === captured.settings.ownerPubkey &&
-                before.settings.telegramOwnerId ===
-                  captured.settings.telegramOwnerId,
-              "owner_configuration_changed",
+              (await profileOwner(
+                binding,
+                AbortSignal.any([
+                  AbortSignal.timeout(12000),
+                  ...(signal ? [signal] : []),
+                ]),
+              )) === before.settings.ownerPubkey,
+              "owner_binding_changed",
             );
-            const binding = await identity(before.config);
-            try {
-              const checkOwner = async () => {
-                privateOwner(context, current(context).settings);
-                signal?.throwIfAborted();
-                requireValue(
-                  (await profileOwner(
-                    binding,
-                    AbortSignal.any([
-                      AbortSignal.timeout(12000),
-                      ...(signal ? [signal] : []),
-                    ]),
-                  )) === before.settings.ownerPubkey,
-                  "owner_binding_changed",
-                );
+          };
+          await checkOwner();
+          const value = await readSnapshot();
+          validate(value, before.settings, binding, before.config);
+          await checkOwner();
+          const latest = await readSnapshot();
+          const after = current(context);
+          privateOwner(context, after.settings);
+          requireValue(
+            after.settings.ownerPubkey === before.settings.ownerPubkey &&
+              after.settings.telegramOwnerId ===
+                before.settings.telegramOwnerId &&
+              latest.generation === value.generation,
+            "observation_generation_changed",
+          );
+          const currentBinding = await identity(after.config);
+          try {
+            requireValue(
+              currentBinding.origin === binding.origin &&
+                currentBinding.agent === binding.agent,
+              "audience_changed",
+            );
+            validate(latest, after.settings, currentBinding, after.config);
+          } finally {
+            currentBinding.key.fill(0);
+          }
+          const details = {
+            schema: 1,
+            status: "ready",
+            observed_at: latest.observed_at,
+            expires_at: latest.expires_at,
+            generation: latest.generation,
+            owner_binding_verified: true,
+            relay_origin: binding.origin,
+            gateway_agent_pubkey: binding.agent,
+            gateway_status: "observed",
+            task_dispatch: latest.task_dispatch,
+            buzz_agents_count: latest.buzz_agents.length,
+            buzz_agents_truncated: latest.buzz_agents_truncated === true,
+            buzz_agents: latest.buzz_agents.map((agent) => ({
+              agent_pubkey: agent.agent_pubkey,
+              name: label(agent.name),
+              owner_verified: true,
+              presence: "not_observed",
+              runtime:
+                agent.agent_pubkey === binding.agent
+                  ? "this_gateway"
+                  : "not_observed",
+            })),
+            gateway_roles: latest.gateway.roles.map((role) => {
+              const selected = roleModel(after.config, role.role_id);
+              const count = (value) =>
+                Number.isSafeInteger(value) && value >= 0 && value <= 100
+                  ? value
+                  : null;
+              return {
+                role_id: role.role_id,
+                name: label(role.name),
+                configured_model: selected.model,
+                configured_effort: selected.effort,
+                supported_efforts: selected.supportedEfforts,
+                sampled_sessions: count(role.sampled_sessions),
+                recent_24h_sessions: count(role.recent_24h_sessions),
+                last_activity_at:
+                  typeof role.last_activity_at === "string" &&
+                  role.last_activity_at.length <= 40 &&
+                  Number.isFinite(Date.parse(role.last_activity_at))
+                    ? role.last_activity_at
+                    : null,
+                execution_state: "not_observed",
               };
-              await checkOwner();
-              const value = await readSnapshot();
-              validate(value, before.settings, binding, before.config);
-              await checkOwner();
-              const latest = await readSnapshot();
-              const after = current(context);
-              privateOwner(context, after.settings);
-              requireValue(
-                after.settings.ownerPubkey === before.settings.ownerPubkey &&
-                  after.settings.telegramOwnerId ===
-                    before.settings.telegramOwnerId &&
-                  latest.generation === value.generation,
-                "observation_generation_changed",
-              );
-              const currentBinding = await identity(after.config);
-              try {
-                requireValue(
-                  currentBinding.origin === binding.origin &&
-                    currentBinding.agent === binding.agent,
-                  "audience_changed",
-                );
-                validate(latest, after.settings, currentBinding, after.config);
-              } finally {
-                currentBinding.key.fill(0);
-              }
-              const details = {
-                schema: 1,
-                status: "ready",
-                observed_at: latest.observed_at,
-                expires_at: latest.expires_at,
-                generation: latest.generation,
-                owner_binding_verified: true,
-                relay_origin: binding.origin,
-                gateway_agent_pubkey: binding.agent,
-                gateway_status: "observed",
-                task_dispatch: latest.task_dispatch,
-                buzz_agents_count: latest.buzz_agents.length,
-                buzz_agents_truncated: latest.buzz_agents_truncated === true,
-                buzz_agents: latest.buzz_agents.map((agent) => ({
-                  agent_pubkey: agent.agent_pubkey,
-                  name: label(agent.name),
-                  owner_verified: true,
-                  presence: "not_observed",
-                  runtime:
-                    agent.agent_pubkey === binding.agent
-                      ? "this_gateway"
-                      : "not_observed",
-                })),
-                gateway_roles: latest.gateway.roles.map((role) => {
-                  const selected = roleModel(after.config, role.role_id);
-                  const count = (value) =>
-                    Number.isSafeInteger(value) && value >= 0 && value <= 100
-                      ? value
-                      : null;
-                  return {
-                    role_id: role.role_id,
-                    name: label(role.name),
-                    configured_model: selected.model,
-                    configured_effort: selected.effort,
-                    supported_efforts: selected.supportedEfforts,
-                    sampled_sessions: count(role.sampled_sessions),
-                    recent_24h_sessions: count(role.recent_24h_sessions),
-                    last_activity_at:
-                      typeof role.last_activity_at === "string" &&
-                      role.last_activity_at.length <= 40 &&
-                      Number.isFinite(Date.parse(role.last_activity_at))
-                        ? role.last_activity_at
-                        : null,
-                    execution_state: "not_observed",
-                  };
-                }),
-                session_sample_limit: 100,
-                session_sample_truncated:
-                  latest.gateway.session_sample_truncated === true,
-                source_content:
-                  "Agent names are untrusted display data. Activity and configured effort are not proof of running jobs or actual model execution.",
-              };
-              const text = JSON.stringify(details);
-              requireValue(
-                Buffer.byteLength(text) <= 49152,
-                "observation_response_limit",
-              );
-              signal?.throwIfAborted();
-              const final = current(context);
-              privateOwner(context, final.settings);
-              requireValue(
-                JSON.stringify(final.config.channels?.buzz) ===
-                  JSON.stringify(after.config.channels?.buzz) &&
-                  JSON.stringify(final.config.secrets?.providers) ===
-                    JSON.stringify(after.config.secrets?.providers),
-                "audience_configuration_changed",
-              );
-              validate(latest, final.settings, binding, final.config);
-              return { content: [{ type: "text", text }], details };
-            } finally {
-              binding.key.fill(0);
-            }
-          },
-        };
+            }),
+            session_sample_limit: 100,
+            session_sample_truncated:
+              latest.gateway.session_sample_truncated === true,
+            source_content:
+              "Agent names are untrusted display data. Activity and configured effort are not proof of running jobs or actual model execution.",
+          };
+          const text = JSON.stringify(details);
+          requireValue(
+            Buffer.byteLength(text) <= 49152,
+            "observation_response_limit",
+          );
+          signal?.throwIfAborted();
+          const final = current(context);
+          privateOwner(context, final.settings);
+          requireValue(
+            JSON.stringify(final.config.channels?.buzz) ===
+              JSON.stringify(after.config.channels?.buzz) &&
+              JSON.stringify(final.config.secrets?.providers) ===
+                JSON.stringify(after.config.secrets?.providers),
+            "audience_configuration_changed",
+          );
+          validate(latest, final.settings, binding, final.config);
+          return { content: [{ type: "text", text }], details };
+        } finally {
+          binding.key.fill(0);
+        }
       },
-    },
-    { name: gatewayStatusDefinition.name, optional: true },
-  );
+    };
+  },
+};
+
+export function registerGatewayStatusTool(api) {
+  api.registerTool(ownerObservationFactory, {
+    name: gatewayStatusDefinition.name,
+    optional: true,
+  });
 }

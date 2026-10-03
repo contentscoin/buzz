@@ -1,7 +1,7 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
   "activation": {
     "onStartup": true
@@ -33,11 +33,19 @@
   },
   "contracts": {
     "tools": [
-      "fmg_buzz_gateway_status"
+      "fmg_buzz_gateway_status",
+      "fmg_buzz_gateway_get_task",
+      "fmg_buzz_gateway_list_tasks"
     ]
   },
   "toolMetadata": {
     "fmg_buzz_gateway_status": {
+      "optional": true
+    },
+    "fmg_buzz_gateway_get_task": {
+      "optional": true
+    },
+    "fmg_buzz_gateway_list_tasks": {
       "optional": true
     }
   }
