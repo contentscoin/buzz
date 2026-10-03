@@ -62,7 +62,7 @@ def call(name, args):
     elif name == "fmg_buzz_list_agents":
         result["buzz_agents"] = [selected(agent, ("agent_pubkey", "name", "owner_verified", "presence", "runtime", "profile_event_id")) for agent in value["buzz_agents"]]
         result["buzz_agents_truncated"] = value["buzz_agents_truncated"]
-        result["gateway_roles"] = [selected(role, ("role_id", "name", "configured_model", "execution_state")) for role in gateway["roles"]]
+        result["gateway_roles"] = [selected(role, ("role_id", "name", "configured_model", "configured_effort", "supported_efforts", "execution_state")) for role in gateway["roles"]]
         for role in result["gateway_roles"]:
             model = role.get("configured_model")
             role["configured_model"] = model.split("@")[0] if isinstance(model, str) else "not_reported"

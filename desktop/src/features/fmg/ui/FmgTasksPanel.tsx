@@ -283,6 +283,8 @@ function TaskResult({ detail }: { detail: TaskDetail }) {
         <dd>
           {detail.proposal.role_id} · {detail.proposal.requested_model}
         </dd>
+        <dt>요청 effort</dt>
+        <dd>{detail.proposal.requested_effort ?? "이전 작업 · 기록 없음"}</dd>
         <dt>실제 응답 모델</dt>
         <dd>{detail.result?.actual_model ?? "아직 확인되지 않음"}</dd>
         <dt>최종 변경</dt>
@@ -302,7 +304,7 @@ function TaskResult({ detail }: { detail: TaskDetail }) {
         <label className="block space-y-2 text-sm">
           {detail.status === "needs_reconcile"
             ? "결과가 불확실합니다. 다시 실행하기 전에 소유자 텔레그램에서 복구 명령을 보내세요."
-            : "지시문과 모델을 검토한 뒤 소유자 텔레그램에서 이 명령을 보내 승인하세요."}
+            : "지시문·모델·effort를 검토한 뒤 소유자 텔레그램에서 이 명령을 보내 승인하세요."}
           <textarea
             aria-label="소유자 텔레그램 명령"
             readOnly

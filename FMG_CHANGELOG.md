@@ -1,5 +1,23 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.9
+
+Base: FMG desktop `0.5.26-fmg.8`.
+
+- Adds GPT-6.1 Sol to the Codex persona model picker. Its capability record uses
+  low, medium, high, xhigh or max with a medium default. Local adapter-advertised
+  effort choices exclude none/minimal for this model; switching from an invalid
+  local effort selects medium on Save.
+- GPT dot task details display the approved requested effort. Telegram task
+  replies and MCP proposals include the same value. Optional MCP `effort` selects
+  a supported value; omission uses the configured role default.
+- Supervisor 0.5.0 uses schema 3/protocol 4 and binds model, auth profile and role
+  default effort before dispatch. The worker passes the approved effort instead
+  of forcing medium. Computer 0.2.2 includes effort in encrypted task detail reads.
+- Hostinger frontend, backend and live-gate roles target GPT-6.1 Sol with medium
+  effort. Existing authentication and tool permissions are preserved. Catalog,
+  configuration, deployed source and actual model execution are separate evidence.
+
 ## 0.5.26-fmg.8
 
 Base: FMG desktop `0.5.26-fmg.7`.

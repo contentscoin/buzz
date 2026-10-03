@@ -1,5 +1,15 @@
 # FMG Buzz Supervisor MCP
 
+## Reasoning effort (server 0.5.0)
+
+`fmg_buzz_propose_task` accepts optional `effort`: low, medium, high, xhigh or
+max. Omit it to use the role default. The fresh snapshot advertises supported
+values; unsupported choices are rejected. Schema 3 proposals show the chosen
+effort and include it in the approval hash. Protocol 4 claims bind the model,
+authentication profile and role default; changed settings stop dispatch.
+The worker sends the approved effort, rather than forcing medium. Desktop .9
+displays requested effort; .8 can still read tasks but does not display that field.
+
 ## Model binding (server 0.4.0)
 
 Schema 2 proposals show public model IDs and bind the approved role's exact model

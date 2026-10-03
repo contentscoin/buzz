@@ -30,6 +30,7 @@ const summary = z.object({
   updated_at: z.number().finite(),
   role_id: z.string().max(100),
   requested_model: z.string().max(500),
+  requested_effort: z.string().max(20).nullable().optional(),
   proposal_hash: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export const taskListSchema = z.object({
@@ -44,6 +45,7 @@ export const taskDetailSchema = summary
     proposal: z.object({
       role_id: z.string().max(100),
       requested_model: z.string().max(500),
+      requested_effort: z.string().max(20).nullable().optional(),
       instructions: z.string().max(5000),
     }),
     result: z

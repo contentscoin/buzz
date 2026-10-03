@@ -263,6 +263,8 @@ async function createProducer(context, settings) {
             role_id: role.id,
             name: label(role.name ?? role.identityName, role.id),
             configured_model: selectedModel.model,
+            configured_effort: selectedModel.effort,
+            supported_efforts: selectedModel.supportedEfforts,
             model_binding: selectedModel.binding,
             sampled_sessions: rows.length,
             recent_24h_sessions: times.filter(

@@ -1,6 +1,7 @@
 {
   "_comment": "Hand-curated model capability manifest — the single runtime artifact. Consumed directly by Rust (include_str! + serde + OnceLock) and TypeScript (JSON import + zod). No codegen. Exact records are AUTHORITATIVE six-axis snapshots: they do NOT inherit from family rules at runtime. MAINTENANCE RULE: any capability change to a family/prefix rule or a provider fallback must audit every exact_record whose _provenance names that source and update the snapshot (and its corpus expectations) wherever the contract change is intended. Divergence between an exact snapshot and its origin rule is legal and sometimes correct (e.g. provider-advertised effort overrides).",
   "_sources": {
+    "openai_gpt61_sol": "https://developers.openai.com/api/docs/models/gpt-6.1-sol (verified 2026-10-03)",
     "models_dev": "https://models.dev/api.json (retrieved 2026-07-31, SHA-256 d5a4974cd69f19b0f67713acaa6bb3b16e920defdc07ecbdf6b0a936181bb0e0)",
     "anthropic_thinking": "https://platform.claude.com/docs/en/build-with-claude/extended-thinking (July 2025)",
     "anthropic_effort": "https://platform.claude.com/docs/en/build-with-claude/effort (July 2025)",
@@ -26,6 +27,26 @@
     "inkling"
   ],
   "family_rules": [
+    {
+      "id": "openai-gpt6-1-sol",
+      "match_kind": "exact",
+      "match_value": "gpt-6.1-sol",
+      "match_aliases": [],
+      "providers": [
+        "openai"
+      ],
+      "thinking_mode": "none",
+      "supported_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_effort": "medium",
+      "databricks_v2_wire_route": "openai-responses",
+      "normalization_policy": "openai-standard"
+    },
     {
       "id": "anthropic-manual-budget-claude3",
       "match_kind": "prefix",

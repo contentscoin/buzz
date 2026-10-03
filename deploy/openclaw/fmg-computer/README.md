@@ -1,4 +1,7 @@
-# FMG Server Computer 0.2.1
+# FMG Server Computer 0.2.2
+
+Task detail projections include the approved `requested_effort` for Desktop .9.
+Older proposals may show null; the broker does not infer a missing effort.
 
 First OpenDots-derived slice: Buzz FMG center → server browser observation.
 Uses existing OpenClaw Buzz identity **in the same Gateway process**, owner

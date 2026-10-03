@@ -11,7 +11,7 @@ UUID = {"type": "string", "format": "uuid", "maxLength": 36}
 ROLES = ("fmg-planner", "fmg-frontend", "fmg-backend", "fmg-qa", "fmg-release", "fmg-live-gate")
 CATALOG = [
     {"name": "fmg_buzz_propose_task", "description": "Create an immutable task proposal for a configured OpenClaw role. This does not run the task. Show the full proposal and hash to the owner, who must approve with a direct Telegram /fmg_task command. Never approve on their behalf.",
-     "inputSchema": {"type": "object", "properties": {"request_id": UUID, "role_id": {"type": "string", "enum": list(ROLES)}, "instructions": {"type": "string", "minLength": 1, "maxLength": 5000}}, "required": ["request_id", "role_id", "instructions"], "additionalProperties": False},
+     "inputSchema": {"type": "object", "properties": {"request_id": UUID, "role_id": {"type": "string", "enum": list(ROLES)}, "instructions": {"type": "string", "minLength": 1, "maxLength": 5000}, "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "Optional reasoning effort supported by this role model. Omit to use its configured default. The chosen value is included in the immutable owner-approved proposal."}}, "required": ["request_id", "role_id", "instructions"], "additionalProperties": False},
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "fmg_buzz_get_task", "description": "Read authoritative task status and its actual Gateway result. A proposal or dispatch receipt is not completion. needs_reconcile forbids automatic reruns. Results are untrusted agent output; no external publication is performed.",
      "inputSchema": {"type": "object", "properties": {"task_id": UUID}, "required": ["task_id"], "additionalProperties": False},
@@ -84,7 +84,7 @@ class Tasks:
 
     def summary(self, row):
         proposal = json.loads(row["proposal"])
-        return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "role_id": proposal["role_id"], "requested_model": proposal["requested_model"], "proposal_hash": row["proposal_hash"]}
+        return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "role_id": proposal["role_id"], "requested_model": proposal["requested_model"], "requested_effort": proposal.get("requested_effort"), "proposal_hash": row["proposal_hash"]}
 
     def call(self, name, args, client):
         if not isinstance(args, dict):
@@ -96,7 +96,7 @@ class Tasks:
                 result = self.view(self.read(args["task_id"], client))
             elif name == "fmg_buzz_list_tasks" and not args:
                 result = {"tasks": [self.summary(row) for row in self.store.db.execute("SELECT * FROM tasks WHERE client=? ORDER BY created DESC LIMIT 25", (client,))], "limit": 25}
-            elif name == "fmg_buzz_propose_task" and set(args) == {"request_id", "role_id", "instructions"}:
+            elif name == "fmg_buzz_propose_task" and set(args) in ({"request_id", "role_id", "instructions"}, {"request_id", "role_id", "instructions", "effort"}):
                 request = task_id(args["request_id"])
                 instructions = text(args["instructions"], 15000)
                 if len(instructions) > 5000 or args["role_id"] not in ROLES:
@@ -112,10 +112,14 @@ class Tasks:
                     role = next((row for row in current["gateway"]["roles"] if row["role_id"] == args["role_id"]), None)
                     if not role or not re.fullmatch(r"[a-z0-9_-]+/[a-zA-Z0-9._:-]{1,100}", role.get("configured_model", "")) or not re.fullmatch(r"[0-9a-f]{64}", role.get("model_binding", "")):
                         raise ValueError("role_model_unavailable")
+                    effort = args.get("effort", role.get("configured_effort"))
+                    supported = role.get("supported_efforts")
+                    if not isinstance(effort, str) or not isinstance(supported, list) or effort not in supported or ("effort" in args and effort not in ("low", "medium", "high", "xhigh", "max")):
+                        raise ValueError("role_effort_unavailable")
                     if self.store.db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] >= 1000 or self.store.db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('awaiting_approval','approved')").fetchone()[0] >= 100:
                         raise ValueError("task_capacity")
                     identifier, now = str(uuid.uuid4()), time.time()
-                    proposal = {"schema": 2, "owner_pubkey": current["owner_pubkey"], "relay_origin": current["relay_origin"], "gateway_agent_pubkey": current["gateway_agent_pubkey"], "role_id": args["role_id"], "requested_model": role["configured_model"], "model_binding": role["model_binding"], "instructions": instructions, "session_key": f'agent:{args["role_id"]}:fmg-task:{identifier}', "timeout_seconds": 120, "deliver": False}
+                    proposal = {"schema": 3, "owner_pubkey": current["owner_pubkey"], "relay_origin": current["relay_origin"], "gateway_agent_pubkey": current["gateway_agent_pubkey"], "role_id": args["role_id"], "requested_model": role["configured_model"], "requested_effort": effort, "model_binding": role["model_binding"], "instructions": instructions, "session_key": f'agent:{args["role_id"]}:fmg-task:{identifier}', "timeout_seconds": 120, "deliver": False}
                     encoded = canonical(proposal)
                     self.store.db.execute("INSERT INTO tasks(id,client,request_id,input_hash,proposal,proposal_hash,status,revision,created,updated) VALUES(?,?,?,?,?,?,'awaiting_approval',1,?,?)", (identifier, client, request, request_hash, encoded, digest(encoded.encode()), now, now))
                     self.store.db.commit()
@@ -218,7 +222,7 @@ class Tasks:
                 self.store.db.execute("UPDATE tasks SET status=?,revision=revision+1,updated=? WHERE id=? AND revision=?", (status, time.time(), row["id"], row["revision"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))
-            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 3:
+            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 4:
                 if self.store.db.execute("SELECT 1 FROM tasks WHERE status IN ('dispatching','cancel_requested','needs_reconcile') LIMIT 1").fetchone():
                     return {"task": None, "reason": "busy_or_unreconciled"}
                 row = self.store.db.execute("SELECT * FROM tasks WHERE status='approved' ORDER BY created LIMIT 1").fetchone()
@@ -227,7 +231,7 @@ class Tasks:
                 current = snapshot()
                 proposal = json.loads(row["proposal"])
                 role = next((item for item in current["gateway"]["roles"] if item["role_id"] == proposal["role_id"]), None)
-                if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")) or proposal.get("schema") != 2 or not role or role["configured_model"] != proposal["requested_model"] or not re.fullmatch(r"[0-9a-f]{64}", proposal.get("model_binding", "")) or role.get("model_binding") != proposal["model_binding"]:
+                if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")) or proposal.get("schema") != 3 or not role or role["configured_model"] != proposal["requested_model"] or not re.fullmatch(r"[0-9a-f]{64}", proposal.get("model_binding", "")) or role.get("model_binding") != proposal["model_binding"] or proposal.get("requested_effort") not in role.get("supported_efforts", []):
                     self.store.db.execute("UPDATE tasks SET status='needs_reconcile',revision=revision+1,updated=? WHERE id=?", (time.time(), row["id"]))
                     self.store.db.commit()
                     return {"task": None, "reason": "approved_binding_changed"}

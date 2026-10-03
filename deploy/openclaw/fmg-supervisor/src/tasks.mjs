@@ -2,7 +2,7 @@ import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
-import { approvedModel, publicModel } from "./model-binding.mjs";
+import { approvedExecution, publicModel } from "./model-binding.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
 const tokenFile = "/data/.openclaw/secrets/fmg-supervisor-operator.token";
@@ -151,7 +151,7 @@ export function registerTaskCommand(api) {
           };
         const task = result;
         return {
-          text: `작업: ${task.task_id}\n상태: ${task.status}\n실행 ID: ${task.run_id ?? "아직 기록 없음"}\n역할: ${task.proposal.role_id}\n모델: ${task.proposal.requested_model}\n요청:\n${clean(task.proposal.instructions, 5000)}\n해시: ${task.proposal_hash}\n승인: ${task.approve_command}\n${task.result ? `결과(에이전트 출력):\n${clean(task.result.reply, 18000) ?? task.result.error_code ?? task.result.status}` : "실행 완료 결과가 아직 없습니다."}\n${task.recovery_note ?? ""}\n실행 중 취소는 요청 상태이며 종료 확인을 뜻하지 않습니다.`,
+          text: `작업: ${task.task_id}\n상태: ${task.status}\n실행 ID: ${task.run_id ?? "아직 기록 없음"}\n역할: ${task.proposal.role_id}\n모델: ${task.proposal.requested_model}\neffort: ${task.proposal.requested_effort ?? "이전 작업 · 기록 없음"}\n요청:\n${clean(task.proposal.instructions, 5000)}\n해시: ${task.proposal_hash}\n승인: ${task.approve_command}\n${task.result ? `결과(에이전트 출력):\n${clean(task.result.reply, 18000) ?? task.result.error_code ?? task.result.status}` : "실행 완료 결과가 아직 없습니다."}\n${task.recovery_note ?? ""}\n실행 중 취소는 요청 상태이며 종료 확인을 뜻하지 않습니다.`,
         };
       } catch {
         return {
@@ -189,7 +189,7 @@ export async function createTaskWorker(context, settings) {
     )
       throw new Error("proposal_invalid");
     await owner(context.config, settings, proposal);
-    await approvedModel(proposal);
+    await approvedExecution(proposal);
     const admitted = await operator(settings, "get", { task_id: task.task_id });
     if (stopped || admitted.status !== "dispatching")
       return {
@@ -246,7 +246,7 @@ export async function createTaskWorker(context, settings) {
         }
       }, 5000);
       // The immutable run ID is stored before admission. Execution is never retried.
-      const selectedModel = await approvedModel(proposal);
+      const selected = await approvedExecution(proposal);
       if (stopped) throw new Error("worker_stopped_before_dispatch");
       receipt = await gateway(
         context.config,
@@ -255,8 +255,8 @@ export async function createTaskWorker(context, settings) {
           message: proposal.instructions,
           agentId: proposal.role_id,
           sessionKey: proposal.session_key,
-          model: selectedModel,
-          thinking: "medium",
+          model: selected.model,
+          thinking: selected.effort,
           deliver: false,
           timeout: 120,
           idempotencyKey: task.run_id,
@@ -331,7 +331,7 @@ export async function createTaskWorker(context, settings) {
       return;
     }
     await owner(context.config, settings);
-    const claim = await operator(settings, "claim", { worker_protocol: 3 });
+    const claim = await operator(settings, "claim", { worker_protocol: 4 });
     if (!claim.task) return;
     let result;
     try {

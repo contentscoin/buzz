@@ -23,16 +23,37 @@ export function roleModel(config, roleId) {
     })
   )
     throw new Error("role_model_unavailable");
+  const effort =
+    entry.thinkingDefault ??
+    config.agents?.defaults?.thinkingDefault ??
+    "medium";
+  const model = publicModel(reference);
+  const requiredReasoning = ["openai/gpt-6.1-sol", "openai/gpt-6-astra"];
+  const optionalReasoning = ["openai/gpt-6-sol", "openai/gpt-6-luna"];
+  const supportedEfforts = requiredReasoning.includes(model)
+    ? ["low", "medium", "high", "xhigh", "max"]
+    : optionalReasoning.includes(model)
+      ? ["none", "low", "medium", "high", "xhigh", "max"]
+      : [effort];
+  if (
+    !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(
+      effort,
+    ) ||
+    !supportedEfforts.includes(effort)
+  )
+    throw new Error("role_effort_invalid");
   return {
     reference,
-    model: publicModel(reference),
+    model,
+    effort,
+    supportedEfforts,
     binding: createHash("sha256")
-      .update(`fmg-model-v1\0${roleId}\0${reference}`)
+      .update(`fmg-model-v2\0${roleId}\0${reference}\0${effort}`)
       .digest("hex"),
   };
 }
 
-export async function approvedModel(proposal) {
+export async function approvedExecution(proposal) {
   // Read the current local configuration, including its selected auth profile.
   // Only the public model and an opaque binding leave the Gateway.
   const config = JSON.parse(
@@ -40,10 +61,11 @@ export async function approvedModel(proposal) {
   );
   const selected = roleModel(config, proposal.role_id);
   if (
-    proposal.schema !== 2 ||
+    proposal.schema !== 3 ||
     selected.model !== proposal.requested_model ||
-    selected.binding !== proposal.model_binding
+    selected.binding !== proposal.model_binding ||
+    !selected.supportedEfforts.includes(proposal.requested_effort)
   )
     throw new Error("approved_model_binding_changed");
-  return selected.reference;
+  return { model: selected.reference, effort: proposal.requested_effort };
 }

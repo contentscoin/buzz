@@ -94,6 +94,7 @@ const manifestShape = {
     live_gate_agent: {
       id: true,
       model: true,
+      reasoning_effort: true,
       runtime: true,
       code_mode: true,
       tools: true,
@@ -325,7 +326,8 @@ export function validateFmgLiveManifest(manifest) {
       "openclaw-plugin-buzz-admin",
     ],
     ["openclaw.live_gate_agent.id", manifest?.openclaw?.live_gate_agent?.id, "fmg-live-gate"],
-    ["openclaw.live_gate_agent.model", manifest?.openclaw?.live_gate_agent?.model, "openai/gpt-6-sol"],
+    ["openclaw.live_gate_agent.model", manifest?.openclaw?.live_gate_agent?.model, "openai/gpt-6.1-sol"],
+    ["openclaw.live_gate_agent.reasoning_effort", manifest?.openclaw?.live_gate_agent?.reasoning_effort, "medium"],
     ["openclaw.live_gate_agent.runtime", manifest?.openclaw?.live_gate_agent?.runtime, "openclaw"],
     ["openclaw.live_gate_agent.code_mode", manifest?.openclaw?.live_gate_agent?.code_mode, "disabled"],
     [

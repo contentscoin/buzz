@@ -2,8 +2,8 @@
   "schema": 2,
   "channel": "fmg-live",
   "desktop": {
-    "version": "0.5.26-fmg.8",
-    "tag": "fmg-desktop-v0.5.26-fmg.8",
+    "version": "0.5.26-fmg.9",
+    "tag": "fmg-desktop-v0.5.26-fmg.9",
     "product_name": "Buzz",
     "identifier": "xyz.block.buzz.app",
     "artifact": "windows-nsis-x86_64",
@@ -87,12 +87,13 @@
     },
     "live_gate_agent": {
       "id": "fmg-live-gate",
-      "model": "openai/gpt-6-sol",
+      "model": "openai/gpt-6.1-sol",
       "runtime": "openclaw",
       "code_mode": "disabled",
       "tools": [
         "buzz_runtime_check"
-      ]
+      ],
+      "reasoning_effort": "medium"
     }
   },
   "rollback": {

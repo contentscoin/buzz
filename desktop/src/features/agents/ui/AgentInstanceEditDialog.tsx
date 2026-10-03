@@ -31,6 +31,7 @@ import { Dialog } from "@/shared/ui/dialog";
 import { Input } from "@/shared/ui/input";
 import { setManagedAgentAutoRestart } from "@/shared/api/tauriManagedAgents";
 import { EffortPickerField } from "./EffortPickerField";
+import { GPT61_SOL_EFFORTS, isGpt61Sol } from "./effortPicker";
 import { EditAgentAdvancedFields } from "./EditAgentAdvancedFields";
 import {
   ADVANCED_FIELDS_MOTION_TRANSITION,
@@ -1096,12 +1097,27 @@ export function AgentInstanceEditDialog({
               onModelDropdownChange={handleModelDropdownChange}
               showCustomModelInput={showCustomModelInput}
               model={model}
-              onModelChange={setModel}
+              onModelChange={(next) => {
+                setModel(next);
+                const current = effortTouched.current
+                  ? effortLevel
+                  : configSurfaceQuery.data?.normalized.thinkingEffort?.value;
+                if (
+                  agent.backend.type === "local" &&
+                  isGpt61Sol(next) &&
+                  current &&
+                  !GPT61_SOL_EFFORTS.includes(current)
+                ) {
+                  effortTouched.current = true;
+                  setEffortLevel("medium");
+                }
+              }}
               modelStatusMessage={modelStatusMessage}
             />
 
             <EffortPickerField
               agent={agent}
+              model={model}
               config={
                 runtimeTouched.current ? undefined : configSurfaceQuery.data
               }

@@ -3,6 +3,7 @@ import { PERSONA_LABEL_OPTIONAL_CLASS } from "./agentConfigOptions";
 import {
   effortPickerState,
   effortSelectionToPersistedValue,
+  isGpt61Sol,
 } from "./effortPicker";
 import { PersonaDropdownField } from "./PersonaDropdownField";
 
@@ -29,6 +30,7 @@ export function EffortPickerField({
   disabled,
   value,
   onChange,
+  model,
 }: {
   agent: ManagedAgent;
   config: RuntimeConfigSurface | undefined;
@@ -36,12 +38,14 @@ export function EffortPickerField({
   /** The pending persisted effort form (`null` = adapter default). */
   value: string | null;
   onChange: (level: string | null) => void;
+  model?: string;
 }) {
   const { visible, options, selectValue } = effortPickerState({
     backend: agent.backend,
     effortConfigId: config?.effortConfigId,
     effortOptions: config?.effortOptions,
     currentEffort: value,
+    model,
   });
 
   if (!visible) {
@@ -68,7 +72,9 @@ export function EffortPickerField({
         value={selectValue}
       />
       <p className="text-xs text-muted-foreground">
-        Applied at the next session start.
+        {isGpt61Sol(model)
+          ? "GPT-6.1 Sol: low / medium / high / xhigh / max. Adapter default uses medium. Applied at the next session start."
+          : "Applied at the next session start."}
       </p>
     </div>
   );

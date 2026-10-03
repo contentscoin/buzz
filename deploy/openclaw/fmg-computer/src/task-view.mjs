@@ -89,6 +89,7 @@ export async function taskView(config, binding, request, signal) {
     proposal: {
       role_id: value.proposal.role_id,
       requested_model: value.proposal.requested_model,
+      requested_effort: value.proposal.requested_effort ?? null,
       instructions: value.proposal.instructions,
     },
     result: value.result

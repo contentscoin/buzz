@@ -1,5 +1,16 @@
 # FMG supervisor producer
 
+## Version 0.5 reasoning effort
+
+Role snapshots expose configured effort and supported choices. Schema 3
+proposals bind `requested_effort` along with model, role and auth profile. Optional
+MCP `effort` selects a supported effort; omission uses the role's configured
+default. Protocol 4 workers pass the approved effort to the local Gateway instead
+of forcing medium. The binding includes the role default, so changing it after
+approval blocks dispatch. Telegram get/approval replies show the chosen effort.
+GPT-6.1 Sol supports low, medium, high, xhigh and max; none/minimal are rejected.
+Model registration and effort selection do not prove account access or execution.
+
 ## Version 0.4 model binding
 
 Model observations and proposals export only `provider/model`, without the
