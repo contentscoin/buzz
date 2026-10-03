@@ -1,5 +1,23 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.8
+
+Base: FMG desktop `0.5.26-fmg.7`.
+
+- FMG Center adds an owner-only task list and result viewer for GPT dot proposals
+  approved by the direct Telegram owner. Manual reads show recent 25 tasks,
+  instructions, requested/actual model, execution ID, response and recovery history.
+- The existing encrypted Buzz control transport carries task observations.
+  The server validates the current owner, community and Gateway against both
+  the signed Buzz profile and fresh Supervisor snapshot; operator tokens remain
+  on Hostinger. Public MCP reads retain the proposing OAuth client boundary.
+- Approval and recovery commands are displayed for manual Telegram use.
+  The desktop does not execute task writes. Ambiguous runs retain their recovery
+  block. Truncated result text is labeled and full results remain accessible to
+  the original proposing client.
+- Requires FMG Computer 0.2.0 and Supervisor server 0.3.1. Source, server deployment,
+  candidate build, local installation and actual workflow evidence are separate.
+
 ## 0.5.26-fmg.7
 
 Base: FMG live release `0.5.26-fmg.6`.
