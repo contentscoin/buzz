@@ -1,7 +1,7 @@
 {
   "id": "fmg-computer",
   "name": "FMG Server Computer",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Owner encrypted, read-only Buzz browser and task viewer.",
   "activation": { "onStartup": true },
   "configSchema": {

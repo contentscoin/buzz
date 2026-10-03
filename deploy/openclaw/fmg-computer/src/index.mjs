@@ -402,8 +402,8 @@ async function createBroker(context, settings) {
       if (prior.event) publish(JSON.parse(prior.event));
       return;
     }
-    requireCondition(Date.now() - lastRequest >= 1000, "rate_limited");
-    lastRequest = Date.now();
+    const rateLimited = Date.now() - lastRequest < 1000;
+    if (!rateLimited) lastRequest = Date.now();
     db.prepare("INSERT INTO receipts VALUES (?,?,NULL,?)").run(
       request.requestId,
       hash,
@@ -411,6 +411,7 @@ async function createBroker(context, settings) {
     );
     let result, error;
     try {
+      requireCondition(!rateLimited, "rate_limited");
       result = await run(request);
     } catch (failure) {
       error = /^[a-z_]+$/.test(failure.message)

@@ -1,4 +1,4 @@
-# FMG Server Computer 0.2.0
+# FMG Server Computer 0.2.1
 
 First OpenDots-derived slice: Buzz FMG center → server browser observation.
 Uses existing OpenClaw Buzz identity **in the same Gateway process**, owner
@@ -15,6 +15,8 @@ request/response transport. Request UUID receipts store encrypted signed respons
 events in SQLite WAL (24 hours / at most 1,000 requests); identical IDs return the same event, conflicting arguments
 are rejected. Completed means response recorded, not delivery acknowledged.
 An interrupted request remains unconfirmed; a new manual read uses a new UUID.
+Rate-limited reads receive a signed encrypted error immediately, so the desktop
+can show retry guidance without waiting for its response deadline.
 
 Screenshots are AES-256-GCM encrypted before Blossom upload. The owner receives
 the key, IV, AAD and hashes only through NIP44. Desktop validates relay origin,
