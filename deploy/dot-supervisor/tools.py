@@ -67,4 +67,3 @@ def call(name, args):
         result["roles"] = [selected(role, ("role_id", "sampled_sessions", "recent_24h_sessions", "last_activity_at", "execution_state")) for role in gateway["roles"]]
         result.update(selected(gateway, ("session_sample_limit", "session_sample_truncated", "total_sessions", "error_code")))
     return {"content": [{"type": "text", "text": canonical(result)}], "structuredContent": result, "isError": False}
-

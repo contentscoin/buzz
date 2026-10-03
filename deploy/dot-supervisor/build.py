@@ -11,4 +11,3 @@ for name in ("server.py", "store.py", "tools.py", "auth.py", "deploy.py"):
 for path in output.glob("*.py"):
     ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 print("Supervisor Python sources staged; syntax parsed.")
-

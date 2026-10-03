@@ -193,4 +193,3 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(canonical({"service": "fmg-dot-supervisor", "version": "0.1.0", "ready": True}), flush=True)
     server.serve_forever()
-

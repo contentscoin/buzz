@@ -38,4 +38,3 @@ class Ledger:
         CREATE TABLE IF NOT EXISTS subscriptions (client_id TEXT);
         CREATE TABLE IF NOT EXISTS workers (client_id TEXT);
         """)
-
