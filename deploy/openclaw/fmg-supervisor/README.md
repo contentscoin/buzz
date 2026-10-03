@@ -72,6 +72,18 @@ untrusted output; existing role tool permissions still apply.
 Syntax/bundle/lint and service health checks do not constitute a ChatGPT tool
 invocation, Telegram owner-command verification or completed model task.
 
+Version 0.6.0 adds the optional Gateway tool `fmg_buzz_gateway_status`. Grant
+only this name in main's `tools.alsoAllow`. Its version 2 factory requires the
+trusted Telegram owner sender and matching private chat ID, main agent, and
+live invocation authority. It checks the current signed Buzz owner twice,
+bounded fresh snapshots, current role bindings and Gateway/community identity,
+then returns allowlisted status/model/effort/activity summaries. It does not
+call the operator API, approve tasks, invoke a model, or send chat messages.
+No credentials, profile suffixes, transcript or raw session identifiers are
+returned. Missing/expired observations fail; they are never empty success.
+Metadata/catalog discovery alone is not proof of an admitted Telegram call.
+See the [official version 2 tool contract](https://docs.openclaw.ai/plugins/tool-plugins).
+
 `WORKFLOW.md` supplies owner-session guidance for current snapshot reads,
 ChatGPT MCP versus Gateway tool exposure, model/effort binding, direct Telegram
 approval and uncertain-result recovery. Install it with

@@ -1,7 +1,7 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.3.0",
+  "version": "0.6.0",
   "description": "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
   "activation": {
     "onStartup": true
@@ -26,7 +26,19 @@
         "const": "/data/.openclaw/secrets/fmg-supervisor-operator.token"
       }
     },
-    "required": ["ownerPubkey"],
+    "required": [
+      "ownerPubkey"
+    ],
     "additionalProperties": false
+  },
+  "contracts": {
+    "tools": [
+      "fmg_buzz_gateway_status"
+    ]
+  },
+  "toolMetadata": {
+    "fmg_buzz_gateway_status": {
+      "optional": true
+    }
   }
 }

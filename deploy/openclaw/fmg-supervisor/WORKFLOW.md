@@ -5,13 +5,17 @@ OpenClaw `main`이 직접 소유자 요청을 처리할 때 읽는다. 배포·�
 
 ## 연결을 확인하는 순서
 
-1. 허용된 파일 읽기 도구로 `/data/.openclaw/fmg-supervisor/snapshot.json`을 읽는다.
-2. `schema=1`, `owner_binding_verified=true`, 현재 시각이 `expires_at` 이전인지
+1. 직접 소유자 Telegram 개인 대화에서는 `fmg_buzz_gateway_status`를 빈 인자로
+   실제 호출한다. 이 도구는 최신 소유권·현재 모델 설정·snapshot 유효기간을
+   확인한 조회 요약을 반환한다. 대화 본문과 인증 정보는 포함하지 않는다.
+2. 도구가 현재 세션에 없으면 허용된 파일 읽기 도구로
+   `/data/.openclaw/fmg-supervisor/snapshot.json`을 읽는다.
+3. `schema=1`, `owner_binding_verified=true`, 현재 시각이 `expires_at` 이전인지
    확인한다. 실패하거나 만료된 경우 현재 연결·역할을 정상으로 표시하지 않는다.
-3. `gateway_status`, `observed_at`, `gateway_roles`의 `configured_model`,
+4. `gateway_status`, `observed_at`, `gateway_roles`의 `configured_model`,
    `configured_effort`, `supported_efforts`를 사용한다. 모델에 `@` 뒤 인증
    프로필이 있으면 제거하고 표시한다. 인증 설정 원본이나 비밀 파일은 읽지 않는다.
-4. `buzz_agents`는 소유권을 확인한 Buzz identity이고 `gateway_roles`는 서버
+5. `buzz_agents`는 소유권을 확인한 Buzz identity이고 `gateway_roles`는 서버
    역할이다. 역할 개수나 최근 세션 시각을 실행 중인 작업 수로 보고하지 않는다.
 
 현재 세션에 파일 읽기 도구가 없으면 조회하지 못했다고 보고한다. 도구 목록에
@@ -25,6 +29,8 @@ OpenClaw `main`이 직접 소유자 요청을 처리할 때 읽는다. 배포·�
   `fmg_buzz_propose_task`, `fmg_buzz_list_tasks`, `fmg_buzz_get_task`를 제공한다.
 - 이 MCP 이름이 OpenClaw `main`의 도구 목록에도 자동 등록되는 것은 아니다.
   `main`은 실제 노출된 도구만 호출한다. 존재하지 않는 도구 호출을 꾸미지 않는다.
+- Gateway의 별도 `fmg_buzz_gateway_status`는 `main` 소유자 Telegram 개인
+  대화에서 연결·역할·모델·effort·활동을 조회한다. 승인이나 작업 실행 도구가 아니다.
 - Buzz 채널의 방 목록·메시지 도구는 위 MCP와 별도다. 실제 목록 조회 또는
   수락된 메시지 ID가 있을 때만 방 확인·전송 완료를 보고한다.
 - 데스크탑 FMG 센터의 작업 목록과 결과는 조회 기능이다. 조회만으로 작업을
@@ -87,4 +93,3 @@ Blender 작업은 별도의 `DOT_BLENDER.md`를 읽고 실제
 구독 활성만으로 렌더 준비가 됐다고 보고하지 않는다. `.blend`, 작업 내용,
 결과를 받을 Buzz 스레드를 임의 선택하지 않는다. 렌더·결과 게시에는 실제
 receipt·파일·전송 수락 기록이 필요하다.
-

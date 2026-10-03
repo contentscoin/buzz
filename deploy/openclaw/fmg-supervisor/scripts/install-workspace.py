@@ -53,6 +53,7 @@ def install(root):
 
 소유자가 Buzz 연결·닷 총괄·모델·effort·작업 상태를 요청하면
 `BUZZ_SUPERVISOR.md`를 먼저 읽는다. 현재 snapshot과 실제 조회 결과로 답한다.
+직접 소유자 Telegram 개인 대화에서는 `fmg_buzz_gateway_status`를 실제 호출한다.
 ChatGPT MCP와 Gateway 도구를 구분하며, 도구 목록에 이름이 없다고 미설치로
 단정하지 않는다. 작업 실행은 소유자의 직접 Telegram `/fmg_task` 명령 승인이다.
 모델이 승인을 대신하거나 불명확한 작업을 자동 재실행하지 않는다.

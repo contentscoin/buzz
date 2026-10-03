@@ -1,6 +1,10 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
 import { createTaskWorker, registerTaskCommand } from "./tasks.mjs";
 import { roleModel } from "./model-binding.mjs";
+import {
+  gatewayStatusDefinition,
+  registerGatewayStatusTool,
+} from "./gateway-status.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, rename } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -11,6 +15,7 @@ import {
   definePluginEntry,
   buildJsonPluginConfigSchema,
 } from "openclaw/plugin-sdk/core";
+import { toolPluginMetadataSymbol } from "openclaw/plugin-sdk/tool-plugin";
 
 const execFile = promisify(callbackExecFile);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -371,13 +376,14 @@ async function createProducer(context, settings) {
   };
 }
 
-export default definePluginEntry({
+const entry = definePluginEntry({
   id: "fmg-supervisor",
   name: "FMG Dot Supervisor",
   configSchema: buildJsonPluginConfigSchema(schema),
   register(api) {
     let stop, stopTasks;
     registerTaskCommand(api);
+    registerGatewayStatusTool(api);
     api.registerService({
       id: "fmg-supervisor",
       reload: {
@@ -404,3 +410,16 @@ export default definePluginEntry({
     });
   },
 });
+Object.defineProperty(entry, toolPluginMetadataSymbol, {
+  value: {
+    id: "fmg-supervisor",
+    name: "FMG Dot Supervisor",
+    description:
+      "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
+    activation: { onStartup: true },
+    configSchema: schema,
+    tools: [gatewayStatusDefinition],
+  },
+  enumerable: false,
+});
+export default entry;
