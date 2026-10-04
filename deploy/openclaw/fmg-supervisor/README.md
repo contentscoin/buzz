@@ -1,5 +1,32 @@
 # FMG supervisor producer
 
+## Version 0.7.1 normal stop and persisted recovery
+
+An OpenAI `stop` is a normal final answer, not a cancellation. Worker success
+requires the SDK's final `ok/completed` response, its bound terminal receipt,
+and no abort, timeout, pending tools, errors or continuation.
+
+When the `agent.wait` cache has expired, direct owner `/fmg_task reconcile`
+can validate a persisted no-tool, single-turn OpenAI runtime trajectory.
+This bounded recovery checks five runtime records, session/run identity,
+exact prompt, actual model, requested effort, final answer phase, provider
+response completion and an unaborted successful `session.ended`. It reads the
+agent SQLite database without writes or migrations. Tool workflows, multi-turn
+sessions, oversized, missing or mismatched evidence stay uncertain. This source
+uses `gateway.runtime.no_tools` / `fmg-terminal-v2`. Older validated final/wait
+evidence remains supported. No raw receipts, transcripts or auth profiles leave
+the Gateway.
+
+Recovery never reruns a model. Only the current direct Telegram owner may
+commit the recovered result; ordinary MCP reads cannot commit it.
+
+Regression checks:
+
+```sh
+node --test deploy/openclaw/fmg-supervisor/test/terminal.test.mjs
+python -m unittest discover -s deploy/dot-supervisor -p test_completion.py
+```
+
 ## Version 0.7.0 durable completion evidence
 
 Protocol 5 workers attach a bounded `completion_evidence` to successful task

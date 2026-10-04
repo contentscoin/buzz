@@ -3,7 +3,7 @@ import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
 import { approvedExecution, publicModel } from "./model-binding.mjs";
-import { completionEvidence } from "./completion.mjs";
+import { finalResult } from "./terminal.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
 const tokenFile = "/data/.openclaw/secrets/fmg-supervisor-operator.token";
@@ -272,31 +272,9 @@ export async function createTaskWorker(context, settings) {
       activeController = undefined;
       activeTask = undefined;
     }
+    const completed = finalResult(receipt, task, clean);
+    if (completed) return completed;
     const meta = receipt?.result?.meta;
-    const terminal =
-      receipt?.runId === task.run_id &&
-      ["ok", "completed"].includes(receipt.status) &&
-      typeof receipt?.result === "object" &&
-      Array.isArray(receipt?.result?.payloads) &&
-      !(meta?.pendingToolCalls?.length > 0) &&
-      meta?.aborted !== true &&
-      !meta?.error &&
-      !meta?.yielded &&
-      !meta?.continuationPending &&
-      !meta?.replayInvalid &&
-      ![
-        "tool_calls",
-        "aborted",
-        "restart",
-        "superseded",
-        "rpc",
-        "stop",
-      ].includes(meta?.stopReason) &&
-      !["working", "paused", "blocked", "abandoned"].includes(
-        meta?.livenessState,
-      ) &&
-      !receipt?.error &&
-      !receipt?.result?.payloads?.some((item) => item?.isError === true);
     const metadata = meta?.agentMeta;
     const actual =
       metadata?.provider && metadata?.model
@@ -312,25 +290,16 @@ export async function createTaskWorker(context, settings) {
         )
       : "";
     const result = {
-      status: terminal ? "succeeded" : "needs_reconcile",
+      status: "needs_reconcile",
       run_id: task.run_id,
       reply,
       requested_model: proposal.requested_model,
       actual_model:
         publicModel(actual) === "not_reported" ? null : publicModel(actual),
-      error_code: terminal
-        ? null
-        : canceled
-          ? "cancel_requested_no_terminal_receipt"
-          : "gateway_terminal_receipt_unconfirmed",
+      error_code: canceled
+        ? "cancel_requested_no_terminal_receipt"
+        : "gateway_terminal_receipt_unconfirmed",
     };
-    if (terminal)
-      result.completion_evidence = completionEvidence(
-        receipt,
-        task,
-        result,
-        "gateway.agent.final",
-      );
     return result;
   }
 

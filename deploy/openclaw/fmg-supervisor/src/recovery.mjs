@@ -2,6 +2,7 @@ import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
 import { createHash } from "node:crypto";
 import { publicModel } from "./model-binding.mjs";
 import { completionEvidence } from "./completion.mjs";
+import { recoverRuntime } from "./runtime-recovery.mjs";
 
 export const clean = (value, limit) =>
   typeof value === "string"
@@ -70,9 +71,15 @@ export function recoveredResult(observation, task) {
   if (
     observation.status === "ok" &&
     !observation.error &&
-    !["tool_calls", "aborted", "restart", "superseded", "rpc", "stop"].includes(
-      observation.stopReason,
-    ) &&
+    ![
+      "tool_calls",
+      "aborted",
+      "restart",
+      "superseded",
+      "rpc",
+      "error",
+      "timeout",
+    ].includes(observation.stopReason) &&
     !["blocked", "abandoned"].includes(observation.livenessState)
   ) {
     const receipt = observation.terminalReceipt;
@@ -152,17 +159,22 @@ export async function reconcileTask(context, settings, args, access) {
     task.dispatch_stage === "intent_recorded" &&
     task.run_id === task.task_id
   ) {
-    const observation = await gateway(context.config, "agent.wait", {
-      runId: task.run_id,
-      timeoutMs: 0,
-    });
-    recovered = recoveredResult(observation, task);
+    try {
+      const observation = await gateway(context.config, "agent.wait", {
+        runId: task.run_id,
+        timeoutMs: 1000,
+      });
+      recovered = recoveredResult(observation, task);
+    } catch {
+      /* A transport failure is not terminal evidence. */
+    }
+    if (!recovered) recovered = await recoverRuntime(task, clean);
   }
   if (!recovered)
     return {
       ...task,
       recovery_note:
-        "완료 기록을 확인하지 못했습니다. Gateway 재시작 또는 약 10분이 지난 기록은 조회 캐시에 없을 수 있습니다. 미확인 상태를 유지하며 작업을 다시 실행하지 않습니다.",
+        "완료 기록을 확인하지 못했습니다. 캐시와 저장된 단일 턴·도구 미사용 종료 기록을 확인했습니다. 미확인 상태를 유지하며 작업을 다시 실행하지 않습니다.",
     };
   await access.owner(context.config, settings, task.proposal);
   access.directOwner(context, settings);

@@ -13,7 +13,11 @@ export function completionEvidence(
     result.run_id !== task.run_id ||
     receipt?.runId !== task.run_id ||
     typeof result.reply !== "string" ||
-    !["gateway.agent.final", "gateway.agent.wait"].includes(source)
+    ![
+      "gateway.agent.final",
+      "gateway.agent.wait",
+      "gateway.runtime.no_tools",
+    ].includes(source)
   )
     throw new Error("completion_binding_invalid");
   const raw = JSON.stringify(receipt);
@@ -22,7 +26,10 @@ export function completionEvidence(
   const hash = (value) => createHash("sha256").update(value).digest("hex");
   return {
     schema: 1,
-    validation_contract: "fmg-terminal-v1",
+    validation_contract:
+      source === "gateway.runtime.no_tools"
+        ? "fmg-terminal-v2"
+        : "fmg-terminal-v1",
     source,
     run_id: task.run_id,
     proposal_hash: task.proposal_hash,

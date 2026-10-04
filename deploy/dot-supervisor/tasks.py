@@ -186,8 +186,10 @@ class Tasks:
                 if evidence.get("source") == "durable_no_dispatch_intent":
                     if row["dispatch_stage"] is not None or row["run_id"] is not None or result["status"] != "canceled" or evidence.get("run_id") is not None:
                         raise ValueError("no_dispatch_not_proven")
-                elif evidence.get("source") == "gateway.agent.wait":
+                elif evidence.get("source") in ("gateway.agent.wait", "gateway.runtime.no_tools"):
                     ended = evidence.get("ended_at")
+                    if evidence.get("source") == "gateway.runtime.no_tools" and (result["status"] != "succeeded" or evidence.get("stop_reason") != "stop"):
+                        raise ValueError("runtime_recovery_not_successful")
                     if row["dispatch_stage"] != "intent_recorded" or row["run_id"] != row["id"] or result.get("run_id") != row["run_id"] or evidence.get("run_id") != row["run_id"] or type(ended) not in (int, float) or not row["created"]*1000-5000 <= ended <= time.time()*1000+5000:
                         raise ValueError("gateway_terminal_evidence_invalid")
                     if result["status"] == "succeeded" and (evidence.get("gateway_status") != "ok" or not re.fullmatch(r"[0-9a-f]{64}", evidence.get("receipt_hash", ""))):
@@ -198,7 +200,7 @@ class Tasks:
                     raise ValueError("recovery_evidence_unsupported")
                 if result["status"] == "succeeded":
                     completion = validate_completion(row, result)
-                    if completion["source"] != "gateway.agent.wait" or completion["receipt_hash"] != evidence["receipt_hash"] or completion["ended_at"] != evidence["ended_at"]:
+                    if completion["source"] != evidence["source"] or completion["receipt_hash"] != evidence["receipt_hash"] or completion["ended_at"] != evidence["ended_at"]:
                         raise ValueError("recovery_completion_mismatch")
                 self.save_recovery(row, evidence)
                 self.store.db.execute("UPDATE tasks SET status=?,result=?,revision=revision+1,updated=?,lease_until=NULL WHERE id=? AND revision=?", (result["status"], canonical(result), time.time(), row["id"], row["revision"]))

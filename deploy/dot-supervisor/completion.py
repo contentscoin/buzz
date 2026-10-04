@@ -18,7 +18,7 @@ def validate_completion(row, result):
             or type(evidence.get("schema")) is not int):
         raise ValueError("completion_model_invalid")
     expected = {
-        "schema": 1, "validation_contract": "fmg-terminal-v1",
+        "schema": 1, "validation_contract": "fmg-terminal-v2" if evidence.get("source") == "gateway.runtime.no_tools" else "fmg-terminal-v1",
         "run_id": row["run_id"], "proposal_hash": row["proposal_hash"],
         "requested_model": proposal["requested_model"],
         "actual_model": result.get("actual_model"),
@@ -34,7 +34,7 @@ def validate_completion(row, result):
             or result.get("requested_model") != proposal["requested_model"]
             or result.get("error_code") is not None
             or digest(canonical(proposal).encode()) != row["proposal_hash"]
-            or evidence.get("source") not in ("gateway.agent.final", "gateway.agent.wait")
+            or evidence.get("source") not in ("gateway.agent.final", "gateway.agent.wait", "gateway.runtime.no_tools")
             or not isinstance(evidence.get("receipt_hash"), str)
             or not re.fullmatch(r"[0-9a-f]{64}", evidence["receipt_hash"])):
         raise ValueError("completion_evidence_invalid")
