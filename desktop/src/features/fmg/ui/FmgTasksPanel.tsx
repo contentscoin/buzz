@@ -25,6 +25,7 @@ import {
 } from "../taskRpc";
 import { FmgDocumentLauncher } from "./FmgDocumentEditor";
 import { FmgDocumentLibrary } from "./FmgDocumentLibrary";
+import { taskAgentOptions } from "../taskAgentOptions";
 
 /** Owner-only task observations use Buzz's existing encrypted relay controls. */
 export function FmgTasksLauncher() {
@@ -34,9 +35,7 @@ export function FmgTasksLauncher() {
   const identity = useIdentityQuery();
   const agents = useRelayAgentsQuery();
   const owner = identity.data?.pubkey;
-  const owned = (agents.data ?? []).filter(
-    (agent) => owner && agent.ownerPubkey === owner,
-  );
+  const owned = taskAgentOptions(agents.data ?? [], owner);
   const agent =
     owned.find((item) => item.pubkey === selected) ??
     owned.find(
@@ -88,21 +87,39 @@ export function FmgTasksLauncher() {
               조회하세요.
             </p>
           ) : null}
+          <p className="text-sm text-muted-foreground">
+            커뮤니티: {activeCommunity?.name ?? "연결 확인 중"}
+          </p>
           <label className="flex items-center gap-3 text-sm">
             소유한 에이전트
             <select
               aria-label="작업 조회 에이전트"
               className="min-w-0 rounded-md border bg-background p-2"
               value={agent?.pubkey ?? ""}
+              disabled={owned.length === 0}
               onChange={(event) => setSelected(event.target.value)}
             >
               {owned.map((item) => (
                 <option key={item.pubkey} value={item.pubkey}>
-                  {item.name}
+                  {item.label}
                 </option>
               ))}
             </select>
           </label>
+          {owned.some((item) => item.sameNameCount > 1) ? (
+            <p className="text-sm text-muted-foreground">
+              같은 이름의 에이전트는 식별자로 구분합니다. 작업은 선택한
+              에이전트에서 조회합니다.
+            </p>
+          ) : null}
+          {agent ? (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">
+                선택한 에이전트 식별자
+              </summary>
+              <p className="break-all pt-2">{agent.pubkey}</p>
+            </details>
+          ) : null}
           {open && scope ? (
             <TasksViewer
               key={`${activeCommunity?.id}:${scope.relay}:${scope.owner}:${scope.agent}`}
