@@ -1,5 +1,24 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.10
+
+Base: FMG desktop `0.5.26-fmg.9`.
+
+- FMG Center adds private Markdown drafts, immutable document versions,
+  stored source summaries, version comparison and document-library pagination.
+- Saves require a successful task with verified completion evidence. Each
+  immutable version records SHA-256, byte count and a request UUID. Retries
+  recover the same request; concurrent head changes require explicit review.
+- Desktop document access is denied until the original proposing OAuth
+  connection explicitly delegates that task. Current owner, community, Gateway,
+  consent and delegation are checked again for reads, writes and retries.
+- Local drafts and pending save requests are encrypted in IndexedDB before
+  network saves. The UI exposes retry, response-loss recovery, local save status,
+  bounded storage and confirmed local-draft cleanup.
+- Requires dot-supervisor 0.7.0 and FMG Computer 0.3.0. Supervisor plugin 0.7.0
+  and worker protocol 5 are retained. Installation and real completed-task
+  document saves must be reported separately from source and build evidence.
+
 ## 0.5.26-fmg.9
 
 Base: FMG desktop `0.5.26-fmg.8`.
