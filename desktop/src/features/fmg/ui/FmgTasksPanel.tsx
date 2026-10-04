@@ -25,23 +25,26 @@ import {
 } from "../taskRpc";
 import { FmgDocumentLauncher } from "./FmgDocumentEditor";
 import { FmgDocumentLibrary } from "./FmgDocumentLibrary";
-import { taskAgentOptions } from "../taskAgentOptions";
+import {
+  resolveTaskAgentSelection,
+  taskAgentGroups,
+} from "../taskAgentOptions";
 
 /** Owner-only task observations use Buzz's existing encrypted relay controls. */
 export function FmgTasksLauncher() {
   const [open, setOpen] = React.useState(false);
   const [selected, setSelected] = React.useState("");
+  const [selectedGroup, setSelectedGroup] = React.useState<string>();
   const { activeCommunity } = useCommunities();
   const identity = useIdentityQuery();
   const agents = useRelayAgentsQuery();
   const owner = identity.data?.pubkey;
-  const owned = taskAgentOptions(agents.data ?? [], owner);
-  const agent =
-    owned.find((item) => item.pubkey === selected) ??
-    owned.find(
-      (item) => item.agentType === "openclaw" || /openclaw/i.test(item.name),
-    ) ??
-    owned[0];
+  const groups = taskAgentGroups(agents.data ?? [], owner);
+  const { group, agent } = resolveTaskAgentSelection(
+    groups,
+    selectedGroup,
+    selected,
+  );
   const relayUrl = activeCommunity?.relayUrl;
   const agentPubkey = agent?.pubkey;
   const scope = React.useMemo<ComputerScope | undefined>(() => {
@@ -95,22 +98,52 @@ export function FmgTasksLauncher() {
             <select
               aria-label="작업 조회 에이전트"
               className="min-w-0 rounded-md border bg-background p-2"
-              value={agent?.pubkey ?? ""}
-              disabled={owned.length === 0}
-              onChange={(event) => setSelected(event.target.value)}
+              value={group?.value ?? ""}
+              disabled={groups.length === 0}
+              onChange={(event) => {
+                setSelectedGroup(event.target.value);
+                setSelected("");
+              }}
             >
-              {owned.map((item) => (
-                <option key={item.pubkey} value={item.pubkey}>
-                  {item.label}
+              {!group ? (
+                <option value="" disabled>
+                  에이전트 선택
+                </option>
+              ) : null}
+              {groups.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.name || "이름 없음"}
                 </option>
               ))}
             </select>
           </label>
-          {owned.some((item) => item.sameNameCount > 1) ? (
-            <p className="text-sm text-muted-foreground">
-              같은 이름의 에이전트는 식별자로 구분합니다. 작업은 선택한
-              에이전트에서 조회합니다.
-            </p>
+          {group && group.connections.length > 1 ? (
+            <div className="space-y-2">
+              <label className="flex items-center gap-3 text-sm">
+                연결 ({group.connections.length}개)
+                <select
+                  aria-label="같은 이름의 에이전트 연결"
+                  className="min-w-0 rounded-md border bg-background p-2"
+                  value={agent?.pubkey ?? ""}
+                  onChange={(event) => {
+                    setSelectedGroup(group.value);
+                    setSelected(event.target.value);
+                  }}
+                >
+                  <option value="" disabled>
+                    조회할 연결 선택
+                  </option>
+                  {group.connections.map((item, index) => (
+                    <option key={item.pubkey} value={item.pubkey}>
+                      연결 {index + 1} · {item.identifier}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="text-sm text-muted-foreground">
+                이 이름에 여러 연결이 있습니다. 조회할 연결을 선택하세요.
+              </p>
+            </div>
           ) : null}
           {agent ? (
             <details className="text-xs text-muted-foreground">
@@ -127,7 +160,9 @@ export function FmgTasksLauncher() {
             />
           ) : (
             <p className="text-sm text-muted-foreground">
-              현재 커뮤니티에서 소유한 서버 에이전트를 확인할 수 없습니다.
+              {group && !agent
+                ? "작업을 조회하려면 위에서 연결을 선택하세요."
+                : "현재 커뮤니티에서 소유한 서버 에이전트를 확인할 수 없습니다."}
             </p>
           )}
         </DialogContent>

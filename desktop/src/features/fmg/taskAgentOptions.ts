@@ -38,6 +38,7 @@ export function taskAgentOptions(
     }
     return {
       ...agent,
+      identifier: agent.pubkey.slice(0, length),
       label:
         siblings.length > 1
           ? `${agent.name} · ${agent.pubkey.slice(0, length)}`
@@ -45,4 +46,45 @@ export function taskAgentOptions(
       sameNameCount: siblings.length,
     };
   });
+}
+
+/** Each name appears once; its exact identities remain separate connections. */
+export function taskAgentGroups(
+  agents: readonly RelayAgent[],
+  owner: string | undefined,
+) {
+  const byName = new Map<string, ReturnType<typeof taskAgentOptions>>();
+  for (const agent of taskAgentOptions(agents, owner)) {
+    const connections = byName.get(agent.name) ?? [];
+    connections.push(agent);
+    byName.set(agent.name, connections);
+  }
+  return [...byName].map(([name, connections]) => ({
+    name,
+    value: JSON.stringify(name),
+    connections,
+  }));
+}
+
+/** An ambiguous name or a removed explicit selection never chooses a target. */
+export function resolveTaskAgentSelection(
+  groups: ReturnType<typeof taskAgentGroups>,
+  selectedGroup: string | undefined,
+  selectedPubkey: string,
+) {
+  const group =
+    selectedGroup === undefined
+      ? (groups.find((item) =>
+          item.connections.some(
+            (agent) =>
+              agent.agentType === "openclaw" || /openclaw/i.test(agent.name),
+          ),
+        ) ?? groups[0])
+      : groups.find((item) => item.value === selectedGroup);
+  const agent = selectedPubkey
+    ? group?.connections.find((item) => item.pubkey === selectedPubkey)
+    : group?.connections.length === 1
+      ? group.connections[0]
+      : undefined;
+  return { group, agent };
 }
