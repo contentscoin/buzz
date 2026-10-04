@@ -1,4 +1,33 @@
-# FMG Server Computer 0.2.2
+# FMG Server Computer 0.3.0
+
+## Private result documents (source implementation; deployment is separate)
+
+Requires dot-supervisor 0.7.0 and the updated Desktop sources. Browser/task
+observations retain their existing behavior. The document broker adds only
+private document operations; it cannot approve, dispatch or rerun a task.
+
+The original proposing `buzz:tasks` connection must explicitly call
+`fmg_buzz_get_document_desktop_access` then
+`fmg_buzz_set_document_desktop_access` with the task ID, enabled flag and expected
+revision. Default is denied. Revocation, expired/revoked proposing OAuth consent,
+or a changed owner/community/Gateway denies reads and writes. The Desktop never
+chooses or receives the original OAuth client ID or credentials.
+
+Actions: `documents.access`, `documents.list`, `documents.get`,
+`documents.versions`, `documents.source`, `documents.task_source`,
+`documents.by_request`, `documents.save`. The signed encrypted broker binds
+every request to the current owner and Gateway. Document retries reauthorize
+at the server instead of replaying a cached response after access revocation.
+
+Markdown and source text use bounded base64 fields to prevent control-character
+JSON expansion from exceeding NIP-44. Original replies are fetched separately
+from Markdown versions; no source truncation is silently performed. Every
+projection is capped at 56,000 bytes before the 60,000-byte telemetry frame cap.
+Document calls permit a burst of at most 30 per minute; ordinary browser/task
+reads keep the existing one-second spacing.
+
+This section describes the new code, not a confirmed installation, real
+completed document save, Telegram invocation or Desktop runtime verification.
 
 Task detail projections include the approved `requested_effort` for Desktop .9.
 Older proposals may show null; the broker does not infer a missing effort.
@@ -41,6 +70,7 @@ further if JSON encoding requires it; truncation is explicit. Full results remai
 available to the original proposing OAuth client through FMG Buzz Tasks.
 Approval/recovery commands are displayed as text for the direct Telegram owner;
 the desktop cannot propose, approve, cancel, reconcile or execute a task.
+Explicitly delegated document saves in 0.3.0 are independent of task execution.
 Requires enabled fmg-supervisor 0.3.0 and dot-supervisor server 0.3.1 or later.
 
 Install: build with `node scripts/build.mjs`, `npm pack`, then OpenClaw's plugin

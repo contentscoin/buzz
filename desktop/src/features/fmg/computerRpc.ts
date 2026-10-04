@@ -25,6 +25,28 @@ export const computerStateSchema = z.object({
 });
 export type ComputerState = z.infer<typeof computerStateSchema>;
 export type ComputerScope = { relay: string; owner: string; agent: string };
+export type ComputerTarget = {
+  generation?: string;
+  tabHandle?: string;
+  taskId?: string;
+  documentId?: string | null;
+  version?: number | null;
+  cursor?: string | null;
+  saveRequestId?: string;
+  expectedVersion?: number;
+  markdownBase64?: string;
+};
+
+/** Preserve a bounded server code for document conflict/recovery flows. */
+export class ComputerRequestError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ComputerRequestError";
+  }
+}
 const responseSchema = z.object({
   schemaVersion: z.literal(1),
   requestId: z.uuid(),
@@ -80,7 +102,7 @@ async function assertScope(scope: ComputerScope, signal: AbortSignal) {
 export async function requestComputer(
   scope: ComputerScope,
   action: string,
-  target: { generation?: string; tabHandle?: string; taskId?: string },
+  target: ComputerTarget,
   signal: AbortSignal,
 ) {
   await assertScope(scope, signal);
@@ -183,8 +205,9 @@ export async function requestComputer(
         response_size_limit: "조회 결과가 크기 제한을 초과했습니다.",
         rate_limited: "잠시 후 다시 조회하세요.",
       };
-      throw new Error(
-        errors[response.error ?? ""] ?? "서버 조회가 거부되었습니다.",
+      throw new ComputerRequestError(
+        response.error ?? "request_rejected",
+        errors[response.error ?? ""] ?? "서버 요청이 거부되었습니다.",
       );
     }
     return response;

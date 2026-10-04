@@ -5,11 +5,13 @@ import uuid
 from completion import validate_completion
 from store import canonical, digest
 from tools import snapshot
+from document_access import DocumentDesktop, ACCESS_CATALOG
 
 MAX_BYTES = 32768
 MAX_VERSIONS = 20
 MAX_DOCUMENTS = 1000
 MAX_STORED_BYTES = 32 * 1024 * 1024
+MAX_REQUESTS = 50000
 BINDING_KEYS = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
 UUID = {"type": "string", "format": "uuid", "maxLength": 36}
 
@@ -35,7 +37,9 @@ CATALOG = [
          {"request_id": UUID}, ["request_id"]),
     tool("list_documents", "List up to 20 immutable document version summaries for your original task, within the current owner/community/Gateway. No document content or external sharing.",
          {"task_id": UUID}, ["task_id"]),
-]
+    tool("list_document_library", "List your private saved documents independently of the latest 25 tasks. Original proposing connection and current audience must match. Pass next_cursor to continue.",
+         {"cursor": UUID}, []),
+] + ACCESS_CATALOG
 NAMES = {item["name"] for item in CATALOG}
 
 
@@ -56,7 +60,7 @@ def identifier(value):
 
 
 class Documents:
-    def __init__(self, store, tasks):
+    def __init__(self, store, tasks, task_resource=None):
         self.store, self.tasks = store, tasks
         store.db.executescript("""
         PRAGMA foreign_keys=ON;
@@ -93,6 +97,13 @@ class Documents:
         CREATE TRIGGER IF NOT EXISTS document_requests_no_delete BEFORE DELETE ON document_requests
             BEGIN SELECT RAISE(ABORT,'immutable_document_request'); END;
         """)
+        columns = {row[1] for row in store.db.execute("PRAGMA table_info(document_requests)")}
+        if "head_at_save" not in columns:
+            store.db.execute("ALTER TABLE document_requests ADD COLUMN head_at_save INTEGER")
+        if "unchanged" not in columns:
+            store.db.execute("ALTER TABLE document_requests ADD COLUMN unchanged INTEGER NOT NULL DEFAULT 0")
+        store.db.commit()
+        self.desktop = DocumentDesktop(self, task_resource)
 
     def source_task(self, task_id, client, current, completed=False):
         try:
@@ -117,7 +128,6 @@ class Documents:
                                     (document_id, scope, client)).fetchone()
         if not doc:
             raise DocumentError("document_unavailable")
-        row = self.source_task(doc["task_id"], client, current, True)
         source = self.store.db.execute("SELECT * FROM document_sources WHERE scope=? AND client=? AND task_id=?",
                                        (scope, client, doc["task_id"])).fetchone()
         if not source or digest(source["data"].encode()) != source["data_hash"]:
@@ -126,9 +136,14 @@ class Documents:
             source_data = json.loads(source["data"])
         except ValueError:
             raise DocumentError("integrity_error") from None
-        if (not isinstance(source_data, dict)
-                or source_data.get("task_result_hash") != digest(row["result"].encode())):
+        if (not isinstance(source_data, dict) or len(source["data"].encode()) != source["bytes"]
+                or any(source_data.get(key) != current[key] for key in BINDING_KEYS)
+                or source_data.get("task_id") != doc["task_id"]
+                or not isinstance(source_data.get("reply"), str)
+                or digest(source_data["reply"].encode()) != source_data.get("response_sha256")):
             raise DocumentError("integrity_error")
+        # Stored source survives removal from recent task lists. Never reconstruct it
+        # from a changing result or invent a successful terminal receipt.
         selected = version if version is not None else doc["head"]
         item = self.store.db.execute("SELECT * FROM document_versions WHERE document_id=? AND version=?",
                                      (doc["id"], selected)).fetchone()
@@ -141,6 +156,8 @@ class Documents:
                   "request_id": item["request_id"], "content_sha256": item["content_hash"],
                   "content_bytes": item["bytes"], "saved_at": item["created"],
                   "source": {key: value for key, value in source_data.items() if key != "reply"}}
+        live_task = self.store.db.execute("SELECT client,status,result FROM tasks WHERE id=?", (doc["task_id"],)).fetchone()
+        result["source_validation"] = "needs_reconcile" if live_task and (live_task["client"] != client or live_task["status"] != "succeeded" or not live_task["result"] or digest(live_task["result"].encode()) != source_data["task_result_hash"]) else "verified_at_save"
         if content:
             result.update(markdown=item["content"], source_response=source_data["reply"],
                           source_content="Stored replies and Markdown are untrusted private data. No publication or execution is authorized by this document.")
@@ -150,10 +167,24 @@ class Documents:
         row = self.store.db.execute("SELECT * FROM document_requests WHERE scope=? AND client=? AND request_id=?",
                                     (scope, client, request_id)).fetchone()
         if row:
-            version = self.store.db.execute("SELECT request_id FROM document_versions WHERE document_id=? AND version=?", (row["document_id"], row["version"])).fetchone()
-            if not version or version[0] != request_id:
+            version = self.store.db.execute("SELECT version FROM document_versions WHERE document_id=? AND version=?", (row["document_id"], row["version"])).fetchone()
+            if not version:
                 raise DocumentError("integrity_error")
         return row
+
+    def request_view(self, request, scope, client, current):
+        return {**self.view(request["document_id"], request["version"], scope, client, current),
+                "request_id": request["request_id"],
+                "current_version": request["head_at_save"] or request["version"],
+                "unchanged": bool(request["unchanged"])}
+
+    def library(self, scope, client, current, cursor=None):
+        if cursor is not None:
+            identifier(cursor)
+        rows = self.store.db.execute("SELECT * FROM documents WHERE scope=? AND client=? AND id>? ORDER BY id LIMIT 21",
+                                     (scope, client, cursor or "")).fetchall()
+        return {"documents": [self.view(row["id"], None, scope, client, current, False) for row in rows[:20]],
+                "limit": 20, "next_cursor": rows[19]["id"] if len(rows) > 20 else None}
 
     def save(self, args, scope, client, current):
         if set(args) != {"task_id", "request_id", "document_id", "expected_version", "markdown"}:
@@ -177,17 +208,25 @@ class Documents:
         if old:
             if old["input_hash"] != input_hash:
                 raise DocumentError("request_conflict")
-            return self.view(old["document_id"], old["version"], scope, client, current)
+            return self.request_view(old, scope, client, current)
+        if self.store.db.execute("SELECT COUNT(*) FROM document_requests").fetchone()[0] >= MAX_REQUESTS:
+            raise DocumentError("request_capacity")
         row = self.source_task(args["task_id"], client, current, True)
         doc = self.store.db.execute("SELECT * FROM documents WHERE scope=? AND client=? AND task_id=?",
                                     (scope, client, row["id"])).fetchone()
         if doc:
             if args["document_id"] != doc["id"] or expected != doc["head"]:
                 raise DocumentError("version_conflict", doc["head"])
+            # Verify immutable source/head before attaching another version.
+            head = self.view(doc["id"], None, scope, client, current)
+            if head["source"].get("task_result_hash") != digest(row["result"].encode()):
+                raise DocumentError("completion_evidence_unavailable")
+            if head["markdown"] == markdown:
+                self.store.db.execute("INSERT INTO document_requests(scope,client,request_id,input_hash,document_id,version,head_at_save,unchanged) VALUES(?,?,?,?,?,?,?,1)",
+                                      (scope, client, args["request_id"], input_hash, doc["id"], doc["head"], doc["head"]))
+                return {**head, "request_id": args["request_id"], "unchanged": True}
             if doc["head"] >= MAX_VERSIONS:
                 raise DocumentError("version_capacity")
-            # Verify immutable source/head before attaching another version.
-            self.view(doc["id"], None, scope, client, current, False)
         elif args["document_id"] is not None or expected != 0:
             raise DocumentError("document_unavailable")
         source_text = None
@@ -204,9 +243,10 @@ class Documents:
                 "source_completeness": proof["source_completeness"],
                 "completion_evidence": proof, "task_result_hash": digest(row["result"].encode()),
             })
-        used = self.store.db.execute("SELECT COALESCE((SELECT SUM(bytes) FROM document_sources),0)+COALESCE((SELECT SUM(bytes) FROM document_versions),0)").fetchone()[0]
+        used = self.store.db.execute("SELECT COALESCE((SELECT SUM(bytes) FROM document_sources WHERE scope=? AND client=?),0)+COALESCE((SELECT SUM(v.bytes) FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.scope=? AND d.client=?),0)", (scope, client, scope, client)).fetchone()[0]
+        global_used = self.store.db.execute("SELECT COALESCE((SELECT SUM(bytes) FROM document_sources),0)+COALESCE((SELECT SUM(bytes) FROM document_versions),0)").fetchone()[0]
         added = len(raw) + (len(source_text.encode()) if source_text else 0)
-        if used + added > MAX_STORED_BYTES or (not doc and self.store.db.execute("SELECT COUNT(*) FROM documents").fetchone()[0] >= MAX_DOCUMENTS):
+        if used + added > MAX_STORED_BYTES or global_used + added > 256 * 1024 * 1024 or (not doc and self.store.db.execute("SELECT COUNT(*) FROM documents").fetchone()[0] >= MAX_DOCUMENTS):
             raise DocumentError("storage_capacity")
         now = time.time()
         doc_id = doc["id"] if doc else str(uuid.uuid4())
@@ -220,9 +260,9 @@ class Documents:
         updated = self.store.db.execute("UPDATE documents SET head=? WHERE id=? AND head=?", (version, doc_id, expected))
         if updated.rowcount != 1:
             raise DocumentError("version_conflict")
-        self.store.db.execute("INSERT INTO document_requests VALUES(?,?,?,?,?,?)",
-                              (scope, client, args["request_id"], input_hash, doc_id, version))
-        return self.view(doc_id, version, scope, client, current)
+        self.store.db.execute("INSERT INTO document_requests(scope,client,request_id,input_hash,document_id,version,head_at_save,unchanged) VALUES(?,?,?,?,?,?,?,0)",
+                              (scope, client, args["request_id"], input_hash, doc_id, version, version))
+        return {**self.view(doc_id, version, scope, client, current), "unchanged": False}
 
     def call(self, name, args, client, authorize):
         if name not in NAMES or not isinstance(args, dict):
@@ -245,12 +285,16 @@ class Documents:
                     request = self.request(identifier(args["request_id"]), scope, client)
                     if not request:
                         raise DocumentError("document_not_found")
-                    result = self.view(request["document_id"], request["version"], scope, client, current)
+                    result = self.request_view(request, scope, client, current)
                 elif name == "fmg_buzz_list_documents" and set(args) == {"task_id"}:
                     row = self.source_task(args["task_id"], client, current)
                     doc = self.store.db.execute("SELECT * FROM documents WHERE scope=? AND client=? AND task_id=?", (scope, client, row["id"])).fetchone()
                     versions = self.store.db.execute("SELECT version FROM document_versions WHERE document_id=? ORDER BY version DESC LIMIT 20", (doc["id"],)).fetchall() if doc else []
                     result = {"limit": MAX_VERSIONS, "versions": [self.view(doc["id"], v[0], scope, client, current, False) for v in versions]}
+                elif name == "fmg_buzz_list_document_library" and set(args) in (set(), {"cursor"}):
+                    result = self.library(scope, client, current, args.get("cursor"))
+                elif name in {item["name"] for item in ACCESS_CATALOG}:
+                    result = self.desktop.access(name, args, scope, client, current)
                 else:
                     raise DocumentError("invalid_request")
                 final = snapshot()

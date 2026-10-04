@@ -1,5 +1,30 @@
 # FMG Buzz Supervisor MCP
 
+## Desktop document connection (server 0.7.0 source)
+
+New task-resource tools: `fmg_buzz_list_document_library`,
+`fmg_buzz_get_document_desktop_access`, `fmg_buzz_set_document_desktop_access`.
+The existing task/document tools remain; `buzz:read` never gains document access.
+Desktop access is denied by default, granted per task by the original proposing
+client using an expected revision, and requires active OAuth authorization for
+that same task resource. The private operator accepts only bound document
+actions; a broker credential alone does not bypass the proposing-client grant.
+
+Stored sources are read independently of the recent-25 task window. A changed
+live result is reported as `needs_reconcile`, without replacing the stored
+source; new versions still require matching successful completion evidence.
+Same-head identical Markdown maps a new request UUID to the existing version.
+Request recovery preserves its originally committed version and head; normal
+document reads report the current head. Old request rows are preserved.
+
+Limits: 32KiB Markdown/version, 20 versions/document, 32MiB content per
+client/audience, 256MiB global content, 1,000 global documents and 50,000 global
+request records. No automatic eviction. Deployment must preserve the existing
+database, auth profiles, model settings, worker protocol and approved proposals.
+
+The source implements this connection. Deployment and live workflow evidence
+are separate; no real task is approved or replayed by building these sources.
+
 ## Private result documents (server 0.6.0)
 
 The task resource adds `fmg_buzz_save_document`, `fmg_buzz_get_document`,

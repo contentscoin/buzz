@@ -1,6 +1,11 @@
 import { identity, profileOwner } from "./binding.mjs";
 import { taskView } from "./task-view.mjs";
 import {
+  documentActions,
+  documentView,
+  validateDocumentRequest,
+} from "./document-view.mjs";
+import {
   randomUUID,
   randomBytes,
   createHash,
@@ -40,6 +45,7 @@ const actions = new Set([
   "transcript.list",
   "tasks.list",
   "tasks.get",
+  ...documentActions,
 ]);
 
 function requireCondition(condition, code) {
@@ -84,7 +90,8 @@ async function createBroker(context, settings) {
   let generation = randomUUID(),
     fingerprint = "",
     handles = new Map(),
-    lastRequest = 0;
+    lastRequest = 0,
+    documentRequests = [];
   const live = () => requireCondition(!stopped, "service_stopped");
   const sign = (kind, tags, content) =>
     finalizeEvent(
@@ -270,6 +277,13 @@ async function createBroker(context, settings) {
     }
   }
   async function run(request) {
+    if (documentActions.has(request.action))
+      return await documentView(
+        context.config,
+        { owner, agent, origin },
+        request,
+        lease.signal,
+      );
     if (request.action === "tasks.list" || request.action === "tasks.get")
       return await taskView(
         context.config,
@@ -281,7 +295,8 @@ async function createBroker(context, settings) {
       return {
         actions: [...actions],
         browserProfile: settings.browserProfile,
-        readOnly: true,
+        readOnly: false,
+        documentWritesRequireProposingClientGrant: true,
       };
     if (request.action === "state.get" || request.action === "tabs.list")
       return await tabs();
@@ -350,31 +365,34 @@ async function createBroker(context, settings) {
         actions.has(request.action),
       "invalid_request",
     );
-    requireCondition(
-      Object.keys(request).every((k) =>
-        [
-          "type",
-          "schemaVersion",
-          "requestId",
-          "relay",
-          "expiresAt",
-          "action",
-          "generation",
-          "tabHandle",
-          "taskId",
-        ].includes(k),
-      ),
-      "invalid_request",
-    );
+    if (documentActions.has(request.action)) validateDocumentRequest(request);
+    else
+      requireCondition(
+        Object.keys(request).every((k) =>
+          [
+            "type",
+            "schemaVersion",
+            "requestId",
+            "relay",
+            "expiresAt",
+            "action",
+            "generation",
+            "tabHandle",
+            "taskId",
+          ].includes(k),
+        ),
+        "invalid_request",
+      );
     const expires = Date.parse(request.expiresAt);
-    requireCondition(
-      request.action === "tasks.get"
-        ? uuid.test(request.taskId) &&
-            request.generation === undefined &&
-            request.tabHandle === undefined
-        : request.taskId === undefined,
-      "invalid_target",
-    );
+    if (!documentActions.has(request.action))
+      requireCondition(
+        request.action === "tasks.get"
+          ? uuid.test(request.taskId) &&
+              request.generation === undefined &&
+              request.tabHandle === undefined
+          : request.taskId === undefined,
+        "invalid_target",
+      );
     requireCondition(
       expires > Date.now() && expires < Date.now() + 60000,
       "request_expired",
@@ -392,6 +410,16 @@ async function createBroker(context, settings) {
         request.tabHandle ?? null,
         request.taskId ?? null,
         request.relay,
+        ...(documentActions.has(request.action)
+          ? [
+              request.documentId ?? null,
+              request.saveRequestId ?? null,
+              request.expectedVersion ?? null,
+              request.version ?? null,
+              request.cursor ?? null,
+              request.markdownBase64 ?? null,
+            ]
+          : []),
       ]),
     );
     const prior = db
@@ -399,12 +427,22 @@ async function createBroker(context, settings) {
       .get(request.requestId);
     if (prior) {
       requireCondition(prior.hash === hash, "request_conflict");
-      if (prior.event) publish(JSON.parse(prior.event));
-      return;
+      if (!documentActions.has(request.action)) {
+        if (prior.event) publish(JSON.parse(prior.event));
+        return;
+      }
     }
-    const rateLimited = Date.now() - lastRequest < 1000;
-    if (!rateLimited) lastRequest = Date.now();
-    db.prepare("INSERT INTO receipts VALUES (?,?,NULL,?)").run(
+    const now = Date.now();
+    documentRequests = documentRequests.filter((at) => at > now - 60000);
+    const documentRequest = documentActions.has(request.action);
+    const rateLimited = documentRequest
+      ? documentRequests.length >= 30
+      : now - lastRequest < 1000;
+    if (!rateLimited) {
+      if (documentRequest) documentRequests.push(now);
+      else lastRequest = now;
+    }
+    db.prepare("INSERT OR IGNORE INTO receipts VALUES (?,?,NULL,?)").run(
       request.requestId,
       hash,
       Date.now(),

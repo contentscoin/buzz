@@ -4,8 +4,14 @@ import { constants } from "node:fs";
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
 const tokenFile = "/data/.openclaw/secrets/fmg-supervisor-operator.token";
 
-/** Only audience-bound reads are reachable from the encrypted desktop broker. */
-export async function taskView(config, binding, request, signal) {
+/** Use the private operator endpoint only for the broker's verified audience. */
+export async function operatorRequest(
+  config,
+  binding,
+  action,
+  arguments_,
+  signal,
+) {
   const settings = config.plugins?.entries?.["fmg-supervisor"];
   if (
     settings?.enabled !== true ||
@@ -35,7 +41,7 @@ export async function taskView(config, binding, request, signal) {
     owner_pubkey: binding.owner,
     relay_origin: binding.origin,
     gateway_agent_pubkey: binding.agent,
-    ...(request.action === "tasks.get" ? { task_id: request.taskId } : {}),
+    ...arguments_,
   };
   const response = await fetch(endpoint, {
     method: "POST",
@@ -46,11 +52,11 @@ export async function taskView(config, binding, request, signal) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      action: request.action === "tasks.get" ? "view_get" : "view_list",
+      action,
       arguments: args,
     }),
   });
-  if (!response.ok || !response.body) throw new Error("task_read_failed");
+  if (!response.body) throw new Error("task_read_failed");
   const reader = response.body.getReader(),
     chunks = [];
   let size = 0;
@@ -66,6 +72,25 @@ export async function taskView(config, binding, request, signal) {
     await reader.cancel();
   }
   const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if (!response.ok)
+    throw new Error(
+      action.startsWith("documents.") &&
+        /^[a-z_]{1,80}$/.test(value.error ?? "")
+        ? value.error
+        : "task_read_failed",
+    );
+  return value;
+}
+
+/** Only audience-bound task reads are reachable through this projection. */
+export async function taskView(config, binding, request, signal) {
+  const value = await operatorRequest(
+    config,
+    binding,
+    request.action === "tasks.get" ? "view_get" : "view_list",
+    request.action === "tasks.get" ? { task_id: request.taskId } : {},
+    signal,
+  );
   if (request.action === "tasks.list") return value;
   const originalReply = value.result?.reply ?? "";
   // Bound UTF-8 bytes without splitting a Unicode code point.

@@ -23,6 +23,8 @@ import {
   type TaskDetail,
   type TaskSummary,
 } from "../taskRpc";
+import { FmgDocumentLauncher } from "./FmgDocumentEditor";
+import { FmgDocumentLibrary } from "./FmgDocumentLibrary";
 
 /** Owner-only task observations use Buzz's existing encrypted relay controls. */
 export function FmgTasksLauncher() {
@@ -60,7 +62,7 @@ export function FmgTasksLauncher() {
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
         <ClipboardList />
-        작업 목록·결과 열기
+        작업 목록·결과·문서 열기
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
@@ -180,6 +182,7 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
   return (
     <div className="space-y-4" aria-busy={busy}>
       <div className="flex flex-wrap gap-2">
+        <FmgDocumentLibrary scope={scope} />
         <Button
           size="sm"
           variant="outline"
@@ -252,7 +255,14 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
           className="min-w-0 space-y-3 rounded-lg border p-4"
         >
           {detail ? (
-            <TaskResult detail={detail} />
+            <>
+              <TaskResult detail={detail} />
+              <FmgDocumentLauncher
+                key={detail.task_id}
+                scope={scope}
+                taskId={detail.task_id}
+              />
+            </>
           ) : (
             <p className="text-sm text-muted-foreground">
               작업을 선택하면 지시문, 모델과 실행 결과를 확인할 수 있습니다.
