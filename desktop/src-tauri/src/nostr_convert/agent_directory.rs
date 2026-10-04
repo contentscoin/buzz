@@ -60,8 +60,8 @@ fn relay_agents_from_legacy_events(events: &[Event]) -> Vec<RelayAgentInfo> {
                         .map(str::to_owned)
                 })
                 .unwrap_or_else(|| "unknown".to_string());
-            // Legacy directory entries are not authenticated managed-policy
-            // coordinates, so they must not drive the live 30177 watcher.
+            // The runtime directory cannot declare ownership. A latest signed
+            // NIP-OA profile can supply provenance in the merge below.
             agent.owner_pubkey = None;
             // Channel membership is authoritative only in relay-signed kind:39002.
             agent.channel_ids.clear();
@@ -70,9 +70,11 @@ fn relay_agents_from_legacy_events(events: &[Event]) -> Vec<RelayAgentInfo> {
         .collect()
 }
 
-/// Merge self-authored kind:10100 runtime profiles with verified Desktop-managed
-/// policy records. A verified managed coordinate reserves the agent identity even
-/// when its current policy is malformed, so stale legacy permissions cannot win.
+/// Merge self-authored kind:10100 runtime profiles with verified owner profiles
+/// and Desktop-managed policy records. External owned identities remain visible
+/// to owner-encrypted controls without inventing a managed response policy.
+/// A verified managed coordinate reserves the identity even when malformed,
+/// so stale runtime permissions cannot win.
 pub fn relay_agents_from_directory_events(
     directory_events: &[Event],
     managed_agent_events: &[Event],
@@ -84,6 +86,16 @@ pub fn relay_agents_from_directory_events(
             .into_iter()
             .map(|agent| (agent.pubkey.clone(), agent))
             .collect();
+    let verified_owners = verified_agent_owners_from_profiles(profile_events);
+    for agent in agents.values_mut() {
+        if let Some(owner) = verified_owners.get(&agent.pubkey) {
+            agent.owner_pubkey = Some(owner.clone());
+            // Ownership permits discovery, not conversation or execution.
+            // Only an authenticated managed policy below supplies those rules.
+            agent.respond_to = None;
+            agent.respond_to_allowlist.clear();
+        }
+    }
     for (agent_pubkey, event) in verified_policies {
         // Remove even when policy parsing fails: invalid latest policy must not
         // revive runtime permissions. Only verified runtime liveness survives

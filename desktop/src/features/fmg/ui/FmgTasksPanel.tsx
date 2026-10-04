@@ -73,6 +73,21 @@ export function FmgTasksLauncher() {
               텔레그램에서 직접 승인한 뒤, 여기서 상태와 결과를 새로 고침하세요.
             </DialogDescription>
           </DialogHeader>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={agents.isFetching}
+            onClick={() => void agents.refetch()}
+          >
+            <RefreshCw className={agents.isFetching ? "animate-spin" : ""} />
+            에이전트 목록 새로 고침
+          </Button>
+          {agents.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              에이전트 목록을 확인하지 못했습니다. 연결을 확인하고 다시
+              조회하세요.
+            </p>
+          ) : null}
           <label className="flex items-center gap-3 text-sm">
             소유한 에이전트
             <select
