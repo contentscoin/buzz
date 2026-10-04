@@ -2,15 +2,29 @@
   "id": "fmg-computer",
   "name": "FMG Server Computer",
   "version": "0.3.0",
-  "description": "Owner encrypted browser/task viewer and explicitly delegated private result documents.",
-  "activation": { "onStartup": true },
+  "description": "Owner encrypted browser/task observations and explicitly delegated private result documents.",
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "properties": {
-      "ownerPubkey": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-      "browserProfile": { "type": "string", "pattern": "^[a-z0-9_-]{1,64}$" }
+      "ownerPubkey": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "browserProfile": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]{1,64}$"
+      }
     },
-    "required": ["ownerPubkey", "browserProfile"],
+    "required": [
+      "ownerPubkey",
+      "browserProfile"
+    ],
     "additionalProperties": false
+  },
+  "contracts": {
+    "tools": []
   }
 }

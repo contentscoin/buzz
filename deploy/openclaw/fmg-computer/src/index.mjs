@@ -23,6 +23,7 @@ import {
   definePluginEntry,
   buildJsonPluginConfigSchema,
 } from "openclaw/plugin-sdk/core";
+import { toolPluginMetadataSymbol } from "openclaw/plugin-sdk/tool-plugin";
 
 const execFile = promisify(execFileCallback);
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -594,7 +595,7 @@ async function createBroker(context, settings) {
     key.fill(0);
     throw error;
   }
-  context.logger.info("FMG Computer read-only owner broker started.");
+  context.logger.info("FMG Computer owner broker started.");
   return async () => {
     stopped = true;
     lease.abort();
@@ -608,7 +609,7 @@ async function createBroker(context, settings) {
   };
 }
 
-export default definePluginEntry({
+const entry = definePluginEntry({
   id: "fmg-computer",
   name: "FMG Server Computer",
   configSchema: buildJsonPluginConfigSchema(schema),
@@ -637,3 +638,16 @@ export default definePluginEntry({
     });
   },
 });
+Object.defineProperty(entry, toolPluginMetadataSymbol, {
+  value: {
+    id: "fmg-computer",
+    name: "FMG Server Computer",
+    description:
+      "Owner encrypted browser/task observations and explicitly delegated private result documents.",
+    activation: { onStartup: true },
+    configSchema: schema,
+    tools: [],
+  },
+  enumerable: false,
+});
+export default entry;
