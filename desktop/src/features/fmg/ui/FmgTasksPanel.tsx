@@ -117,7 +117,7 @@ export function FmgTasksLauncher() {
               ))}
             </select>
           </label>
-          {group && group.connections.length > 1 ? (
+          {group && (group.connections.length > 1 || !agent) ? (
             <div className="space-y-2">
               <label className="flex items-center gap-3 text-sm">
                 연결 ({group.connections.length}개)
@@ -141,7 +141,9 @@ export function FmgTasksLauncher() {
                 </select>
               </label>
               <p className="text-sm text-muted-foreground">
-                이 이름에 여러 연결이 있습니다. 조회할 연결을 선택하세요.
+                {group.connections.length > 1
+                  ? "이 이름에 여러 연결이 있습니다. 조회할 연결을 선택하세요."
+                  : "이전에 선택한 연결을 확인할 수 없습니다. 현재 연결을 다시 선택하세요."}
               </p>
             </div>
           ) : null}
