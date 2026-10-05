@@ -3,7 +3,6 @@ import { PERSONA_LABEL_OPTIONAL_CLASS } from "./agentConfigOptions";
 import {
   effortPickerState,
   effortSelectionToPersistedValue,
-  isGpt61Sol,
 } from "./effortPicker";
 import { PersonaDropdownField } from "./PersonaDropdownField";
 
@@ -58,7 +57,7 @@ export function EffortPickerField({
         className="text-sm font-medium text-foreground"
         htmlFor="edit-agent-effort"
       >
-        Thinking effort
+        추론 강도 (effort)
         <span className={PERSONA_LABEL_OPTIONAL_CLASS}>Optional</span>
       </label>
       <PersonaDropdownField
@@ -72,9 +71,7 @@ export function EffortPickerField({
         value={selectValue}
       />
       <p className="text-xs text-muted-foreground">
-        {isGpt61Sol(model)
-          ? "GPT-6.1 Sol: low / medium / high / xhigh / max. Adapter default uses medium. Applied at the next session start."
-          : "Applied at the next session start."}
+        실행기가 제공한 선택지입니다. 저장 후 다음 세션 시작에 적용됩니다.
       </p>
     </div>
   );

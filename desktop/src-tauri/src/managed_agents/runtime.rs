@@ -411,6 +411,19 @@ pub(crate) fn configure_runtime_cli(
     let Some(runtime) = runtime else {
         return;
     };
+    if runtime.id == "codex" {
+        // Discovery and execution must use the same CLI. The ACP adapter's
+        // own PATH lookup otherwise selects a stale standalone installation.
+        let explicit = command
+            .get_envs()
+            .any(|(key, value)| key == "CODEX_PATH" && value.is_some());
+        if !explicit && std::env::var_os("CODEX_PATH").is_none() {
+            if let Some(path) = runtime.underlying_cli.and_then(resolve_command) {
+                command.env("CODEX_PATH", path);
+            }
+        }
+        return;
+    }
     if runtime.id != "claude" {
         return;
     }

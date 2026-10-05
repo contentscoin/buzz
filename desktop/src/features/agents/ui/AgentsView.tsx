@@ -20,6 +20,7 @@ import { TeamDeleteDialog } from "./TeamDeleteDialog";
 import { TeamDialog } from "./TeamDialog";
 import { TeamsSection } from "./TeamsSection";
 import { UnifiedAgentsSection } from "./UnifiedAgentsSection";
+import { OwnedRelayAgentsSection } from "./OwnedRelayAgentsSection";
 import { useManagedAgentActions } from "./useManagedAgentActions";
 import { usePersonaActions } from "./usePersonaActions";
 import { useTeamActions } from "./useTeamActions";
@@ -218,6 +219,14 @@ export function AgentsView() {
             title="Agents"
           />
           <div className="flex flex-col gap-8">
+            <OwnedRelayAgentsSection
+              agents={agents.relayAgentsQuery.data}
+              managedAgents={agents.managedAgentsQuery.data}
+              loading={agents.relayAgentsQuery.isLoading}
+              error={agents.relayAgentsQuery.error}
+              onRefresh={agents.refetchRelayAgents}
+              onOpenProfile={(pubkey) => openProfilePanel?.(pubkey)}
+            />
             <UnifiedAgentsSection
               commandScope={agents.commandScope}
               getAvailability={agents.getAvailability}

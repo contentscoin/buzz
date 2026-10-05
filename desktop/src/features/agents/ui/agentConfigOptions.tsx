@@ -150,6 +150,7 @@ const CLAUDE_MODEL_OPTIONS: readonly PersonaModelOption[] = [
 const CODEX_MODEL_OPTIONS: readonly PersonaModelOption[] = [
   DEFAULT_MODEL_OPTION,
   { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
+  { id: "gpt-6-astra", label: "GPT-6 Astra" },
   { id: "gpt-6-sol", label: "GPT-6 Sol" },
   { id: "gpt-6-luna", label: "GPT-6 Luna" },
 ];

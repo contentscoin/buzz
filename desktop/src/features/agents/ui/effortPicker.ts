@@ -10,14 +10,6 @@ import type { PersonaDropdownOption } from "./agentConfigOptions";
  */
 export const EFFORT_DEFAULT_DROPDOWN_VALUE = "__effort_default__";
 
-export const GPT61_SOL_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-export const isGpt61Sol = (model: string | undefined) =>
-  model
-    ?.trim()
-    .toLowerCase()
-    .replace(/^openai\//, "")
-    .split("@")[0] === "gpt-6.1-sol";
-
 /**
  * Pure gating + option compute for the effort write control in the edit dialog.
  *
@@ -37,7 +29,7 @@ export function effortPickerState({
   effortConfigId,
   effortOptions,
   currentEffort,
-  model,
+  model: _model,
 }: {
   backend: ManagedAgentBackend;
   effortConfigId: string | undefined;
@@ -50,9 +42,7 @@ export function effortPickerState({
   selectValue: string;
 } {
   const visible = backend.type === "local" && effortConfigId !== undefined;
-  const availableOptions = (effortOptions ?? []).filter(
-    (option) => !isGpt61Sol(model) || GPT61_SOL_EFFORTS.includes(option.value),
-  );
+  const availableOptions = effortOptions ?? [];
 
   const options: PersonaDropdownOption[] = [
     { label: "Adapter default", value: EFFORT_DEFAULT_DROPDOWN_VALUE },

@@ -30,8 +30,7 @@ import { ChooserDialogContent } from "@/shared/ui/chooser-dialog-content";
 import { Dialog } from "@/shared/ui/dialog";
 import { Input } from "@/shared/ui/input";
 import { setManagedAgentAutoRestart } from "@/shared/api/tauriManagedAgents";
-import { EffortPickerField } from "./EffortPickerField";
-import { GPT61_SOL_EFFORTS, isGpt61Sol } from "./effortPicker";
+import { AgentEffortFields } from "./ModelEffortField";
 import { EditAgentAdvancedFields } from "./EditAgentAdvancedFields";
 import {
   ADVANCED_FIELDS_MOTION_TRANSITION,
@@ -156,9 +155,7 @@ export function AgentInstanceEditDialog({
   const [envVars, setEnvVars] = React.useState<EnvVarsValue>(agent.envVars);
   const [autoRestartOnConfigChange, setAutoRestartOnConfigChange] =
     React.useState(agent.autoRestartOnConfigChange);
-  // Effort picker is Save-gated: hold the pending selection in dialog state and
-  // embed it in the locked update payload on Save alone (see
-  // resolveEffortSubmission / handleSubmit — PR #4625), never on selection.
+  // Effort choices commit through the locked Save transaction only.
   // `effortTouched` distinguishes "user picked a value" from "showing the
   // config-surface effective value", so an untouched Save writes nothing.
   const [effortLevel, setEffortLevel] = React.useState<string | null>(null);
@@ -751,8 +748,6 @@ export function AgentInstanceEditDialog({
             : undefined,
       };
 
-      // Resolve effort before the update so access-change restarts can
-      // snapshot and launch the NEW effort value atomically.
       const effortSubmission = resolveEffortSubmission({
         effortLevel,
         originalEffortLevel:
@@ -1097,31 +1092,19 @@ export function AgentInstanceEditDialog({
               onModelDropdownChange={handleModelDropdownChange}
               showCustomModelInput={showCustomModelInput}
               model={model}
-              onModelChange={(next) => {
-                setModel(next);
-                const current = effortTouched.current
-                  ? effortLevel
-                  : configSurfaceQuery.data?.normalized.thinkingEffort?.value;
-                if (
-                  agent.backend.type === "local" &&
-                  isGpt61Sol(next) &&
-                  current &&
-                  !GPT61_SOL_EFFORTS.includes(current)
-                ) {
-                  effortTouched.current = true;
-                  setEffortLevel("medium");
-                }
-              }}
+              onModelChange={setModel}
               modelStatusMessage={modelStatusMessage}
             />
 
-            <EffortPickerField
+            <AgentEffortFields
               agent={agent}
-              model={model}
+              model={model || inheritedModelDefault.value}
+              options={discoveredModelOptions}
+              onModelChange={setModel}
               config={
                 runtimeTouched.current ? undefined : configSurfaceQuery.data
               }
-              disabled={isSaving}
+              disabled={isSaving || modelDiscoveryLoading}
               value={
                 effortTouched.current
                   ? effortLevel

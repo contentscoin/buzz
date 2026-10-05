@@ -338,6 +338,21 @@ with a TypeScript lookup table or an id comparison in a component.
     possible. Keep the Codex and Claude adapter version floors aligned with the
     packages that understand those IDs; an older resolved adapter must be
     offered the maintained `@agentclientprotocol` replacement before spawn.
+    On Windows, Codex discovery resolves the newest version-probed native CLI
+    in the standard desktop install directories, with a bounded probe budget.
+    The adapter receives that same `CODEX_PATH` at discovery and spawn; explicit
+    user overrides remain authoritative. ACP legacy `model[effort]` entries may
+    drive a separate Save-gated effort field before session-native effort is
+    available. Choices must come from the discovered catalog, never a UI model
+    capability table. They persist through the model field; an instance edit
+    clears a conflicting canonical effort in the same locked Save transaction.
+    Do not mount this field in live-switch controls.
+    External owned relay identities have their own Agents section without local
+    lifecycle/model controls. Explicit owner mention enrollment signs kind:30177
+    after exact current ownership and scope checks, requires no existing policy,
+    and never creates a local managed record. Existing owner-only consent is
+    idempotent; other existing policies are not overwritten. Channel membership
+    and send-time revalidation remain required.
 21. **Final managed-agent deletion is a scoped, journaled transaction.** Every
     UI deletion captures the active relay URL and signer before its first
     await; direct agent deletion and persona cascade pass both through IPC. The

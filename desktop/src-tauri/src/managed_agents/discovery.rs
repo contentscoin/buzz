@@ -21,6 +21,8 @@ mod runtime_metadata;
 #[macro_use]
 mod windows_install;
 mod catalog;
+#[cfg(windows)]
+mod codex_cli;
 pub(crate) use catalog::KNOWN_ACP_RUNTIMES;
 pub use login_shell::{find_nvm_default_bin, login_shell_path};
 pub(crate) use login_shell::{find_via_login_shell, refresh_login_shell_path};
@@ -615,6 +617,12 @@ fn resolve_buzz_managed_command(command: &str) -> Option<PathBuf> {
 }
 
 fn resolve_command_uncached(command: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    if command == "codex" || command == "codex.exe" {
+        if let Some(current) = codex_cli::current_windows_codex_cli() {
+            return Some(current);
+        }
+    }
     if let Some(path) = resolve_workspace_command(command) {
         return Some(path);
     }

@@ -15,6 +15,7 @@ import { PersonaDropdownField } from "./PersonaDropdownField";
 import type { EnvVarsValue } from "./EnvVarsEditor";
 import { PersonaAdvancedFields } from "./PersonaAdvancedFields";
 import { PersonaModelField } from "./PersonaModelField";
+import { ModelEffortField } from "./ModelEffortField";
 import { runtimeAvailabilityWarning } from "./runtimeAvailabilityWarning";
 import { PersonaProviderApiKeyField } from "./PersonaProviderApiKeyField";
 import {
@@ -876,6 +877,16 @@ export function AgentDefinitionDialog({
                 }));
               }}
               value={apiKeyValue}
+            />
+          ) : null}
+
+          {modelFieldVisible && aiConfigurationMode === "custom" ? (
+            <ModelEffortField
+              id="persona-model-effort"
+              model={model}
+              options={discoveredModelOptions}
+              disabled={isPending || modelDiscoveryLoading}
+              onChange={setModel}
             />
           ) : null}
 

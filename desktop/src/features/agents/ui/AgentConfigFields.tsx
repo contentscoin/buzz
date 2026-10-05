@@ -8,6 +8,7 @@
 import * as React from "react";
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ModelEffortField } from "./ModelEffortField";
 
 import type {
   BakedEnvEntry,
@@ -868,6 +869,15 @@ export function AgentConfigFields({
       ) : null}
 
       {/* Thinking / Effort */}
+      {showEffortField && !effortFieldVisible && !dependentFieldsDisabled ? (
+        <ModelEffortField
+          id="global-agent-model-effort"
+          model={config.model ?? fallbackModel ?? ""}
+          options={discoveredModelOptions}
+          disabled={modelDiscoveryLoading}
+          onChange={handleModelChange}
+        />
+      ) : null}
       {effortFieldVisible ? (
         <div className={blockClassName}>
           <EffortSelectField
