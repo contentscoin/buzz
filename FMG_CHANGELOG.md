@@ -1,5 +1,20 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.15
+
+Base: FMG desktop `0.5.26-fmg.14`.
+
+- Local instance effort uses choices from the applicable model's live catalog,
+  including GPT-6.1 SOL, before consulting a matching session-native catalog.
+  Stale session choices from another model cannot mask the selected model.
+- Instance strengths save through the existing canonical effort column in the
+  locked Save transaction, including persona-linked instances. Definition and
+  defaults editors retain the adapter's encoded model/effort persistence.
+- The effort section identifies its applicable model and explains definition
+  ownership. Blank default-model forms use their effective inherited model.
+- Definition editors show Model before Effort. Live conversation effort and
+  remote Gateway role settings are unchanged.
+
 ## 0.5.26-fmg.14
 
 Base: FMG desktop `0.5.26-fmg.13`.

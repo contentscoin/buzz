@@ -222,8 +222,9 @@ with a TypeScript lookup table or an id comparison in a component.
    the shared provenance context, without per-row directory subscriptions. See
    [the provenance contract](../../../../docs/agent-management-provenance.md).
 14. **Thinking effort has two surfaces: a local-only WRITE control and a
-   read-only two-facts DISPLAY.** The write control is `EffortPickerField`
-   (`ui/EffortPickerField.tsx`), a self-contained section component mounted in
+   read-only two-facts DISPLAY.** The instance write section is `AgentEffortFields`
+   (`ui/ModelEffortField.tsx`), selecting the applicable model's discovered
+   strengths or the matching native `EffortPickerField`, mounted in
    `AgentInstanceEditDialog` beside the Model block. It is **Save-gated, not
    direct-write**: the control is fully controlled by the parent dialog
    (`value`/`onChange`) and owns no mutation. The dialog persists the selection
@@ -231,7 +232,7 @@ with a TypeScript lookup table or an id comparison in a component.
    the effort write is atomic with any access-policy change and can never race
    or survive a Cancel or failed Save. There is no standalone
    `persistAgentEffortLevel` setter. Its gating and option compute live in the
-   pure helper `ui/effortPicker.ts` (`effortPickerState`): the picker renders
+   pure helper `ui/effortPicker.ts` (`effortPickerState`): the native fallback renders
    only when `agent.backend.type === "local"` **AND** a `thought_level`
    `effortConfigId` has been discovered from the running session (absent
    pre-first-session and for runtimes/models without effort support). Local-only
@@ -343,9 +344,15 @@ with a TypeScript lookup table or an id comparison in a component.
     The adapter receives that same `CODEX_PATH` at discovery and spawn; explicit
     user overrides remain authoritative. ACP legacy `model[effort]` entries may
     drive a separate Save-gated effort field before session-native effort is
-    available. Choices must come from the discovered catalog, never a UI model
-    capability table. They persist through the model field; an instance edit
-    clears a conflicting canonical effort in the same locked Save transaction.
+    available. Choices must come from the selected model's discovered catalog,
+    never a UI model capability table. Prefer that catalog over session options
+    cached for another model. Definitions/defaults persist encoded choices
+    through the model field; local instance edits persist the selected strength
+    through canonical `effortLevel` in the same locked Save transaction. This
+    also applies to persona-linked instances whose model field is definition-owned.
+    Session-native choices are a fallback only for the matching model scope.
+    An unset default-model form uses its effective fallback for display without
+    writing until the user selects and saves. Show the model beside its strengths.
     Do not mount this field in live-switch controls.
     External owned relay identities have their own Agents section without local
     lifecycle/model controls. Explicit owner mention enrollment signs kind:30177

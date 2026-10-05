@@ -775,9 +775,7 @@ export function AgentInstanceEditDialog({
             autoRestartOnConfigChange,
           );
         }
-        // Effort disk write happened inside the locked update. Only need to
-        // invalidate the cache here (when effortTouched && effortSubmission.persist).
-        // If effort was not included (!effortSubmission.persist), nothing to do.
+        // Refresh only when the locked Save persisted an effort change.
         if (effortTouched.current && effortSubmission.persist) {
           // Disk write already done; invalidate so the panel tier reflects it.
           await queryClient.invalidateQueries({
@@ -1098,9 +1096,12 @@ export function AgentInstanceEditDialog({
 
             <AgentEffortFields
               agent={agent}
-              model={model || inheritedModelDefault.value}
+              model={
+                (linkedPersona ? linkedPersona.model : model) ||
+                inheritedModelDefault.value
+              }
+              definitionName={linkedPersona?.displayName}
               options={discoveredModelOptions}
-              onModelChange={setModel}
               config={
                 runtimeTouched.current ? undefined : configSurfaceQuery.data
               }

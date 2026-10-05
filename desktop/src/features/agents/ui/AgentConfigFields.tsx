@@ -872,7 +872,7 @@ export function AgentConfigFields({
       {showEffortField && !effortFieldVisible && !dependentFieldsDisabled ? (
         <ModelEffortField
           id="global-agent-model-effort"
-          model={config.model ?? fallbackModel ?? ""}
+          model={config.model?.trim() || fallbackModel || ""}
           options={discoveredModelOptions}
           disabled={modelDiscoveryLoading}
           onChange={handleModelChange}

@@ -880,16 +880,6 @@ export function AgentDefinitionDialog({
             />
           ) : null}
 
-          {modelFieldVisible && aiConfigurationMode === "custom" ? (
-            <ModelEffortField
-              id="persona-model-effort"
-              model={model}
-              options={discoveredModelOptions}
-              disabled={isPending || modelDiscoveryLoading}
-              onChange={setModel}
-            />
-          ) : null}
-
           <AnimatePresence initial={false}>
             {modelFieldVisible && aiConfigurationMode === "custom" ? (
               <PersonaModelField
@@ -909,6 +899,16 @@ export function AgentDefinitionDialog({
               />
             ) : null}
           </AnimatePresence>
+
+          {modelFieldVisible && aiConfigurationMode === "custom" ? (
+            <ModelEffortField
+              id="persona-model-effort"
+              model={model}
+              options={discoveredModelOptions}
+              disabled={isPending || modelDiscoveryLoading}
+              onChange={setModel}
+            />
+          ) : null}
 
           {aiConfigurationMode === "defaults" ? (
             <AgentCreateAiDefaultsSummary
