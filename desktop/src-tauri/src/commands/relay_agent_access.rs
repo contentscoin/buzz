@@ -17,6 +17,9 @@ pub async fn allow_owned_relay_agent_mentions(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let _workspace_guard = state.workspace_apply_lock.lock().await;
+    if expected_relay_url.trim().is_empty() || expected_signer_pubkey.trim().is_empty() {
+        return Err("커뮤니티와 계정 연결이 준비되지 않았습니다".into());
+    }
     let pubkey = nostr::PublicKey::from_hex(&pubkey)
         .map_err(|_| "에이전트 식별자가 올바르지 않습니다".to_string())?
         .to_hex();
@@ -112,7 +115,13 @@ pub async fn allow_owned_relay_agent_mentions(
         })],
     )
     .await?;
-    let enrolled = nostr_convert::relay_agents_from_managed_agent_events(&confirmed, &profiles);
+    let current_profiles = relay::query_relay(
+        &state,
+        &[serde_json::json!({ "kinds": [0], "authors": [&pubkey], "limit": 1 })],
+    )
+    .await?;
+    let enrolled =
+        nostr_convert::relay_agents_from_managed_agent_events(&confirmed, &current_profiles);
     if !enrolled.iter().any(|agent| {
         agent.pubkey == pubkey && agent.respond_to == Some(managed_agents::RespondTo::OwnerOnly)
     }) {
