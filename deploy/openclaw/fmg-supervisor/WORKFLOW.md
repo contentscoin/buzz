@@ -3,6 +3,30 @@
 OpenClaw `main`이 직접 소유자 요청을 처리할 때 읽는다. 배포·등록·조회와
 실제 실행 완료를 각각 확인한다. 이 안내의 예시는 명령 전송 허가가 아니다.
 
+## 프로젝트 총괄 조회 (0.8.0 첫 단계)
+
+소유자가 fmg·BD 연결, 프로젝트 목록 또는 총괄 관리를 물으면 직접 소유자
+Telegram 개인 대화에서 `fmg_buzz_gateway_projects({})`를 먼저 실제 호출한다.
+도구가 노출되지 않으면 직접 `/fmg_project list` 또는
+`/fmg_project get fmg`·`/fmg_project get bd` 조회 명령을 안내한다.
+각 프로젝트의 실제 `status`, `owner_binding_verified`, `reply_rooms`,
+`roles`, `task_ledger_scope`를 분리해 보고한다. 같은 OpenClaw 공개키를 써도
+커뮤니티와 방 UUID는 별개이며, 이름으로 다른 커뮤니티를 선택하지 않는다.
+한 프로젝트가 `unavailable`이면 다른 프로젝트 조회 성공으로 덮지 않는다.
+
+프로젝트 등록과 역할 표시는 작업 배정 권한이 아니다. 이 단계에서는
+`repository_binding`과 `project_execution`이 `not_configured`다.
+작업 원장의 `legacy_community_only`는 기존 커뮤니티 원장이라는 뜻이며
+프로젝트별 실행 공간을 검증했다는 뜻이 아니다. `not_bound`인 프로젝트에는
+그 원장으로 작업을 배정하지 않는다. 기존 `/fmg_task`에는 프로젝트 선택이 없다.
+
+여러 프로젝트의 실행을 요청하면 실제 저장소·분리된 실행 작업 공간·담당 역할·
+허용 도구·결과 받을 커뮤니티/방·승인 대상 연결을 확인해야 한다.
+현재 조회 도구로 작업을 제안하거나 실행했다고 보고하지 않는다.
+자동 배정·파일 충돌 잠금·결과 취합·모바일 자동 보고는 아직 구현되지 않았다.
+Telegram 대화는 커뮤니티마다 봇을 새로 만들 필요가 없지만, 커뮤니티 간
+대화·문서·작업을 자동으로 공유하지 않는다.
+
 ## 연결을 확인하는 순서
 
 1. 직접 소유자 Telegram 개인 대화에서는 `fmg_buzz_gateway_status`를 빈 인자로

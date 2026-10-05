@@ -1,5 +1,11 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
 import { createTaskWorker, registerTaskCommand } from "./tasks.mjs";
+import {
+  gatewayProjectsDefinition,
+  projectsSchema,
+  registerProjectCommand,
+  registerProjectTools,
+} from "./projects.mjs";
 import { roleModel } from "./model-binding.mjs";
 import {
   gatewayStatusDefinition,
@@ -27,6 +33,7 @@ const root = "/data/.openclaw/fmg-supervisor";
 const schema = {
   type: "object",
   properties: {
+    projects: projectsSchema,
     ownerPubkey: { type: "string", pattern: "^[0-9a-f]{64}$" },
     telegramOwnerId: { type: "string", pattern: "^[1-9][0-9]{0,19}$" },
     operatorUrl: {
@@ -387,6 +394,8 @@ const entry = definePluginEntry({
   register(api) {
     let stop, stopTasks;
     registerTaskCommand(api);
+    registerProjectCommand(api);
+    registerProjectTools(api);
     registerGatewayStatusTool(api);
     registerGatewayTaskTools(api);
     api.registerService({
@@ -423,7 +432,11 @@ Object.defineProperty(entry, toolPluginMetadataSymbol, {
       "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
     activation: { onStartup: true },
     configSchema: schema,
-    tools: [gatewayStatusDefinition, ...gatewayTaskDefinitions],
+    tools: [
+      gatewayStatusDefinition,
+      ...gatewayTaskDefinitions,
+      gatewayProjectsDefinition,
+    ],
   },
   enumerable: false,
 });

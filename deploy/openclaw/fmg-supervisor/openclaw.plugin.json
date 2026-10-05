@@ -1,8 +1,8 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.7.1",
-  "description": "Owner verified Buzz observations and directly approved durable task execution for Your dot.",
+  "version": "0.8.0",
+  "description": "Owner verified multi-community project registry and directly approved legacy task execution.",
   "activation": {
     "onStartup": true
   },
@@ -24,18 +24,51 @@
       "tokenFile": {
         "type": "string",
         "const": "/data/.openclaw/secrets/fmg-supervisor-operator.token"
+      },
+      "projects": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "buzzAccountId": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"
+            },
+            "roleIds": {
+              "type": "array",
+              "maxItems": 12,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+              }
+            }
+          },
+          "required": ["id", "name", "buzzAccountId", "roleIds"],
+          "additionalProperties": false
+        }
       }
     },
-    "required": [
-      "ownerPubkey"
-    ],
+    "required": ["ownerPubkey"],
     "additionalProperties": false
   },
   "contracts": {
     "tools": [
       "fmg_buzz_gateway_status",
       "fmg_buzz_gateway_get_task",
-      "fmg_buzz_gateway_list_tasks"
+      "fmg_buzz_gateway_list_tasks",
+      "fmg_buzz_gateway_projects"
     ]
   },
   "toolMetadata": {
@@ -46,6 +79,9 @@
       "optional": true
     },
     "fmg_buzz_gateway_list_tasks": {
+      "optional": true
+    },
+    "fmg_buzz_gateway_projects": {
       "optional": true
     }
   }

@@ -1,5 +1,42 @@
 # FMG supervisor producer
 
+## Version 0.8.0 project registry (first management stage)
+
+The optional `projects` registry explicitly binds up to four project IDs to
+distinct Buzz account IDs and non-overlapping configured Gateway role IDs.
+The direct Telegram owner can use `/fmg_project list` or `/fmg_project get ID`.
+Main can read `fmg_buzz_gateway_projects` after that exact optional tool is
+granted. Its version 2 factory reuses the admitted owner status observation,
+checks signed ownership twice per account, probes each account's identity and
+connection, and rejects configuration/generation changes before returning.
+An account failure is explicit `unavailable`, never an empty healthy roster.
+Names are display data, not routing authority. Credentials and private workspace
+paths are not exported. Reads have bounded deadlines, outputs and registry sizes.
+
+Registering a project does not authorize execution. The existing task ledger
+still has its single community boundary and no project/repository binding.
+The catalog exposes `legacy_community_only` versus `not_bound` so a connected
+fmg account cannot be mistaken for a working fmg task queue. Both registered
+projects report `project_execution=not_configured` and
+`repository_binding=not_configured` until a separate project-bound execution
+implementation is delivered. Assigned role metadata is configuration, not proof
+of task dispatch, running jobs, repository access or result delivery.
+
+Example of the explicit registry (no repository is inferred):
+
+```json
+{
+  "projects": [
+    {"id":"bd","name":"BD","buzzAccountId":"default","roleIds":[]},
+    {"id":"fmg","name":"fmg","buzzAccountId":"fmg","roleIds":["fmg-planner","fmg-frontend","fmg-backend","fmg-qa","fmg-release","fmg-live-gate"]}
+  ]
+}
+```
+
+The unchanged `/fmg_task` command cannot select a project. Do not use it as a
+cross-project dispatcher. No task approvals, reruns, role tool grants, model
+changes, messages, or automatic mirrors are introduced by this registry.
+
 ## Version 0.7.1 normal stop and persisted recovery
 
 An OpenAI `stop` is a normal final answer, not a cancellation. Worker success
