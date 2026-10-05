@@ -1,5 +1,18 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.16
+
+Base: FMG desktop `0.5.26-fmg.15`.
+
+- Windows runtime identity recognizes npm `.cmd` and `.bat` adapter shims.
+  Resolved Codex adapter paths now retain the newest native CLI selection at
+  both model discovery and agent spawn, preserving explicit `CODEX_PATH`.
+- Installed `.15` discovery with the current native CLI returns all six
+  GPT-6.1 SOL effort entries. The unselected CLI path can return base models
+  without the legacy effort entries; model presence alone is insufficient.
+- User-visible `.16` menus and saved next-session effort require separate
+  observation after installation.
+
 ## 0.5.26-fmg.15
 
 Base: FMG desktop `0.5.26-fmg.14`.

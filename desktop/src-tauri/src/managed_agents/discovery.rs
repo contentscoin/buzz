@@ -129,6 +129,14 @@ pub(crate) fn normalize_command_identity(command: &str) -> String {
         })
         .collect::<String>();
     let lower = lower.strip_suffix(".exe").unwrap_or(&lower).to_string();
+    // npm installs ACP adapters as Windows batch shims. Match their runtime
+    // identity too, so discovery and spawn apply the same underlying CLI.
+    #[cfg(windows)]
+    let lower = lower
+        .strip_suffix(".cmd")
+        .or_else(|| lower.strip_suffix(".bat"))
+        .unwrap_or(&lower)
+        .to_string();
 
     if let Some(suffix) = std::env::consts::EXE_SUFFIX.strip_prefix('.') {
         return lower
