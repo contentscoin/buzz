@@ -31,6 +31,7 @@ import { Dialog } from "@/shared/ui/dialog";
 import { Input } from "@/shared/ui/input";
 import { setManagedAgentAutoRestart } from "@/shared/api/tauriManagedAgents";
 import { AgentEffortFields } from "./ModelEffortField";
+import { runtimeCatalogEntryForCommand } from "../lib/resolvePersonaRuntime";
 import { EditAgentAdvancedFields } from "./EditAgentAdvancedFields";
 import {
   ADVANCED_FIELDS_MOTION_TRANSITION,
@@ -219,9 +220,10 @@ export function AgentInstanceEditDialog({
       setIsAvatarUploadPending(false);
       setIsAddHarnessOpen(false);
       runtimeTouched.current = false;
-      const matched =
-        runtimes.find((r) => r.command?.trim() === agent.agentCommand.trim()) ??
-        runtimes.find((r) => r.id === agent.agentCommand.trim());
+      const matched = runtimeCatalogEntryForCommand(
+        runtimes,
+        agent.agentCommand,
+      );
       setSelectedRuntimeId(matched ? matched.id : "custom");
       updateMutation.reset();
     }
@@ -232,9 +234,7 @@ export function AgentInstanceEditDialog({
     if (!open || runtimeTouched.current || runtimes.length === 0) {
       return;
     }
-    const matched =
-      runtimes.find((r) => r.command?.trim() === agent.agentCommand.trim()) ??
-      runtimes.find((r) => r.id === agent.agentCommand.trim());
+    const matched = runtimeCatalogEntryForCommand(runtimes, agent.agentCommand);
     if (matched) {
       setSelectedRuntimeId(matched.id);
     }
@@ -279,9 +279,7 @@ export function AgentInstanceEditDialog({
   // ids mutate during selection changes and cannot identify the original state.
   const originalRuntimeSupportsProvider = React.useMemo(() => {
     const originalCommand = originalAgentCommand.trim();
-    const matched =
-      runtimes.find((r) => r.command?.trim() === originalCommand) ??
-      runtimes.find((r) => r.id === originalCommand);
+    const matched = runtimeCatalogEntryForCommand(runtimes, originalCommand);
     return runtimeSupportsLlmProviderSelection(matched?.id ?? "");
   }, [runtimes, originalAgentCommand]);
 
@@ -300,9 +298,7 @@ export function AgentInstanceEditDialog({
       );
     }
     return (
-      runtimes.find((r) => r.command?.trim() === agent.agentCommand.trim())
-        ?.id ??
-      runtimes.find((r) => r.id === agent.agentCommand.trim())?.id ??
+      runtimeCatalogEntryForCommand(runtimes, agent.agentCommand)?.id ??
       // Fall back to the app default runtime so discovery can run for agents
       // whose persona has no runtime set (e.g. freshly-added catalog builtins).
       getDefaultPersonaRuntime(runtimes)?.id ??

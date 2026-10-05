@@ -344,8 +344,11 @@ with a TypeScript lookup table or an id comparison in a component.
     The adapter receives that same `CODEX_PATH` at discovery and spawn; explicit
     user overrides remain authoritative. On Windows, runtime identity recognizes
     npm `.cmd`/`.bat` shims as well as native executables; resolving an adapter
-    to its full shim path must not skip that CLI selection. ACP legacy `model[effort]` entries may
-    drive a separate Save-gated effort field before session-native effort is
+    to its full shim path must not skip that CLI selection.
+    Instance editors match saved full adapter paths to the catalog's `binaryPath`
+    as well as `command` and `id`; an installed adapter must not become a custom
+    runtime with discovery disabled solely because its saved command is absolute.
+    ACP legacy `model[effort]` entries may drive a separate Save-gated effort field before session-native effort is
     available. Choices must come from the selected model's discovered catalog,
     never a UI model capability table. Prefer that catalog over session options
     cached for another model. Definitions/defaults persist encoded choices

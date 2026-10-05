@@ -1,5 +1,22 @@
 import type { AcpRuntime, AcpRuntimeCatalogEntry } from "@/shared/api/types";
 
+/** Match saved commands against identities and unique paths from the Rust catalog. */
+export function runtimeCatalogEntryForCommand<T extends AcpRuntimeCatalogEntry>(
+  runtimes: readonly T[],
+  command: string,
+): T | undefined {
+  const current = command.trim();
+  if (!current) return undefined;
+  const exact =
+    runtimes.find((runtime) => runtime.command?.trim() === current) ??
+    runtimes.find((runtime) => runtime.id === current);
+  if (exact) return exact;
+  const byPath = runtimes.filter(
+    (runtime) => runtime.binaryPath?.trim() === current,
+  );
+  return byPath.length === 1 ? byPath[0] : undefined;
+}
+
 /**
  * Select the best default runtime from a catalog, using the same preference
  * order as the UI picker: buzz-agent first (bundled sidecar), then goose,
