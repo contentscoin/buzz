@@ -1,5 +1,24 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.14
+
+Base: FMG desktop `0.5.26-fmg.13`.
+
+- Agents shows verified owned relay identities, including an independently
+  operated OpenClaw, without fabricating local runtime controls.
+- Explicit owner-only mention enrollment publishes an owner-signed response
+  policy in the selected community. Exact identity, current ownership and
+  observed existing policy are checked before publication and again afterwards.
+  Channel membership and final message authorization remain required.
+- Windows Codex discovery and launch use the same newest version-probed native
+  CLI in the standard install directories, preserving explicit `CODEX_PATH`.
+- Edit, persona and defaults menus expose effort encoded in the adapter's
+  discovered model catalog before the first live session. Choices save through
+  the model field and never switch live conversation effort. Native session
+  effort remains Save-gated and uses adapter-advertised choices.
+- Build, installation, owner enrollment and actual mentioned replies are
+  separate evidence. OpenClaw roles remain distinct from Buzz identities.
+
 ## 0.5.26-fmg.10
 
 Base: FMG desktop `0.5.26-fmg.9`.

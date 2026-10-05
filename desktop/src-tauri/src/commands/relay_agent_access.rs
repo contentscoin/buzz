@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 use crate::{app_state::AppState, managed_agents, nostr_convert, relay};
 
 /// Publish owner-only mention consent after refreshing the exact identity.
-/// Existing policies are never overwritten by this enrollment command.
+/// Existing observed policies are not overwritten by this enrollment command.
 #[tauri::command]
 pub async fn allow_owned_relay_agent_mentions(
     pubkey: String,
@@ -61,12 +61,11 @@ pub async fn allow_owned_relay_agent_mentions(
         })],
     )
     .await?;
-    if let Some(policy) = policies.first() {
-        if policy.verify().is_err() {
-            return Err("응답 권한 서명을 확인할 수 없습니다".into());
-        }
-        let content = managed_agents::agent_events::managed_agent_content_from_event(policy)?;
-        return if content.respond_to == managed_agents::RespondTo::OwnerOnly {
+    if !policies.is_empty() {
+        let existing = nostr_convert::relay_agents_from_managed_agent_events(&policies, &profiles);
+        return if existing.iter().any(|agent| {
+            agent.pubkey == pubkey && agent.respond_to == Some(managed_agents::RespondTo::OwnerOnly)
+        }) {
             Ok(())
         } else {
             Err("기존 응답 권한이 있습니다. 이 등록 메뉴로 덮어쓸 수 없습니다".into())
@@ -99,6 +98,15 @@ pub async fn allow_owned_relay_agent_mentions(
     };
     let body = serde_json::to_string(&content).map_err(|e| e.to_string())?;
     let tag = Tag::parse(["d", pubkey.as_str()]).map_err(|e| e.to_string())?;
+    let latest = relay::query_relay(
+        &state,
+        &[serde_json::json!({ "kinds": [30177], "authors": [&owner], "#d": [&pubkey], "limit": 1 })],
+    ).await?;
+    if !latest.is_empty() {
+        return Err("응답 권한이 다른 연결에서 변경됐습니다. 목록을 새로 고침하세요".into());
+    }
+    // This relay has no cross-device CAS. Final revalidation still checks the
+    // latest owner policy; enrollment is not atomic with another device's edit.
     relay::submit_event_with_keys(
         EventBuilder::new(Kind::Custom(30177), body).tags([tag]),
         &state,
