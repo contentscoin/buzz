@@ -1,5 +1,30 @@
 # FMG supervisor producer
 
+## Hostinger central manager and code preparation
+
+The human owner selected the Hostinger OpenClaw `main` as the central manager.
+fmg and BD are conversation connections, not an assertion of separate code
+projects. The current managed source is `contentscoin/buzz` on
+`feat/fmg-desktop-graph-aside`.
+
+`scripts/prepare-buzz-workspaces.mjs COMMIT REQUEST_UUID` runs inside the Linux
+Gateway container. It clones a shallow bare source and creates separate branches
+and worktrees for main and the five existing coding roles. live-gate retains its
+existing observation-only permissions and receives no coding grant. The script
+uses the official role workspace catalog, requires a matching immutable commit,
+rejects existing targets and links, bounds child process trees and output, and
+preserves existing guidance with private backups and a preparation journal.
+Guide pointers follow guide installation. Failed preparation stays `needs_review`;
+there is no automatic reset, deletion or rerun of a model. A crash leaves the
+exclusive preparation lock for operator review.
+
+The private manifest at `/data/.openclaw/projects/buzz/manifest.json` records
+prepared worktrees, not task execution. Existing models, effort, tool permissions
+and the approval protocol are unchanged. Each new execution still needs proposal
+binding to repository/baseline/role branch before automatic project assignment
+can be represented as implemented. This preparation neither adds project-aware
+queue dispatch nor merges, pushes, publishes messages or runs tests/models.
+
 ## Version 0.8.0 project registry (first management stage)
 
 The optional `projects` registry explicitly binds up to four project IDs to
