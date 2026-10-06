@@ -1,7 +1,7 @@
 {
   "name": "buzz",
   "private": true,
-  "version": "0.5.26-fmg.19",
+  "version": "0.5.26-fmg.20",
   "type": "module",
   "scripts": {
     "dev": "vite",

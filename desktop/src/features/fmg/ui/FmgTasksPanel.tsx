@@ -25,6 +25,9 @@ import {
 } from "../taskRpc";
 import { FmgDocumentLauncher } from "./FmgDocumentEditor";
 import { FmgDocumentLibrary } from "./FmgDocumentLibrary";
+import { FmgTaskActions } from "./FmgTaskActions";
+import { FmgTaskListControls } from "./FmgTaskListControls";
+import { filterTasks, type TaskStatusFilter } from "../taskPresentation";
 import {
   resolveTaskAgentSelection,
   taskAgentGroups,
@@ -71,8 +74,9 @@ export function FmgTasksLauncher() {
           <DialogHeader>
             <DialogTitle>GPT dot · Buzz 작업 목록과 결과</DialogTitle>
             <DialogDescription>
-              최근 작업 25건을 조회합니다. GPT dot에서 작업을 제안하고
-              텔레그램에서 직접 승인한 뒤, 여기서 상태와 결과를 새로 고침하세요.
+              최근 작업 25건을 조회합니다. GPT dot이나 Hostinger OpenClaw에서
+              작업을 제안하고 텔레그램에서 직접 승인한 뒤, 여기서 상태와 결과를
+              새로 고침하세요.
             </DialogDescription>
           </DialogHeader>
           <Button
@@ -180,6 +184,10 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [checkedAt, setCheckedAt] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  const [statusFilter, setStatusFilter] =
+    React.useState<TaskStatusFilter>("all");
+  const visibleTasks = filterTasks(tasks ?? [], search, statusFilter);
   const lifecycle = React.useRef({
     active: false,
     revision: 0,
@@ -219,7 +227,12 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
       );
       if (!current()) return;
       if (taskId) {
-        const value = taskDetailSchema.parse(response.result);
+        const parsed = taskDetailSchema.safeParse(response.result);
+        if (!parsed.success)
+          throw new Error(
+            "작업 상세 또는 저장소 연결 정보가 올바르지 않습니다. 서버 연결과 버전을 확인하세요.",
+          );
+        const value = parsed.data;
         if (value.task_id !== taskId)
           throw new Error("조회한 작업이 요청과 일치하지 않습니다.");
         setDetail(value);
@@ -235,7 +248,14 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
               : row,
           ),
         );
-      } else setTasks(taskListSchema.parse(response.result).tasks);
+      } else {
+        const parsed = taskListSchema.safeParse(response.result);
+        if (!parsed.success)
+          throw new Error(
+            "작업 목록 형식이 올바르지 않습니다. 서버 연결과 버전을 확인하세요.",
+          );
+        setTasks(parsed.data.tasks);
+      }
       setCheckedAt(response.checkedAt);
     } catch (failure) {
       if (current())
@@ -286,9 +306,19 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
           갱신되지 않습니다.
         </p>
       ) : null}
+      {tasks ? (
+        <FmgTaskListControls
+          tasks={tasks}
+          search={search}
+          status={statusFilter}
+          visibleCount={visibleTasks.length}
+          onSearch={setSearch}
+          onStatus={setStatusFilter}
+        />
+      ) : null}
       <div className="grid gap-4 md:grid-cols-[18rem_1fr]">
         <nav aria-label="서버 작업 목록" className="space-y-2">
-          {tasks?.map((task) => (
+          {visibleTasks.map((task) => (
             <button
               type="button"
               key={task.task_id}
@@ -306,12 +336,22 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
               <span className="block break-all text-xs text-muted-foreground">
                 {task.requested_model}
               </span>
+              <span className="block text-xs text-muted-foreground">
+                effort: {task.requested_effort ?? "기록 없음"} ·{" "}
+                {new Date(task.updated_at * 1000).toLocaleString("ko-KR")}
+              </span>
             </button>
           ))}
+          {tasks?.length && !visibleTasks.length ? (
+            <p className="text-sm text-muted-foreground">
+              조건에 맞는 작업이 없습니다. 필터를 초기화하거나 검색어를
+              바꾸세요.
+            </p>
+          ) : null}
           {tasks?.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               등록된 작업이 없습니다. GPT dot의 FMG Buzz Tasks에서 먼저 작업을
-              제안하세요.
+              제안하거나 Hostinger OpenClaw에 작업 제안을 요청하세요.
             </p>
           ) : tasks === undefined && !busy && !error ? (
             <p className="text-sm text-muted-foreground">
@@ -325,12 +365,29 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
         >
           {detail ? (
             <>
-              <TaskResult detail={detail} />
-              <FmgDocumentLauncher
-                key={detail.task_id}
-                scope={scope}
-                taskId={detail.task_id}
+              {tasks &&
+              !visibleTasks.some((task) => task.task_id === detail.task_id) ? (
+                <p className="text-xs text-muted-foreground">
+                  현재 선택한 작업은 필터 결과에 없습니다.
+                </p>
+              ) : null}
+              <TaskResult
+                detail={detail}
+                relay={scope.relay}
+                checkedAt={checkedAt}
               />
+              {detail.proposal.proposal_account === "gateway_owner_main" ? (
+                <p className="text-sm text-muted-foreground">
+                  Hostinger OpenClaw에서 제안한 작업의 결과는 여기서 조회할 수
+                  있습니다. 이 제안 계정의 불변 문서 저장은 후속 기능입니다.
+                </p>
+              ) : (
+                <FmgDocumentLauncher
+                  key={detail.task_id}
+                  scope={scope}
+                  taskId={detail.task_id}
+                />
+              )}
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -343,13 +400,16 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
   );
 }
 
-function TaskResult({ detail }: { detail: TaskDetail }) {
-  const command =
-    detail.status === "needs_reconcile"
-      ? `/fmg_task reconcile ${detail.task_id} ${detail.proposal_hash}`
-      : detail.status === "awaiting_approval"
-        ? `/fmg_task approve ${detail.task_id} ${detail.proposal_hash}`
-        : "";
+function TaskResult({
+  detail,
+  relay,
+  checkedAt,
+}: {
+  detail: TaskDetail;
+  relay: string;
+  checkedAt: string;
+}) {
+  const project = detail.proposal.project;
   return (
     <>
       <h3 className="text-sm font-semibold">
@@ -375,28 +435,55 @@ function TaskResult({ detail }: { detail: TaskDetail }) {
           </>
         ) : null}
       </dl>
+      <section
+        aria-label="작업에 고정된 저장소 연결"
+        className="space-y-2 rounded-md border p-3"
+      >
+        <h4 className="text-sm font-medium">저장소 실행 연결</h4>
+        {project ? (
+          <>
+            <dl className="space-y-1 break-all text-xs">
+              <dt>코드 프로젝트</dt>
+              <dd>{project.project_id}</dd>
+              <dt>저장소</dt>
+              <dd>{project.repository_url}</dd>
+              <dt>기준 commit</dt>
+              <dd>{project.source_commit}</dd>
+              <dt>담당 브랜치</dt>
+              <dd>{project.branch}</dd>
+              <dt>실행 위치</dt>
+              <dd>Hostinger</dd>
+              <dt>제안 경로</dt>
+              <dd>소유자 Telegram · OpenClaw main</dd>
+            </dl>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">
+                작업 공간 결속 식별자
+              </summary>
+              <p className="break-all pt-2">{project.workspace_binding}</p>
+            </details>
+            <p className="text-xs text-muted-foreground">
+              제안에 고정된 연결 정보입니다. 현재 브랜치 상태나 실제 작업 완료를
+              뜻하지 않습니다.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            이 제안에는 저장소 실행 연결 기록이 없습니다. 현재 커뮤니티 이름으로
+            저장소를 추정하지 않습니다.
+          </p>
+        )}
+      </section>
       <h4 className="text-sm font-medium">작업 지시문</h4>
       <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-sm">
         {detail.proposal.instructions}
       </pre>
-      {command ? (
-        <label className="block space-y-2 text-sm">
-          {detail.status === "needs_reconcile"
-            ? "결과가 불확실합니다. 다시 실행하기 전에 소유자 텔레그램에서 복구 명령을 보내세요."
-            : "지시문·모델·effort를 검토한 뒤 소유자 텔레그램에서 이 명령을 보내 승인하세요."}
-          <textarea
-            aria-label="소유자 텔레그램 명령"
-            readOnly
-            value={command}
-            rows={3}
-            className="w-full rounded-md border bg-muted p-2 font-mono text-xs"
-            onFocus={(event) => event.target.select()}
-          />
-          <span className="block break-all text-xs text-muted-foreground">
-            전체 제안 해시: {detail.proposal_hash}
-          </span>
-        </label>
-      ) : null}
+      <FmgTaskActions
+        key={`${detail.task_id}:${detail.revision}`}
+        detail={detail}
+        relay={relay}
+        checkedAt={checkedAt}
+      />
       <h4 className="text-sm font-medium">실행 결과</h4>
       {detail.result?.reply ? (
         <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm">

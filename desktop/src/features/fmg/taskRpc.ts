@@ -37,17 +37,48 @@ export const taskListSchema = z.object({
   tasks: z.array(summary).max(25),
   limit: z.literal(25),
 });
+const projectBinding = z
+  .object({
+    schema: z.literal(1),
+    project_id: z.literal("buzz"),
+    repository_url: z.literal("https://github.com/contentscoin/buzz.git"),
+    role_id: z.enum([
+      "fmg-planner",
+      "fmg-frontend",
+      "fmg-backend",
+      "fmg-qa",
+      "fmg-release",
+    ]),
+    branch: z.string().max(200),
+    source_commit: z.string().regex(/^[0-9a-f]{40}$/),
+    execution_host: z.literal("hostinger"),
+    workspace_binding: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .refine((value) => value.branch === `fmg-buzz/${value.role_id}`, {
+    message: "작업 브랜치가 역할과 일치하지 않습니다.",
+  });
 export const taskDetailSchema = summary
   .omit({ role_id: true, requested_model: true })
   .extend({
     run_id: z.uuid().nullable(),
     dispatch_stage: z.string().max(100).nullable(),
-    proposal: z.object({
-      role_id: z.string().max(100),
-      requested_model: z.string().max(500),
-      requested_effort: z.string().max(20).nullable().optional(),
-      instructions: z.string().max(5000),
-    }),
+    proposal: z
+      .object({
+        role_id: z.string().max(100),
+        requested_model: z.string().max(500),
+        requested_effort: z.string().max(20).nullable().optional(),
+        instructions: z.string().max(5000),
+        project: projectBinding.optional(),
+        proposal_account: z.literal("gateway_owner_main").optional(),
+      })
+      .refine(
+        (value) => !value.project || value.project.role_id === value.role_id,
+        { message: "저장소 작업의 역할이 제안과 일치하지 않습니다." },
+      )
+      .refine(
+        (value) => Boolean(value.project) === Boolean(value.proposal_account),
+        { message: "저장소 작업의 제안 계정 결속이 누락됐습니다." },
+      ),
     result: z
       .object({
         status,

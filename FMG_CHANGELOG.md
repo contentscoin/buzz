@@ -1,5 +1,23 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.20
+
+Base: FMG desktop `0.5.26-fmg.19`.
+
+- Task observations add search, status counts and filters over the fetched recent
+  25 tasks, plus requested effort and update time in each list row.
+- Preserve and validate the Computer broker's existing schema 4 repository,
+  commit, role branch and workspace binding instead of stripping them on parse.
+  Show immutable proposal context separately from current execution evidence.
+- Add explicit copy actions for owner Telegram approval, cancellation and
+  reconciliation commands, with the exact task UUID and full proposal hash.
+- Preview and manually copy a bounded mobile task summary, retaining uncertain,
+  cancellation and truncated-result states. No automatic message publication.
+- Explain the reserved Gateway proposal account's unsupported document save
+  path without borrowing OAuth document access. Existing owner/community/Gateway
+  authorization, local lifecycle, models and effort settings remain unchanged.
+- Build, installation and actual UI observations are separate evidence.
+
 ## 0.5.26-fmg.19
 
 Base: FMG desktop `0.5.26-fmg.18`.
