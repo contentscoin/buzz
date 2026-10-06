@@ -1,5 +1,9 @@
 # 2026-10-07 — FMG와 중앙 코드 프로젝트 실행 연결
 
+- 소유자 Telegram 개인 채팅의 명령 메뉴를 유지보수하는 전용 script를 추가했다.
+  FMG 4개 명령을 11개 한국어 메뉴의 앞에 배치하고 메뉴 버튼을 명령 목록으로 설정한다.
+  실제 등록 명령을 확인하며 UUID journal·충돌 검사·원격 재조회로 반영 여부를 구분한다.
+  기본 메뉴, 다른 채팅, 실행 승인과 Gateway 설정은 변경하지 않는다.
 - Supervisor 0.12.1. task server 0.10.0, worker protocol 7, Desktop .21 유지.
 - 커뮤니티별 snapshot producer는 전체 registry로 코드 실행 매핑을 확인하고,
   relay 소유권 조회에는 해당 커뮤니티 계정만 사용한다.

@@ -1,5 +1,24 @@
 # Supervisor 0.12.1 — explicit community code-project execution binding
 
+## Owner Telegram command menu maintenance
+
+`scripts/configure-telegram-owner-menu.mjs REQUEST_UUID` is an operator-only
+maintenance script run as Gateway UID 1000. It reads the current configured bot
+and direct Telegram owner, verifies the commands are already registered, and
+puts the four FMG commands first in an 11-entry Korean menu scoped only to the
+owner's private chat. Neutral and Korean lists and the command menu button are
+read back from Telegram. Global/native menus and Gateway configuration stay
+unchanged. `/commands` still lists all available commands.
+
+A private durable journal records intent before remote writes. Reuse its UUID
+to reconcile a lost response; a conflicting later menu edit requires operator
+review. Menu entries do not execute tasks or supply approval arguments. The
+script is not registered as an agent tool. It currently requires a direct bot
+token or TELEGRAM_BOT_TOKEN; other SecretRefs must be resolved by the approved
+operator runtime. Telegram stores the owner chat scope independently of
+OpenClaw's default/group menu refresh; new FMG command additions require explicit
+maintenance of this owner menu. No message is sent to the owner by this script.
+
 Scoped snapshot producers use the full runtime registry for code routing while
 keeping relay ownership probes scoped to their individual channel account.
 
