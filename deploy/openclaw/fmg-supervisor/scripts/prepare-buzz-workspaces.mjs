@@ -184,6 +184,7 @@ async function guidance(workspace, worktree, branch, roleId, receipt) {
   await atomic(agentPath, updated);
 }
 
+requireValue(process.getuid?.() === 1000, "gateway_runtime_user_required");
 requireValue(
   /^[0-9a-f]{40}$/.test(baseline ?? "") &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(

@@ -8,7 +8,9 @@ projects. The current managed source is `contentscoin/buzz` on
 `feat/fmg-desktop-graph-aside`.
 
 `scripts/prepare-buzz-workspaces.mjs COMMIT REQUEST_UUID` runs inside the Linux
-Gateway container. It clones a shallow bare source and creates separate branches
+Gateway container as the actual Gateway runtime user, UID 1000 (`docker exec
+--user 1000:1000`, never the default root exec user). The script rejects other
+users before creating files. It clones a shallow bare source and creates separate branches
 and worktrees for main and the five existing coding roles. live-gate retains its
 existing observation-only permissions and receives no coding grant. The script
 uses the official role workspace catalog, requires a matching immutable commit,
