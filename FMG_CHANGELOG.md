@@ -1,5 +1,18 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.19
+
+Base: FMG desktop `0.5.26-fmg.18`.
+
+- Local agent cards show the current community's local execution state beside
+  their separate relay presence dot. Online presence alone cannot prove that
+  a stopped local process is still running.
+- Bulk Stop returns exact successfully stopped keys to clear old working badges
+  for the captured owner, refreshes presence along with local state, and preserves
+  native error messages. Failed terminations keep their working state.
+- Existing session pause, launch preferences, and remote lifecycle boundaries
+  remain in force. No model task or test suite was requested.
+
 ## 0.5.26-fmg.18
 
 Base: FMG desktop `0.5.26-fmg.17`.

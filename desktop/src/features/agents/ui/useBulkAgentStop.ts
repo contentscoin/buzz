@@ -1,7 +1,10 @@
 import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { managedAgentsQueryKey } from "../hooks";
-import { managedAgentRuntimesQueryKey } from "../managedAgentRuntimeHooks";
+import {
+  clearActiveTurnsForAgentOnStop,
+  managedAgentRuntimesQueryKey,
+} from "../managedAgentRuntimeHooks";
 import type { ManagedAgentCommandScope } from "../lib/managedAgentControlActions";
 import { stopAllLocalManagedAgents } from "@/shared/api/tauriManagedAgents";
 
@@ -34,8 +37,15 @@ export function useBulkAgentStop(options: {
     try {
       const result = await stopAllLocalManagedAgents(scope);
       if (!isCurrent()) return;
+      for (const pubkey of result.stoppedPubkeys) {
+        clearActiveTurnsForAgentOnStop(
+          pubkey,
+          null,
+          scope.expectedSignerPubkey,
+        );
+      }
       options.notice(
-        `로컬 에이전트 ${result.stoppedAgents}개 중지 처리. 남은 실행 연결 ${result.remainingRuntimes}개.`,
+        `이 기기의 로컬 에이전트 ${result.stoppedAgents}개 중지 처리. 남은 실행 연결 ${result.remainingRuntimes}개. 커뮤니티 접속 표시는 별도로 갱신됩니다.`,
       );
       if (result.failures.length || result.remainingRuntimes > 0) {
         options.error(
@@ -48,7 +58,11 @@ export function useBulkAgentStop(options: {
     } catch (cause) {
       if (isCurrent())
         options.error(
-          cause instanceof Error ? cause.message : "전체 중지에 실패했습니다.",
+          cause instanceof Error
+            ? cause.message
+            : typeof cause === "string"
+              ? cause
+              : "전체 중지에 실패했습니다.",
         );
     } finally {
       running.current = false;
@@ -57,6 +71,8 @@ export function useBulkAgentStop(options: {
       void queryClient.invalidateQueries({
         queryKey: managedAgentRuntimesQueryKey,
       });
+      if (isCurrent())
+        void queryClient.invalidateQueries({ queryKey: ["presence"] });
     }
   }
   return { stopAll, pending };

@@ -8,6 +8,7 @@ use crate::{app_state::AppState, managed_agents::*};
 #[serde(rename_all = "camelCase")]
 pub struct StopAllLocalManagedAgentsResult {
     stopped_agents: usize,
+    stopped_pubkeys: Vec<String>,
     remaining_runtimes: usize,
     failures: Vec<LocalStopFailure>,
 }
@@ -66,6 +67,8 @@ pub async fn stop_all_local_managed_agents(
             .map_err(|e| e.to_string())?
             .extend(local_keys.iter().cloned());
         let mut stopped_agents = 0;
+        let mut stopped_pubkeys = Vec::new();
+        let mut failed_pubkeys = std::collections::HashSet::new();
         let mut failures = Vec::new();
         let affected_keys: Vec<_> = runtimes
             .keys()
@@ -80,11 +83,15 @@ pub async fn stop_all_local_managed_agents(
                 Ok(()) => {
                     state.clear_agent_session_caches(&record.pubkey);
                     stopped_agents += 1;
+                    stopped_pubkeys.push(record.pubkey.clone());
                 }
-                Err(error) => failures.push(LocalStopFailure {
-                    name: record.name.clone(),
-                    error,
-                }),
+                Err(error) => {
+                    failed_pubkeys.insert(record.pubkey.clone());
+                    failures.push(LocalStopFailure {
+                        name: record.name.clone(),
+                        error,
+                    });
+                }
             }
         }
         // Recover current-instance children recorded on disk but absent from the map.
@@ -94,6 +101,7 @@ pub async fn stop_all_local_managed_agents(
                 && valid_agent_runtime_receipt(&path, &receipt, &current_instance_id(&stop_app))
             {
                 if let Err(error) = terminate_untracked_pair_runtime(&stop_app, &receipt.key) {
+                    failed_pubkeys.insert(receipt.key.pubkey.clone());
                     let name = records
                         .iter()
                         .find(|record| record.pubkey == receipt.key.pubkey)
@@ -118,6 +126,7 @@ pub async fn stop_all_local_managed_agents(
             })
             .count();
         let remaining_runtimes = tracked_remaining + orphan_remaining;
+        stopped_pubkeys.retain(|pubkey| !failed_pubkeys.contains(pubkey));
         save_managed_agents(&stop_app, &records)?;
         let _ = stop_app.emit("agents-data-changed", ());
         for key in affected_keys {
@@ -127,6 +136,7 @@ pub async fn stop_all_local_managed_agents(
         }
         Ok(StopAllLocalManagedAgentsResult {
             stopped_agents,
+            stopped_pubkeys,
             remaining_runtimes,
             failures,
         })

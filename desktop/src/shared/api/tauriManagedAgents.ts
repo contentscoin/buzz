@@ -72,6 +72,7 @@ export function stopAllLocalManagedAgents(scope: {
   expectedSignerPubkey: string;
 }): Promise<{
   stoppedAgents: number;
+  stoppedPubkeys: string[];
   remainingRuntimes: number;
   failures: { name: string; error: string }[];
 }> {

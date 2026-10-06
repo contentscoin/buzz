@@ -39,6 +39,7 @@ import {
 import { IdentityCardSkeleton } from "@/shared/ui/identity-card-skeleton";
 import { AgentIdentityCard } from "./AgentIdentityCard";
 import { AgentRuntimeAvatarControl } from "./AgentRuntimeAvatarControl";
+import { LocalAgentStatusBadge } from "./LocalAgentStatusBadge";
 import { CreateIdentityCard } from "./CreateIdentityCard";
 import { PersonaActionsMenu } from "./PersonaActionsMenu";
 import { buildUnifiedGroups } from "./unifiedAgentGroups";
@@ -485,14 +486,17 @@ function AgentPersonaCard({
         onOpenPersonaProfile(persona);
       }}
       statusBadge={
-        autoRestartFailure ? (
-          <AutoRestartFailureBadge reason={autoRestartFailure.message} />
-        ) : agent?.personaOrphaned ? (
-          <Badge className="gap-1" variant="warning">
-            <AlertTriangle className="h-3 w-3" />
-            Configuration missing
-          </Badge>
-        ) : null
+        <>
+          <LocalAgentStatusBadge agent={agent} />
+          {autoRestartFailure ? (
+            <AutoRestartFailureBadge reason={autoRestartFailure.message} />
+          ) : agent?.personaOrphaned ? (
+            <Badge className="gap-1" variant="warning">
+              <AlertTriangle className="h-3 w-3" />
+              Configuration missing
+            </Badge>
+          ) : null}
+        </>
       }
     />
   );
@@ -633,14 +637,17 @@ function StandaloneAgentCard({
         );
       }}
       statusBadge={
-        autoRestartFailure ? (
-          <AutoRestartFailureBadge reason={autoRestartFailure.message} />
-        ) : agent.personaOrphaned ? (
-          <Badge className="gap-1" variant="warning">
-            <AlertTriangle className="h-3 w-3" />
-            Configuration missing
-          </Badge>
-        ) : null
+        <>
+          <LocalAgentStatusBadge agent={agent} />
+          {autoRestartFailure ? (
+            <AutoRestartFailureBadge reason={autoRestartFailure.message} />
+          ) : agent.personaOrphaned ? (
+            <Badge className="gap-1" variant="warning">
+              <AlertTriangle className="h-3 w-3" />
+              Configuration missing
+            </Badge>
+          ) : null}
+        </>
       }
     />
   );

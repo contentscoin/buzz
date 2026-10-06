@@ -407,6 +407,14 @@ session only. The shared spawn boundary and lazy reconcile must honor that pause
 explicit successful Start clears it, while failed starts retain it. Relaunch
 clears the in-memory pause and follows the preserved launch preference.
 
+Local agent cards also show an explicit current-community local execution badge.
+Relay Online/Away dots must not be presented as proof the local process survived
+Stop. Keep presence-based duplicate-start guards; do not manufacture Offline or
+remote shutdown authority from a local stop. Bulk Stop returns exact successfully
+stopped public keys, excluding termination failures, so the captured signer can
+clear old working turns without touching failed agents. Refresh presence as well
+as runtime and inventory queries after Stop, retaining real IPC error strings.
+
 ## Channel-only runtime controls
 
 Desktop observer controls identify a channel, not a thread session. The harness
