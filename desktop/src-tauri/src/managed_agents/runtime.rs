@@ -502,6 +502,15 @@ pub fn spawn_agent_child(
     owner_hex: Option<&str>,
     replay_floor_unix: Option<u64>,
 ) -> Result<crate::managed_agents::ManagedAgentProcess, String> {
+    if app
+        .state::<crate::app_state::AppState>()
+        .managed_agent_paused_pubkeys
+        .lock()
+        .map_err(|e| e.to_string())?
+        .contains(&record.pubkey)
+    {
+        return Err("이 앱에서 전체 중지된 에이전트입니다. Start로 다시 시작하세요.".into());
+    }
     if let Some(error) = spawn_key_refusal(record) {
         return Err(error);
     }

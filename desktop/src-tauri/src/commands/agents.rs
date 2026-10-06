@@ -26,6 +26,10 @@ pub(super) fn workspace_owner_hex(state: &AppState) -> Result<String, String> {
     Ok(keys.public_key().to_hex())
 }
 
+#[path = "agents_bulk_stop.rs"]
+mod bulk_stop;
+pub use bulk_stop::*;
+
 #[path = "agents_pending.rs"]
 mod pending;
 #[cfg(test)]
@@ -258,14 +262,28 @@ pub(super) async fn start_local_agent_with_preflight(
             }
         }
     }
-    start_managed_agent_process(
+    let was_paused = state
+        .managed_agent_paused_pubkeys
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&record.pubkey);
+    if let Err(error) = start_managed_agent_process(
         app,
         record,
         &mut runtimes,
         Some(workspace_owner.as_str()),
         &workspace_relay_url,
         replay_floor_unix,
-    )?;
+    ) {
+        if was_paused {
+            state
+                .managed_agent_paused_pubkeys
+                .lock()
+                .map_err(|e| e.to_string())?
+                .insert(record.pubkey.clone());
+        }
+        return Err(error);
+    }
     // A successful explicit Start also opts this local agent into launch restore.
     // App shutdown stops processes without clearing this persisted preference.
     record.start_on_app_launch = true;

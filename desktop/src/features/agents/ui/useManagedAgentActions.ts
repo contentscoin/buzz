@@ -38,6 +38,7 @@ import {
 } from "../lib/managedAgentControlActions";
 import { clearScopedActiveTurnsForAgentOnStop } from "../managedAgentRuntimeHooks";
 import { useBulkAgentStart } from "./useBulkAgentStart";
+import { useBulkAgentStop } from "./useBulkAgentStop";
 import {
   availableRuntimesForStart,
   buildInstanceInputForDefinition,
@@ -466,61 +467,15 @@ export function useManagedAgentActions() {
     void relayAgentsQuery.refetch();
   }
 
-  async function runBulkAction(
-    targets: ManagedAgent[],
-    confirmLabel: string,
-    failureNoun: string,
-    action: (agent: ManagedAgent) => Promise<unknown>,
-  ): Promise<boolean> {
-    if (targets.length === 0) return false;
-    const confirmed = window.confirm(
-      `${confirmLabel} ${targets.length} agent${targets.length === 1 ? "" : "s"}?`,
-    );
-    if (!confirmed) return false;
-    clearFeedback();
-    const results = await Promise.allSettled(targets.map(action));
-    const failures = results.filter((r) => r.status === "rejected");
-    if (failures.length > 0) {
-      setActionErrorMessage(
-        `${failures.length} of ${targets.length} ${failureNoun}${failures.length === 1 ? "" : "s"} failed.`,
-      );
-    }
-    return true;
-  }
-
-  async function handleBulkStopRunning() {
-    try {
-      const scope = captureCommandScope();
-      await runBulkAction(
-        managedAgents.filter((a) => isManagedAgentActive(a)),
-        "Stop",
-        "stop",
-        async (a) => {
-          await stopManagedAgentWithRules({
-            agent: a,
-            channels: channelsQuery.data ?? [],
-            relayAgents: relayAgentsQuery.data ?? [],
-            scope,
-            stopManagedAgent: stopManagedAgentCommand,
-          });
-          if (a.backend.type === "local") {
-            clearScopedActiveTurnsForAgentOnStop(
-              a.pubkey,
-              scope.expectedRelayUrl,
-              scope.expectedSignerPubkey,
-            );
-          }
-        },
-      );
-    } catch (error) {
-      setActionErrorMessage(
-        error instanceof Error ? error.message : "Failed to stop agents.",
-      );
-    }
-  }
-
+  const bulkStop = useBulkAgentStop({
+    scope: commandScope,
+    clearFeedback,
+    notice: setActionNoticeMessage,
+    error: setActionErrorMessage,
+  });
   const isPending =
     bulkStart.pending ||
+    bulkStop.pending ||
     restartingAgentPubkey !== null ||
     createAgentMutation.isPending ||
     startMutation.isPending ||
@@ -565,7 +520,8 @@ export function useManagedAgentActions() {
     handleDelete,
     handleToggleStartOnAppLaunch,
     handleAddedToChannel,
-    handleBulkStopRunning,
+    handleBulkStopRunning: bulkStop.stopAll,
+    bulkStopPending: bulkStop.pending,
     handleBulkStart: bulkStart.startAll,
     bulkStartPending: bulkStart.pending,
     bulkStartProgress: bulkStart.progress,

@@ -300,6 +300,13 @@ pub async fn restore_managed_agents_on_launch(
         let handles: Vec<_> = agents_to_start
             .iter()
             .filter(|_| !shutdown_started.load(Ordering::SeqCst))
+            .filter(|record| {
+                !state
+                    .managed_agent_paused_pubkeys
+                    .lock()
+                    .map(|paused| paused.contains(&record.pubkey))
+                    .unwrap_or(true)
+            })
             .map(|record| {
                 let handle = scope.spawn(move || {
                     let workspace_relay =

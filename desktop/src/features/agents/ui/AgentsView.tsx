@@ -26,7 +26,6 @@ import { usePersonaActions } from "./usePersonaActions";
 import { useTeamActions } from "./useTeamActions";
 import { useProfilePanel } from "@/shared/context/ProfilePanelContext";
 import { useBakedBuildEnvQuery } from "@/features/agents/hooks";
-import { isManagedAgentActive } from "@/features/agents/lib/managedAgentControlActions";
 import { useGlobalAgentConfig } from "@/features/agents/useGlobalAgentConfig";
 import { Button } from "@/shared/ui/button";
 import {
@@ -98,8 +97,8 @@ export function AgentsView() {
     teamActions.createTeamMutation.isPending ||
     teamActions.updateTeamMutation.isPending ||
     teamActions.deleteTeamMutation.isPending;
-  const runningAgentCount = agents.managedAgents.filter((agent) =>
-    isManagedAgentActive(agent),
+  const localAgentCount = agents.managedAgents.filter(
+    (agent) => agent.backend.type === "local",
   ).length;
   const hasSavedAgentDefaults = Boolean(
     globalConfig.preferred_runtime?.trim() ||
@@ -178,9 +177,16 @@ export function AgentsView() {
                       ? "Agent defaults"
                       : "Set agent defaults"}
                   </Button>
-                  {runningAgentCount > 0 ? (
+                  {
                     <Button
-                      disabled={isActionPending}
+                      data-testid="stop-all-agents-button"
+                      disabled={
+                        isActionPending ||
+                        !agents.commandScope ||
+                        localAgentCount === 0 ||
+                        agents.managedAgentsQuery.isLoading ||
+                        agents.managedAgentsQuery.isError
+                      }
                       onClick={() => {
                         void agents.handleBulkStopRunning();
                       }}
@@ -188,9 +194,11 @@ export function AgentsView() {
                       variant="outline"
                     >
                       <OctagonX />
-                      Stop running agents
+                      {agents.bulkStopPending
+                        ? "중지 중…"
+                        : "전체 로컬 에이전트 중지"}
                     </Button>
-                  ) : null}
+                  }
                 </div>
 
                 <DropdownMenu modal={false}>
@@ -234,17 +242,26 @@ export function AgentsView() {
                         ? "Agent defaults"
                         : "Set agent defaults"}
                     </DropdownMenuItem>
-                    {runningAgentCount > 0 ? (
+                    {
                       <DropdownMenuItem
-                        disabled={isActionPending}
+                        data-testid="stop-all-agents-menu-item"
+                        disabled={
+                          isActionPending ||
+                          !agents.commandScope ||
+                          localAgentCount === 0 ||
+                          agents.managedAgentsQuery.isLoading ||
+                          agents.managedAgentsQuery.isError
+                        }
                         onSelect={() => {
                           void agents.handleBulkStopRunning();
                         }}
                       >
                         <OctagonX />
-                        Stop running agents
+                        {agents.bulkStopPending
+                          ? "중지 중…"
+                          : "전체 로컬 에이전트 중지"}
                       </DropdownMenuItem>
-                    ) : null}
+                    }
                   </DropdownMenuContent>
                 </DropdownMenu>
               </>

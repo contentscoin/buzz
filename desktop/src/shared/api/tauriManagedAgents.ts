@@ -67,6 +67,17 @@ export async function setManagedAgentStartOnAppLaunch(
   return fromRawManagedAgent(response);
 }
 
+export function stopAllLocalManagedAgents(scope: {
+  expectedRelayUrl: string;
+  expectedSignerPubkey: string;
+}): Promise<{
+  stoppedAgents: number;
+  remainingRuntimes: number;
+  failures: { name: string; error: string }[];
+}> {
+  return invokeTauri("stop_all_local_managed_agents", scope);
+}
+
 export async function setManagedAgentAutoRestart(
   pubkey: string,
   autoRestartOnConfigChange: boolean,

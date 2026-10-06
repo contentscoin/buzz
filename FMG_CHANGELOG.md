@@ -1,5 +1,18 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.18
+
+Base: FMG desktop `0.5.26-fmg.17`.
+
+- 전체 로컬 에이전트 중지 drains this device's local runtime pairs in every
+  community, using a distinct owner-bound native command. Remaining processes
+  and partial failures are reported after termination, including valid orphan
+  receipts belonging to this Desktop instance.
+- Keep Stop visible even when the active community has no running pair. Bulk
+  Stop pauses automatic starts until an explicit Start or app relaunch; the
+  saved launch preference remains intact. Single-community Stop stays scoped.
+- No remote Hostinger process shutdown, model task, or test suite was requested.
+
 ## 0.5.26-fmg.17
 
 Base: FMG desktop `0.5.26-fmg.16`.

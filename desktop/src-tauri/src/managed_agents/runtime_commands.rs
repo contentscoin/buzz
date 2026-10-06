@@ -15,6 +15,15 @@ use crate::app_state::AppState;
 
 const STATUS_EVENT: &str = "managed-agent-runtime-status";
 
+pub(crate) fn emit_managed_agent_runtime_change(
+    app: &AppHandle,
+    record: &super::ManagedAgentRecord,
+    key: &ManagedAgentRuntimeKey,
+    runtime: Option<&ManagedAgentPairRuntime>,
+) {
+    emit_status(app, &status_for(app, record, key, runtime, None));
+}
+
 fn status_for(
     app: &AppHandle,
     record: &super::ManagedAgentRecord,
@@ -289,11 +298,27 @@ fn start_pair(
         .managed_agent_processes
         .lock()
         .map_err(|e| e.to_string())?;
+    if !remember_start
+        && state
+            .managed_agent_paused_pubkeys
+            .lock()
+            .map_err(|e| e.to_string())?
+            .contains(&record.pubkey)
+    {
+        return Ok(status_for(&app, record, &key, runtimes.get(&key), None));
+    }
     if runtimes
         .get_mut(&key)
         .is_some_and(|runtime| runtime.child.try_wait().ok().flatten().is_none())
     {
         let status = status_for(&app, record, &key, runtimes.get(&key), None);
+        if remember_start {
+            state
+                .managed_agent_paused_pubkeys
+                .lock()
+                .map_err(|e| e.to_string())?
+                .remove(&record.pubkey);
+        }
         if remember_start && !record.start_on_app_launch {
             record.start_on_app_launch = true;
             record.updated_at = crate::util::now_iso();
@@ -312,8 +337,29 @@ fn start_pair(
             .ok()
             .map(|keys| keys.public_key().to_hex()),
     };
+    let was_paused = if remember_start {
+        state
+            .managed_agent_paused_pubkeys
+            .lock()
+            .map_err(|e| e.to_string())?
+            .remove(&record.pubkey)
+    } else {
+        false
+    };
     let mut process =
-        spawn_agent_child(&app, record, &key.relay_url, lazy, owner.as_deref(), None)?;
+        match spawn_agent_child(&app, record, &key.relay_url, lazy, owner.as_deref(), None) {
+            Ok(process) => process,
+            Err(error) => {
+                if was_paused {
+                    state
+                        .managed_agent_paused_pubkeys
+                        .lock()
+                        .map_err(|e| e.to_string())?
+                        .insert(record.pubkey.clone());
+                }
+                return Err(error);
+            }
+        };
     let now = crate::util::now_iso();
     let receipt = ManagedAgentRuntimeReceipt {
         key: key.clone(),
@@ -324,6 +370,13 @@ fn start_pair(
     if let Err(error) = write_agent_runtime_receipt(&app, &receipt) {
         let _ = terminate_process(process.child.id());
         let _ = process.child.wait();
+        if was_paused {
+            state
+                .managed_agent_paused_pubkeys
+                .lock()
+                .map_err(|e| e.to_string())?
+                .insert(record.pubkey.clone());
+        }
         return Err(error);
     }
     record.runtime_pid = None;

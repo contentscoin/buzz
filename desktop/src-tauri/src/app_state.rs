@@ -50,6 +50,8 @@ pub struct AppState {
     pub managed_agents_store_lock: Mutex<()>,
     pub channel_templates_store_lock: Mutex<()>,
     pub managed_agent_processes: Mutex<HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>>,
+    /// Explicit device-wide Stop pauses automatic spawns until Start or app relaunch.
+    pub managed_agent_paused_pubkeys: Mutex<std::collections::HashSet<String>>,
     pub provider_deploy_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub huddle_state: Mutex<HuddleState>,
     pub huddle_audio: crate::huddle::tts_settings::HuddleAudioSettingsState,
@@ -227,6 +229,7 @@ pub fn build_app_state() -> AppState {
         managed_agents_store_lock: Mutex::new(()),
         channel_templates_store_lock: Mutex::new(()),
         managed_agent_processes: Mutex::new(HashMap::new()),
+        managed_agent_paused_pubkeys: Mutex::new(std::collections::HashSet::new()),
         provider_deploy_locks: Mutex::new(HashMap::new()),
         session_config_cache: Mutex::new(HashMap::new()),
         huddle_state: Mutex::new(HuddleState::default()),

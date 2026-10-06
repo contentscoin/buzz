@@ -396,6 +396,17 @@ concurrency to two starts, block repeated clicks, and report partial failures.
 Stop dispatching new starts after a community/owner switch; do not publish the
 old operation's feedback into the new scope.
 
+Bulk Stop is explicitly device-wide for local managed agents: the native command
+captures relay and signer, holds workspace/transition/store fences, drains every
+tracked community pair and valid current-instance orphan receipt, and reports
+remaining processes and partial failures. Keep the button visible even when the
+active community has no running pair. It does not control remote provider or
+Hostinger processes. Ordinary individual Stop remains pair-scoped.
+Explicit bulk Stop pauses automatic spawn for those keys for the current app
+session only. The shared spawn boundary and lazy reconcile must honor that pause;
+explicit successful Start clears it, while failed starts retain it. Relaunch
+clears the in-memory pause and follows the preserved launch preference.
+
 ## Channel-only runtime controls
 
 Desktop observer controls identify a channel, not a thread session. The harness
