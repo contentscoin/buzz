@@ -1,4 +1,23 @@
-# Supervisor 0.11.0 — original dot connection community consent
+# Supervisor 0.12.0 — explicit community code-project execution binding
+
+An optional `projects[].codeProjectId: "buzz"` explicitly maps a registered
+conversation community to the existing prepared Buzz repository. Its assigned
+coding roles receive only their independently verified clean worktree bindings.
+live-gate remains observation-only. Repository proposals and worker admission
+recheck the immutable audience against this current mapping; no separate
+community repository is inferred or created. Default BD admission keeps its
+existing compatibility contract when it has no explicit mapping.
+
+`fmg_buzz_gateway_projects` and `/fmg_project` now derive repository/execution
+status from the mapping and observed worktrees. `verified` and
+`ready_direct_owner_approval_required` describe readiness, not a successful run.
+Missing mappings are `not_configured`; missing/dirty worktrees or failed
+observations are explicit `requires_review`/`unavailable`. Readiness does not
+change model/effort, tool grants, OAuth consent, per-task document access or the
+direct human hash approval requirement. Schema 3 generic dot proposals do not
+claim repository binding. Task server 0.10.0 and worker protocol 7 stay unchanged.
+
+## Supervisor 0.11.0 — original dot connection community consent
 
 The producer publishes a public `communities.json` registry with a generation
 fence and adds registry generation/community/default flags to fresh snapshots.
@@ -104,7 +123,7 @@ worktree counts. The ledger remains bound to the default BD audience; fmg does
 not gain cross-community task/document access. No automatic report publication,
 Gateway document saving, branch merging or multi-role scheduling is introduced.
 
-## Version 0.8.0 project registry (first management stage)
+## Version 0.8.0 project registry (historical first management stage)
 
 The optional `projects` registry explicitly binds up to four project IDs to
 distinct Buzz account IDs and non-overlapping configured Gateway role IDs.

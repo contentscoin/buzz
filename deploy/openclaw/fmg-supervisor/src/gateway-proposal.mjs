@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { ownerObservationFactory } from "./gateway-status.mjs";
 import { projectBinding } from "./project-binding.mjs";
+import { requireCommunityProject } from "./project-routing.mjs";
 import { operator } from "./tasks.mjs";
 import { createHash } from "node:crypto";
 
@@ -146,6 +147,12 @@ export function registerGatewayProposalTool(api) {
               arguments_,
             );
             if (result.proposal === null) {
+              requireCommunityProject(
+                config,
+                input.community_id,
+                input.role_id,
+                input.project_id,
+              );
               arguments_.project = await projectBinding(
                 config,
                 input.role_id,

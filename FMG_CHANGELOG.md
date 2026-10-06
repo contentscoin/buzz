@@ -1,3 +1,15 @@
+# 2026-10-07 — FMG와 중앙 코드 프로젝트 실행 연결
+
+- Supervisor 0.12.0. task server 0.10.0, worker protocol 7, Desktop .21 유지.
+- 등록된 커뮤니티의 `codeProjectId: buzz`로 명시적으로 실행 프로젝트를 연결한다.
+- 저장소·실행 준비 상태는 실제 역할 작업 공간 검사를 반영한다.
+  고정 not_configured 표시를 제거하고 확인 실패는 requires_review/unavailable로 구분한다.
+- 신규 저장소 제안과 실행 인수는 현재 커뮤니티 매핑 및 배정된 coding 역할을 확인한다.
+  live-gate는 저장소 코드 실행에 배정하지 않는다. 기본 BD 경로는 기존 계약을 유지한다.
+- 일반 Gateway 관리 권한·모델·effort·인증을 변경하지 않는다. 직접 해시 승인과
+  결과·문서의 원 제안 계정 및 커뮤니티 경계를 유지한다.
+- 준비 상태는 실제 작업 실행 완료를 뜻하지 않는다. 테스트·모델 실행은 별도 요청이다.
+
 # 2026-10-07 — GPT dot 커뮤니티 선택
 
 - task server 0.10.0 / Supervisor 0.11.0. Worker protocol 7, Computer 0.4.0,

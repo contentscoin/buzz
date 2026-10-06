@@ -17,6 +17,10 @@ import {
 import { roleModel } from "./model-binding.mjs";
 import { projectBindings } from "./project-binding.mjs";
 import {
+  scopedProjectBindings,
+  projectExecutionObservation,
+} from "./project-routing.mjs";
+import {
   gatewayProposalDefinition,
   registerGatewayProposalTool,
 } from "./gateway-proposal.mjs";
@@ -343,6 +347,10 @@ async function createProducer(
       "owner_binding_changed",
     );
     const now = Date.now();
+    const codeBindings = await projectBindings(
+      context.config,
+      controller.signal,
+    );
     await save({
       schema: 1,
       service: "fmg-supervisor",
@@ -361,9 +369,16 @@ async function createProducer(
       buzz_agents_truncated:
         observedProfiles.length >= 201 || authors.length >= 50,
       gateway,
-      project_bindings: await projectBindings(
+      project_bindings: scopedProjectBindings(
         context.config,
-        controller.signal,
+        legacy && communityId === "default" ? undefined : communityId,
+        codeBindings,
+        legacy,
+      ),
+      project_execution_binding: projectExecutionObservation(
+        context.config,
+        legacy && communityId === "default" ? undefined : communityId,
+        codeBindings,
       ),
       capabilities: ["status.read", "agents.list", "activity.summary"],
       task_dispatch:

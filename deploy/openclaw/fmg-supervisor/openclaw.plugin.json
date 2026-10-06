@@ -1,7 +1,7 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Owner verified community connections and directly approved repository-bound central task proposals.",
   "activation": {
     "onStartup": true
@@ -53,14 +53,25 @@
                 "type": "string",
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
               }
+            },
+            "codeProjectId": {
+              "type": "string",
+              "const": "buzz"
             }
           },
-          "required": ["id", "name", "buzzAccountId", "roleIds"],
+          "required": [
+            "id",
+            "name",
+            "buzzAccountId",
+            "roleIds"
+          ],
           "additionalProperties": false
         }
       }
     },
-    "required": ["ownerPubkey"],
+    "required": [
+      "ownerPubkey"
+    ],
     "additionalProperties": false
   },
   "contracts": {

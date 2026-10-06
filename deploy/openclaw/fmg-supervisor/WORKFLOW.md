@@ -1,5 +1,26 @@
 # GPT dot · Buzz 작업 운영 안내
 
+## 커뮤니티와 코드 프로젝트 연결 (Supervisor 0.12.0)
+
+커뮤니티의 `codeProjectId: buzz`를 명시한 경우에만 등록된 coding 역할의
+작업 공간 결속을 해당 커뮤니티의 저장소 제안에 사용한다. FMG는 공용
+contentscoin/buzz 저장소의 5개 역할 작업 공간을 사용하며 live-gate는 조회 전용이다.
+`fmg_buzz_gateway_projects` 또는 `/fmg_project get fmg`의 실제 응답을 확인한다.
+`repository_binding: verified`와 `project_execution: ready_direct_owner_approval_required`는
+준비 상태이며 실행 완료가 아니다. 역할 작업 공간이 없거나 변경됐으면
+requires_review/unavailable로 보고한다. not_configured를 고정 문구로 답하지 않는다.
+
+소유자 Telegram 개인 대화의 main에서 `project_id: buzz`, `community_id: fmg`로
+저장소 결속 제안을 생성한다. 실행 전 현재 커뮤니티 매핑·역할·브랜치·HEAD·깨끗한
+작업 공간을 재검사한다. 작업 실행은 직접 해시 승인 뒤에만 시작한다.
+Gateway 설정 변경 권한을 일반 모델에 열 필요가 없으며,
+config 권한 거절만으로 기존 조회·제안 도구도 막혔다고 판단하지 않는다.
+schema 3 일반 dot 제안은 저장소 결속을 증명하지 않는다.
+
+Supervisor 0.11.0 / 서버 0.10.0에서 dot 연결별 추가 커뮤니티 접근을 제공한다.
+현재 연결의 허용과 ChatGPT 도구 정의 갱신 여부를 각각 확인한다.
+아래 이전 버전의 BD 전용·고정 not_configured 설명은 당시 기록이다.
+
 ## 커뮤니티별 원장 (Supervisor 0.10.0 / 서버 0.9.0)
 
 제안·Gateway 조회 도구에 `community_id: "fmg"`를 명시하면 fmg 원장을 사용한다.
@@ -7,7 +28,7 @@
 작업 ID가 있는 조회·승인·취소·복구·문서 허용 명령은 변경 불가능한 제안의
 소유자·커뮤니티·Gateway 결속을 다시 확인한다. BD 기록을 fmg로 옮기거나
 기존 문서 접근 권한을 상속하지 않는다. fmg Desktop 연결은 작업·문서 전용이며
-브라우저·대화 기록은 제공하지 않는다. 기존 OAuth dot 연결은 BD 범위다.
+브라우저·대화 기록은 제공하지 않는다. OAuth dot의 추가 커뮤니티는 원 연결에 별도 허용한다.
 같은 요청 UUID로 유실된 제안을 조회하고, 실제 성공 종료 receipt를 확인한 뒤
 별도 문서 접근 허용과 저장을 진행한다. protocol 7 worker만 실행을 인수한다.
 코드 역할 workspace는 여전히 공용 buzz 저장소다. 커뮤니티별 독립 저장소,
@@ -56,10 +77,11 @@ Telegram 개인 대화에서 `fmg_buzz_gateway_projects({})`를 먼저 실제 �
 한 프로젝트가 `unavailable`이면 다른 프로젝트 조회 성공으로 덮지 않는다.
 
 프로젝트 등록과 역할 표시는 작업 배정 권한이 아니다. 커뮤니티 항목의
-`repository_binding`과 `project_execution`은 `not_configured`다.
-작업 원장의 `legacy_community_only`는 기존 커뮤니티 원장이라는 뜻이며
-프로젝트별 실행 공간을 검증했다는 뜻이 아니다. `not_bound`인 프로젝트에는
-그 원장으로 작업을 배정하지 않는다. 기존 `/fmg_task`에는 프로젝트 선택이 없다.
+`repository_binding`과 `project_execution`은 현재 조회 응답대로 보고한다.
+`codeProjectId`가 없는 경우에만 `not_configured`다. 연결된 코드 프로젝트와
+실제 역할 작업 공간을 확인하고 별도 소유자 해시 승인을 받아야 한다.
+`/fmg_task list fmg`는 fmg 원장만 조회한다. 코드 프로젝트 ID buzz와
+원장 커뮤니티 ID fmg는 구분한다.
 
 여러 프로젝트의 실행을 요청하면 실제 저장소·분리된 실행 작업 공간·담당 역할·
 허용 도구·결과 받을 커뮤니티/방·승인 대상 연결을 확인해야 한다.
@@ -84,9 +106,9 @@ main은 코드 실행 담당으로 선택하지 않는다. 지시문은 4,000자
 보내기 전에는 실행되지 않는다. 응답 유실이면 같은 UUID와 같은 입력으로
 재조회하고 새 UUID로 중복 제안하거나 모델을 실행하지 않는다.
 
-중앙 원장은 기본 BD 커뮤니티에 결속된다. 코드 프로젝트 ID buzz와 커뮤니티
-연결 ID bd/fmg는 별개다. fmg의 Desktop 작업 조회로 BD 원장을 볼 수 있다고
-안내하지 않는다. Telegram의 Gateway 작업 조회/명령 또는 BD의 Desktop
+중앙 원장은 선택한 커뮤니티에 결속되며 생략하면 BD다. 코드 프로젝트 ID buzz와
+커뮤니티 연결 ID bd/fmg는 별개다. fmg의 Desktop 작업 조회로 BD 원장을 볼 수 있다고
+안내하지 않는다. 선택한 커뮤니티의 Telegram Gateway 작업 조회/명령 또는 Desktop
 조회 경로를 사용한다. Gateway 제안 계정은 별도 예약 계정이므로 다른 ChatGPT
 OAuth 계정의 문서 저장 권한을 빌리지 않는다. 이 단계에는 Gateway 문서 저장
 도구나 fmg 원장 연결, 결과 자동 게시가 없다.

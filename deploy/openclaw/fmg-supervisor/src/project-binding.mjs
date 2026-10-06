@@ -3,17 +3,11 @@ import { open, realpath, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { execFile as callbackExecFile } from "node:child_process";
 import { promisify } from "node:util";
+import { assertAudienceProject, codingRoles } from "./project-routing.mjs";
 
 const execFile = promisify(callbackExecFile);
 const root = "/data/.openclaw/projects/buzz";
 const repository = "https://github.com/contentscoin/buzz.git";
-const codingRoles = [
-  "fmg-planner",
-  "fmg-frontend",
-  "fmg-backend",
-  "fmg-qa",
-  "fmg-release",
-];
 
 function requireValue(condition, code) {
   if (!condition) throw new Error(code);
@@ -156,6 +150,7 @@ export async function assertProjectBinding(proposal, signal) {
   const config = JSON.parse(
     await readFile("/data/.openclaw/openclaw.json", "utf8"),
   );
+  await assertAudienceProject(config, proposal);
   const observed = await projectBinding(config, proposal.role_id, signal);
   requireValue(
     Object.keys(observed).length === Object.keys(proposal.project).length &&
