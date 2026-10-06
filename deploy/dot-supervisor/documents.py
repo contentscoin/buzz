@@ -4,9 +4,9 @@ import time
 import uuid
 from completion import validate_completion
 from store import canonical, digest
-from tools import snapshot
 from document_access import DocumentDesktop, ACCESS_CATALOG
 from document_owner import PREFIX, validate_main_task
+from communities import binding, scoped_catalog, split
 
 MAX_BYTES = 32768
 MAX_VERSIONS = 20
@@ -41,6 +41,7 @@ CATALOG = [
     tool("list_document_library", "List your private saved documents independently of the latest 25 tasks. Original proposing connection and current audience must match. Pass next_cursor to continue.",
          {"cursor": UUID}, []),
 ] + ACCESS_CATALOG
+CATALOG = scoped_catalog(CATALOG)
 NAMES = {item["name"] for item in CATALOG}
 
 
@@ -270,12 +271,18 @@ class Documents:
     def call(self, name, args, client, authorize):
         if name not in NAMES or not isinstance(args, dict):
             raise DocumentError("invalid_request")
+        args, community_id = split(args)
+        def selected_current():
+            try:
+                return self.tasks.communities.current(client, community_id)
+            except (ValueError, KeyError, TypeError, OSError) as error:
+                raise DocumentError("community_access_required" if str(error) == "community_access_required" else "community_unavailable") from error
         with self.store.lock:
             if authorize() != client:
                 raise DocumentError("access_denied")
             self.store.db.execute("BEGIN IMMEDIATE")
             try:
-                current = snapshot()
+                current = selected_current()
                 scope = digest(canonical({key: current[key] for key in BINDING_KEYS}).encode())
                 if name == "fmg_buzz_save_document":
                     result = self.save(args, scope, client, current)
@@ -300,9 +307,10 @@ class Documents:
                     result = self.desktop.access(name, args, scope, client, current)
                 else:
                     raise DocumentError("invalid_request")
-                final = snapshot()
+                final = selected_current()
                 if final["generation"] != current["generation"] or any(final[key] != current[key] for key in BINDING_KEYS) or authorize() != client:
                     raise DocumentError("access_denied")
+                result.update(connection_id=client, community_id=current.get("community_id", "bd"), audience=binding(current))
                 encoded = canonical(result)
                 if len(encoded.encode()) > 160000:
                     raise DocumentError("response_size_limit")

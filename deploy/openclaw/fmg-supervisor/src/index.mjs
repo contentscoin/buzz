@@ -6,6 +6,8 @@ import {
 } from "../../fmg-computer/src/community-binding.mjs";
 import { createTaskWorker, registerTaskCommand } from "./tasks.mjs";
 import { registerDocumentCommand } from "./document-command.mjs";
+import { createCommunityRegistry } from "./community-registry.mjs";
+import { registerDotCommunityCommand } from "./dot-community-command.mjs";
 import {
   gatewayProjectsDefinition,
   projectsSchema,
@@ -116,7 +118,13 @@ function ownedProfile(event, owner) {
 }
 
 /** This producer exports only allowlisted summaries; the MCP never gets Buzz keys. */
-async function createProducer(context, settings, legacy = true) {
+async function createProducer(
+  context,
+  settings,
+  legacy = true,
+  registryGeneration,
+  communityId,
+) {
   const binding = await identity(context.config);
   const owner = settings.ownerPubkey;
   const generation = randomUUID();
@@ -338,6 +346,9 @@ async function createProducer(context, settings, legacy = true) {
     await save({
       schema: 1,
       service: "fmg-supervisor",
+      registry_generation: registryGeneration,
+      community_id: communityId,
+      default_community: legacy,
       generation,
       observed_at: new Date(now).toISOString(),
       expires_at: new Date(now + 90000).toISOString(),
@@ -420,6 +431,7 @@ const entry = definePluginEntry({
     let stop, stopTasks;
     registerTaskCommand(api);
     registerDocumentCommand(api);
+    registerDotCommunityCommand(api);
     registerProjectCommand(api);
     registerProjectTools(api);
     registerGatewayStatusTool(api);
@@ -440,19 +452,36 @@ const entry = definePluginEntry({
           context.config.plugins?.entries?.["fmg-supervisor"]?.config ??
           api.pluginConfig;
         const producers = [];
+        const entries = await distinctCommunities(context.config);
+        const registry = await createCommunityRegistry(
+          entries,
+          settings.ownerPubkey,
+        );
         try {
-          for (const entry of await distinctCommunities(context.config))
+          for (const entry of entries)
             producers.push(
               await createProducer(
                 { ...context, config: entry.config },
                 settings,
                 entry.accountId === "default",
+                registry.generation,
+                entry.id ?? "default",
               ),
             );
-          stop = () => closeCommunities(producers);
+          stop = async () => {
+            try {
+              await closeCommunities(producers);
+            } finally {
+              await registry.stop();
+            }
+          };
           stopTasks = await createTaskWorker(context, settings);
         } catch (error) {
-          await closeCommunities(producers);
+          try {
+            await closeCommunities(producers);
+          } finally {
+            await registry.stop();
+          }
           stop = undefined;
           throw error;
         }

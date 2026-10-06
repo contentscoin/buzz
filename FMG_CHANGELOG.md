@@ -1,3 +1,15 @@
+# 2026-10-07 — GPT dot 커뮤니티 선택
+
+- task server 0.10.0 / Supervisor 0.11.0. Worker protocol 7, Computer 0.4.0,
+  Desktop .21을 유지한다.
+- 작업·문서 MCP에 `community_id`를 추가한다. 생략하면 기존 BD이며, 추가 커뮤니티는
+  원 제안 OAuth 연결에 별도로 허용해야 한다. 다른 연결의 동의는 자동 확대하지 않는다.
+- 공개 등록 목록과 최신 snapshot generation으로 등록 해제·만료·소유권 변경을 차단한다.
+- 직접 소유자 `/fmg_dot` 명령으로 연결별 접근을 허용·철회한다. UUID receipt/CAS를 유지한다.
+- 조회 목록은 원 연결과 audience를 함께 확인하며, UUID 재조회도 저장된 audience를 확인한다.
+- 커뮤니티 접근 허용은 실행 승인이나 작업별 Desktop 문서 허용이 아니다.
+- 배포·권한 적용·MCP 스키마 갱신과 실제 실행·문서 저장 성공은 별도 확인한다.
+
 # FMG Buzz changelog
 
 ## 0.5.26-fmg.21

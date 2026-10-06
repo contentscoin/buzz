@@ -51,6 +51,10 @@ class DocumentDesktop:
     def authorized_client(self, client, current):
         if client == reserved_client(current):
             return True
+        try:
+            self.docs.tasks.communities.authorize(client, current)
+        except (ValueError, KeyError, TypeError, OSError):
+            return False
         return bool(self.resource and self.store.db.execute("SELECT 1 FROM tokens WHERE client_id=? AND scope='buzz:tasks' AND resource=? AND kind IN ('access','refresh') AND expires>? LIMIT 1", (client, self.resource, time.time())).fetchone())
 
     def access(self, name, args, scope, client, current):

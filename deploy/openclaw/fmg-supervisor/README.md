@@ -1,3 +1,22 @@
+# Supervisor 0.11.0 — original dot connection community consent
+
+The producer publishes a public `communities.json` registry with a generation
+fence and adds registry generation/community/default flags to fresh snapshots.
+Each community still independently proves current signed ownership. Registry
+shutdown invalidates selected access; old shutdown cannot overwrite a newer
+registry generation. A failed startup closes all producers and invalidates its
+registry. No Buzz signing credential is exported to the OAuth task server.
+
+New direct human `/fmg_dot access CONNECTION COMMUNITY` and
+`/fmg_dot allow|revoke CONNECTION COMMUNITY REVISION REQUEST_UUID` commands manage
+only that original OAuth connection's non-default community access. No model tool
+can grant permission. Default BD OAuth consent and separate per-task document
+delegation remain unchanged. This is not task approval, execution or cancellation.
+Task server 0.10.0 exposes community selection for dot; worker protocol stays 7.
+The Computer 0.4.0 broker and Desktop .21 need no binary changes for this slice.
+
+Earlier implementation notes:
+
 # Community ledger 0.10.0
 
 Task server 0.9.0 and protocol 7 select a fresh owner/community/Gateway snapshot.

@@ -1,3 +1,33 @@
+# GPT dot community selection 0.10.0
+
+Task and private document MCP tools accept optional `community_id` (`bd`, `fmg`,
+or another explicitly registered ID). Omission preserves default BD. The new
+`fmg_buzz_list_communities` reports only this original OAuth connection's access
+and readiness. It cannot grant permission or run a task.
+
+Existing OAuth consent does not automatically enable additional communities.
+Owner-configured per-connection grants bind the owner/community/Gateway scope.
+`/fmg_dot access/allow/revoke` requires the direct human Telegram main context;
+UUID receipts and revision CAS make lost-response recovery safe. Replaying a prior
+allow reports that receipt and current access, never re-enables a revoked grant.
+Only an active original `buzz:tasks` OAuth connection is eligible. The default
+consent is revoked through its original OAuth flow. Community consent does not
+inherit per-task Desktop document delegation or another proposing account's access.
+
+Public community registration is generated with the current Gateway generation.
+Each selected audience also requires its fresh, signed-owner-verified snapshot.
+Removed/unknown registrations, mismatched generations, expired snapshots, revoked
+community permission or OAuth consent deny access without fallback. Default legacy
+snapshots remain supported during rollout. UUID task replay also checks the stored
+audience, and task lists filter by original client plus audience before the 25 limit.
+Private document source/version/request rules and success receipt admission remain.
+
+No OAuth token is moved, replaced or broadened by deployment. Only a directly
+authorized original connection may receive a separate additive community grant.
+No task execution, model/effort mutation or implicit document delegation occurs.
+
+Earlier implementation notes:
+
 # Community operator scopes 0.9.0
 
 Private operator task/document actions select producer-written audience-hashed

@@ -7,6 +7,7 @@ import uuid
 from store import canonical, digest, text
 from tools import snapshot
 from completion import validate_completion
+from communities import CommunityAccess, CATALOG as COMMUNITY_CATALOG, binding, scoped_catalog, split
 
 UUID = {"type": "string", "format": "uuid", "maxLength": 36}
 ROLES = ("fmg-planner", "fmg-frontend", "fmg-backend", "fmg-qa", "fmg-release", "fmg-live-gate")
@@ -21,6 +22,7 @@ CATALOG = [
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
      "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
 ]
+CATALOG = scoped_catalog(CATALOG) + COMMUNITY_CATALOG
 
 
 def task_id(value):
@@ -30,8 +32,9 @@ def task_id(value):
 
 
 class Tasks:
-    def __init__(self, store):
+    def __init__(self, store, resource=None):
         self.store = store
+        self.communities = CommunityAccess(store, resource)
         store.db.executescript("""
         CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY, client TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -87,16 +90,34 @@ class Tasks:
         proposal = json.loads(row["proposal"])
         return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "role_id": proposal["role_id"], "requested_model": proposal["requested_model"], "requested_effort": proposal.get("requested_effort"), "proposal_hash": row["proposal_hash"], "project_id": proposal.get("project", {}).get("project_id"), "source_commit": proposal.get("project", {}).get("source_commit")}
 
-    def call(self, name, args, client, project=None, audience=None):
+    def call(self, name, args, client, project=None, audience=None, authorize=None):
         if not isinstance(args, dict):
             raise ValueError("object_required")
+        args, community_id = split(args)
         with self.store.lock, self.store.db:
-            snapshot(audience)  # Revoked or expired observations also deny stored result access.
+            if authorize and authorize() != client:
+                raise ValueError("connection_unavailable")
+            if name == "fmg_buzz_list_communities" and not args and community_id is None:
+                result = self.communities.catalog(client)
+                if authorize and authorize() != client:
+                    raise ValueError("connection_unavailable")
+                return {"content": [{"type": "text", "text": canonical(result)}], "structuredContent": result, "isError": False}
+            if audience is not None and (community_id is not None or client != "gateway-owner-main:" + digest(canonical(binding(audience)).encode())):
+                raise ValueError("audience_changed")
+            def current_snapshot():
+                return snapshot(audience) if audience is not None else self.communities.current(client, community_id)
+            current = current_snapshot()
+            def matches(row):
+                return binding(json.loads(row["proposal"])) == binding(current)
             self.expire()
             if name == "fmg_buzz_get_task" and set(args) == {"task_id"}:
-                result = self.view(self.read(args["task_id"], client))
+                row = self.read(args["task_id"], client)
+                if not matches(row):
+                    raise ValueError("task_unavailable")
+                result = self.view(row)
             elif name == "fmg_buzz_list_tasks" and not args:
-                result = {"tasks": [self.summary(row) for row in self.store.db.execute("SELECT * FROM tasks WHERE client=? ORDER BY created DESC LIMIT 25", (client,))], "limit": 25}
+                rows = self.store.db.execute("SELECT * FROM tasks WHERE client=? ORDER BY created DESC LIMIT 1000", (client,))
+                result = {"tasks": [self.summary(row) for row in rows if matches(row)][:25], "limit": 25}
             elif name == "fmg_buzz_propose_task" and set(args) in ({"request_id", "role_id", "instructions"}, {"request_id", "role_id", "instructions", "effort"}):
                 request = task_id(args["request_id"])
                 instructions = text(args["instructions"], 15000)
@@ -105,11 +126,11 @@ class Tasks:
                 request_hash = digest(canonical(dict(args, project_id=project["project_id"]) if project else args).encode())
                 old = self.store.db.execute("SELECT * FROM tasks WHERE client=? AND request_id=?", (client, request)).fetchone()
                 if old:
-                    if old["input_hash"] != request_hash:
+                    if old["input_hash"] != request_hash or not matches(old):
                         raise ValueError("request_conflict")
                     result = self.view(old)
                 else:
-                    current = snapshot(audience)
+                    current = current_snapshot()
                     role = next((row for row in current["gateway"]["roles"] if row["role_id"] == args["role_id"]), None)
                     if not role or not re.fullmatch(r"[a-z0-9_-]+/[a-zA-Z0-9._:-]{1,100}", role.get("configured_model", "")) or not re.fullmatch(r"[0-9a-f]{64}", role.get("model_binding", "")):
                         raise ValueError("role_model_unavailable")
@@ -131,10 +152,17 @@ class Tasks:
                     result = self.view(self.read(identifier, client))
             else:
                 raise ValueError("unsupported_task_request")
+            final = current_snapshot()
+            if final["generation"] != current["generation"] or binding(final) != binding(current) or (authorize and authorize() != client):
+                raise ValueError("response_unconfirmed_reuse_request_uuid")
+            if authorize:
+                result.update(connection_id=client, community_id=current.get("community_id", "bd"), audience=binding(current))
         return {"content": [{"type": "text", "text": canonical(result)}], "structuredContent": result, "isError": False}
 
     def operator(self, data):
         action = data.get("action")
+        if isinstance(action, str) and action.startswith("communities."):
+            return self.communities.operator(data)
         args = data.get("arguments", {})
         if not isinstance(args, dict) or set(data) != {"action", "arguments"}:
             raise ValueError("operator_shape_invalid")
