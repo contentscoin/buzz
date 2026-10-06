@@ -37,6 +37,7 @@ import {
   stopManagedAgentWithRules,
 } from "../lib/managedAgentControlActions";
 import { clearScopedActiveTurnsForAgentOnStop } from "../managedAgentRuntimeHooks";
+import { useBulkAgentStart } from "./useBulkAgentStart";
 import {
   availableRuntimesForStart,
   buildInstanceInputForDefinition,
@@ -204,6 +205,16 @@ export function useManagedAgentActions() {
   ) => startMutation.mutateAsync({ pubkey, ...options });
   const stopManagedAgentCommand: StopManagedAgentCommand = (pubkey, options) =>
     stopMutation.mutateAsync({ pubkey, ...options });
+
+  const bulkStart = useBulkAgentStart({
+    agents: managedAgents,
+    scope: commandScope,
+    assertPresence: assertStartNotBlockedByPresence,
+    start: startManagedAgentCommand,
+    clearFeedback,
+    notice: setActionNoticeMessage,
+    error: setActionErrorMessage,
+  });
 
   async function handleStart(pubkey: string) {
     clearFeedback();
@@ -509,6 +520,7 @@ export function useManagedAgentActions() {
   }
 
   const isPending =
+    bulkStart.pending ||
     restartingAgentPubkey !== null ||
     createAgentMutation.isPending ||
     startMutation.isPending ||
@@ -554,6 +566,10 @@ export function useManagedAgentActions() {
     handleToggleStartOnAppLaunch,
     handleAddedToChannel,
     handleBulkStopRunning,
+    handleBulkStart: bulkStart.startAll,
+    bulkStartPending: bulkStart.pending,
+    bulkStartProgress: bulkStart.progress,
+    startableAgentCount: bulkStart.count,
     refetchManagedAgents: () => void managedAgentsQuery.refetch(),
     refetchRelayAgents: () => void relayAgentsQuery.refetch(),
   };

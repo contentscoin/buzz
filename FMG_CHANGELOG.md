@@ -1,5 +1,19 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.17
+
+Base: FMG desktop `0.5.26-fmg.16`.
+
+- Explicit local Start and runtime-pair Start/Restart save the launch restore
+  preference. Internal reconciliation does not change manual preferences.
+  The startup toggle can disable restore; ordinary Stop retains the preference.
+- Agents adds 전체 에이전트 시작 to its header and compact action menu.
+  Two concurrent starts skip running/deployed records, preserve owner/community
+  and presence guards, and report progress and partial failures. External relay
+  identities remain managed by their host.
+- Static checks and native compilation are recorded separately from actual
+  app-restart observation. No live model work or regression tests were requested.
+
 ## 0.5.26-fmg.16
 
 Base: FMG desktop `0.5.26-fmg.15`.

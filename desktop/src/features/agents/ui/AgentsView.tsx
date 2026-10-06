@@ -1,5 +1,5 @@
 import * as React from "react";
-import { EllipsisVertical, OctagonX, Settings2 } from "lucide-react";
+import { EllipsisVertical, OctagonX, Play, Settings2 } from "lucide-react";
 import {
   consumePendingSnapshotImport,
   subscribeSnapshotImport,
@@ -149,6 +149,24 @@ export function AgentsView() {
               <>
                 <div className="flex flex-wrap justify-end gap-2 [@container(max-width:40rem)]:hidden">
                   <Button
+                    data-testid="start-all-agents-button"
+                    disabled={
+                      isActionPending ||
+                      !agents.commandScope ||
+                      agents.managedAgentsQuery.isLoading ||
+                      agents.managedAgentsQuery.isError ||
+                      agents.startableAgentCount === 0
+                    }
+                    onClick={() => void agents.handleBulkStart()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <Play />
+                    {agents.bulkStartPending
+                      ? `시작 중 ${agents.bulkStartProgress.completed}/${agents.bulkStartProgress.total}`
+                      : "전체 에이전트 시작"}
+                  </Button>
+                  <Button
                     data-testid="agent-defaults-button"
                     ref={fullAiDefaultsTriggerRef}
                     onClick={(event) => openAiDefaults(event.currentTarget)}
@@ -191,6 +209,22 @@ export function AgentsView() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
+                      data-testid="start-all-agents-menu-item"
+                      disabled={
+                        isActionPending ||
+                        !agents.commandScope ||
+                        agents.managedAgentsQuery.isLoading ||
+                        agents.managedAgentsQuery.isError ||
+                        agents.startableAgentCount === 0
+                      }
+                      onSelect={() => void agents.handleBulkStart()}
+                    >
+                      <Play />
+                      {agents.bulkStartPending
+                        ? `시작 중 ${agents.bulkStartProgress.completed}/${agents.bulkStartProgress.total}`
+                        : "전체 에이전트 시작"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
                       onSelect={() => {
                         openAiDefaults(compactActionsTriggerRef.current);
                       }}
@@ -215,7 +249,7 @@ export function AgentsView() {
                 </DropdownMenu>
               </>
             }
-            description="Set up and manage your agents."
+            description="로컬 에이전트는 Start 후 앱을 다시 열 때 자동으로 시작됩니다. 전체 시작은 이 기기에서 관리하는 에이전트에 적용됩니다."
             title="Agents"
           />
           <div className="flex flex-col gap-8">

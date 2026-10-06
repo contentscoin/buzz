@@ -379,6 +379,23 @@ with a TypeScript lookup table or an id comparison in a component.
     deletion from a missing local record alone because another device can own
     the retained agent head.
 
+## Launch restore and bulk start
+
+An explicit successful local Start (including runtime-pair Start/Restart) persists
+`start_on_app_launch=true`. Internal lazy bootstrap and startup reconciliation
+never change this preference. App shutdown and ordinary pair Stop preserve it;
+the existing explicit startup toggle can disable launch restore after Start.
+Do not replay unfinished model turns when restoring the lazy harness.
+
+Agents exposes bulk Start in its wide header and compact action menu. It starts
+existing locally managed records, including provider-backed records through their
+normal deploy path; it does not create persona instances or control external
+relay identities. Running/deployed records are skipped. Capture relay and signer
+before awaits, retain native scope checks and exact-key presence guards, bound
+concurrency to two starts, block repeated clicks, and report partial failures.
+Stop dispatching new starts after a community/owner switch; do not publish the
+old operation's feedback into the new scope.
+
 ## Channel-only runtime controls
 
 Desktop observer controls identify a channel, not a thread session. The harness

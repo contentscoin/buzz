@@ -229,7 +229,7 @@ pub(crate) fn start_managed_agent_runtime_pair_lazy(
     relay_url: String,
     app: AppHandle,
 ) -> Result<ManagedAgentRuntimeStatus, String> {
-    start_pair(pubkey, relay_url, true, None, None, app)
+    start_pair(pubkey, relay_url, true, None, None, false, app)
 }
 
 #[tauri::command]
@@ -250,6 +250,7 @@ pub fn start_managed_agent_runtime(
         true,
         None,
         Some(workspace_signer.as_str()),
+        true,
         app,
     )
 }
@@ -260,6 +261,7 @@ fn start_pair(
     lazy: bool,
     expected_updated_at: Option<&str>,
     bound_owner_pubkey: Option<&str>,
+    remember_start: bool,
     app: AppHandle,
 ) -> Result<ManagedAgentRuntimeStatus, String> {
     let state = app.state::<AppState>();
@@ -292,6 +294,11 @@ fn start_pair(
         .is_some_and(|runtime| runtime.child.try_wait().ok().flatten().is_none())
     {
         let status = status_for(&app, record, &key, runtimes.get(&key), None);
+        if remember_start && !record.start_on_app_launch {
+            record.start_on_app_launch = true;
+            record.updated_at = crate::util::now_iso();
+            save_managed_agents(&app, &records)?;
+        }
         return Ok(status);
     }
     runtimes.remove(&key);
@@ -324,6 +331,9 @@ fn start_pair(
     record.last_started_at = Some(now);
     record.last_stopped_at = None;
     record.last_error = None;
+    if remember_start {
+        record.start_on_app_launch = true;
+    }
     runtimes.insert(key.clone(), ManagedAgentPairRuntime::starting(process));
     let status = status_for(&app, record, &key, runtimes.get(&key), None);
     drop(runtimes);
@@ -428,6 +438,7 @@ pub fn restart_managed_agent_runtime(
         true,
         None,
         Some(workspace_signer.as_str()),
+        true,
         app,
     )
 }
@@ -554,6 +565,7 @@ pub async fn reconcile_managed_agent_runtimes(
                         true,
                         Some(&record.updated_at),
                         None,
+                        false,
                         app.clone(),
                     ) {
                         Ok(mut status) => {

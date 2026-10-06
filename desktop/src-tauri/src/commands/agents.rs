@@ -266,6 +266,9 @@ pub(super) async fn start_local_agent_with_preflight(
         &workspace_relay_url,
         replay_floor_unix,
     )?;
+    // A successful explicit Start also opts this local agent into launch restore.
+    // App shutdown stops processes without clearing this persisted preference.
+    record.start_on_app_launch = true;
     save_managed_agents(app, &records)?;
     if let Some(saved_record) = records.iter().find(|r| r.pubkey == pubkey) {
         retain_managed_agent_pending(app, state, saved_record);
