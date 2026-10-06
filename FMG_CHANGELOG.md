@@ -376,3 +376,13 @@ Base: upstream `desktop-v0.5.25` (`c8f73213089cbd5a0f1e675d3193558280d46e10`).
   desktop work-report card.
 - Ordinary summary delivery is best effort because the behavior is enforced by
   the agent prompt rather than a programmatic post-publish hook.
+# 2026-10-07 — 커뮤니티별 작업·결과 문서 연결
+
+- Supervisor 0.10.0 / task server 0.9.0 / Computer 0.4.0 / worker protocol 7.
+- 등록된 `community_id` 선택으로 제안·조회·실행 인수·문서 접근을 분리한다.
+  생략하면 기존 BD 원장, `fmg`면 fmg 원장이다. 기존 기록·문서·권한을 이전하지 않는다.
+- fmg Computer는 소유자 암호화 작업·문서 전용 연결과 별도 receipt 저장소를 제공한다.
+  BD 브라우저 프로필과 대화 기록을 노출하지 않는다. Desktop .21 RPC를 유지한다.
+- 소유권·90초 snapshot·요청 UUID·해시 승인·성공 종료 receipt·접근 revision 기준은 유지한다.
+- 커뮤니티별 독립 코드 저장소와 자동 총괄 배정·보고는 이번 변경에 포함되지 않는다.
+  빌드·배포와 실제 작업 실행·Desktop 문서 저장 성공은 각각 확인해야 한다.

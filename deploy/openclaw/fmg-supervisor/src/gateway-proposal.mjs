@@ -17,11 +17,14 @@ export const gatewayProposalDefinition = {
   name: "fmg_buzz_gateway_propose_task",
   label: "Buzz Managed Repository Proposal",
   description:
-    "Create an immutable, repository-bound Buzz coding proposal from the direct Telegram owner main conversation. Does not execute or approve. Reuse the same request UUID after a lost response. Show the full instructions, role, model, effort, repository, commit, branch and hash; only the human owner sends the exact /fmg_task approve command. Ledger audience remains the default BD community; fmg is a separate conversation connection. No document access grant or external delivery.",
+    "Create an immutable, repository-bound Buzz coding proposal from the direct Telegram owner main conversation. Does not execute or approve. Reuse the same request UUID after a lost response. Show the full instructions, role, model, effort, repository, commit, branch and hash; only the human owner sends the exact /fmg_task approve command. community_id selects an explicitly registered community; omission preserves the default BD audience. Each ledger and document scope is isolated. No document access grant or external delivery.",
   parameters: Type.Object(
     {
       request_id: Type.String({ pattern: uuid.source, maxLength: 36 }),
       project_id: Type.Literal("buzz"),
+      community_id: Type.Optional(
+        Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,39}$" }),
+      ),
       role_id: Type.Union(roles.map((role) => Type.Literal(role))),
       instructions: Type.String({ minLength: 1, maxLength: 4000 }),
       effort: Type.Optional(
@@ -78,6 +81,7 @@ export function registerGatewayProposalTool(api) {
                   [
                     "request_id",
                     "project_id",
+                    "community_id",
                     "role_id",
                     "instructions",
                     "effort",
@@ -85,6 +89,8 @@ export function registerGatewayProposalTool(api) {
                 ) &&
                 uuid.test(input.request_id) &&
                 input.project_id === "buzz" &&
+                (input.community_id === undefined ||
+                  /^[a-z0-9][a-z0-9_-]{0,39}$/.test(input.community_id)) &&
                 roles.includes(input.role_id) &&
                 typeof input.instructions === "string" &&
                 input.instructions.trim().length > 0 &&
@@ -99,13 +105,19 @@ export function registerGatewayProposalTool(api) {
               AbortSignal.timeout(55000),
               ...(signal ? [signal] : []),
             ]);
-            const before = (await observation.execute(callId, {}, combined))
-              .details;
+            const selection =
+              input.community_id === undefined
+                ? {}
+                : { community_id: input.community_id };
+            const before = (
+              await observation.execute(callId, selection, combined)
+            ).details;
             const config = current(context),
               expected = fingerprint(config);
             const settings = config.plugins.entries["fmg-supervisor"].config;
-            const after = (await observation.execute(callId, {}, combined))
-              .details;
+            const after = (
+              await observation.execute(callId, selection, combined)
+            ).details;
             requireValue(
               before.generation === after.generation &&
                 before.relay_origin === after.relay_origin &&
@@ -167,6 +179,7 @@ export function registerGatewayProposalTool(api) {
               result_access: "fmg_buzz_gateway_get_task",
               request_id: input.request_id,
               proposal_account: "gateway_owner_main",
+              community_id: input.community_id ?? "default",
               execution_performed: false,
               document_access: "separate_original_proposing_account_required",
               source_content:

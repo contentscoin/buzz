@@ -1,3 +1,23 @@
+# Community ledger 0.10.0
+
+Task server 0.9.0 and protocol 7 select a fresh owner/community/Gateway snapshot.
+Gateway status, proposal and task read tools accept optional `community_id` from
+the explicit project registry (for example `fmg`). Omission preserves default BD.
+`/fmg_task list fmg` reads only that community; IDs select their immutable stored
+audience for approval, recovery and `/fmg_document` commands. Existing OAuth
+resources remain default-community-only; fmg cannot borrow their tasks/grants.
+Desktop .21 already binds each request and encrypted draft to its active community.
+Computer 0.4.0 adds separate signed connections and receipt databases for registered
+communities, exposing only task/document actions on non-default communities.
+No browser profile, navigation, transcripts or implicit document grants cross scopes.
+Expiry, owner revocation, unknown/duplicate registrations and stale generations deny
+access without default fallback. Successful terminal receipts still gate document saves.
+Coding worktrees remain the shared Buzz repository. This does not provision a separate
+repository for BD/fmg, automate role scheduling, send summaries or prove a model ran.
+Build/deployment evidence must be reported separately from Desktop and execution use.
+
+## Earlier implementation notes
+
 # FMG supervisor producer
 
 ## Version 0.9.1 main proposal document delegation

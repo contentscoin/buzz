@@ -44,7 +44,8 @@ export function registerDocumentCommand(api) {
             enabled: action === "allow",
           };
         } else return { text: usage };
-        const audience = await owner(context.config, settings);
+        const task = await operator(settings, "get", { task_id: args.task_id });
+        const audience = await owner(context.config, settings, task.proposal);
         directOwner(context, settings);
         const result = await operator(
           settings,

@@ -6,6 +6,7 @@ import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
 import { ownerObservationFactory } from "./gateway-status.mjs";
 import { roleModel } from "./model-binding.mjs";
 import { projectBindings } from "./project-binding.mjs";
+import { operatorRequest } from "../../fmg-computer/src/task-view.mjs";
 
 const execFile = promisify(callbackExecFile);
 const id = /^[a-z0-9][a-z0-9_-]{0,39}$/;
@@ -151,7 +152,7 @@ async function connections(signal) {
   return accounts;
 }
 
-async function observeProject(config, project, statuses, ledgerOrigin, signal) {
+async function observeProject(config, project, statuses, signal) {
   const scoped = accountConfig(config, project.buzzAccountId);
   const binding = await identity(scoped);
   try {
@@ -200,6 +201,23 @@ async function observeProject(config, project, statuses, ledgerOrigin, signal) {
       status.running === true &&
       status.connected === true &&
       status.probe.ok === true;
+    let ledger = "unavailable";
+    try {
+      const result = await operatorRequest(
+        config,
+        { owner, agent: binding.agent, origin: binding.origin },
+        "view_list",
+        {},
+        signal,
+      );
+      requireValue(
+        Array.isArray(result.tasks) && result.tasks.length <= 25,
+        "project_ledger_invalid",
+      );
+      ledger = "community_isolated";
+    } catch {
+      signal.throwIfAborted();
+    }
     return {
       project_id: project.id,
       name: project.name,
@@ -223,8 +241,7 @@ async function observeProject(config, project, statuses, ledgerOrigin, signal) {
         };
       }),
       roles,
-      task_ledger_scope:
-        binding.origin === ledgerOrigin ? "legacy_community_only" : "not_bound",
+      task_ledger_scope: ledger,
       project_execution: "not_configured",
       repository_binding: "not_configured",
     };
@@ -239,7 +256,7 @@ async function collect(config, ledgerOrigin, signal) {
   const statuses = await connections(signal);
   const results = await Promise.allSettled(
     projects.map((project) =>
-      observeProject(config, project, statuses, ledgerOrigin, signal),
+      observeProject(config, project, statuses, signal),
     ),
   );
   signal.throwIfAborted();
@@ -268,13 +285,13 @@ async function collect(config, ledgerOrigin, signal) {
       project_id: "buzz",
       manager: "main",
       execution_host: "hostinger",
-      task_ledger_scope: "default_community_only",
+      task_ledger_scope: "selected_registered_community",
       observed_role_bindings: await projectBindings(config, signal),
       dispatch: "direct_owner_hash_approval_required",
       execution_completed: false,
     },
     source_content:
-      "Community connections are distinct from the managed Buzz code project. Connectivity does not prove task completion. New code proposals bind a worktree and use the default community ledger; legacy tasks have no repository binding. fmg does not gain access to the default ledger or private documents.",
+      "Community connections are distinct from the managed Buzz code project. Connectivity does not prove task completion. Explicit community selection binds each new proposal and private document scope. Legacy OAuth remains default-community-only. Coding role worktrees still belong to the shared Buzz repository, not independent community repositories.",
   };
 }
 
@@ -409,12 +426,12 @@ export function registerProjectCommand(api) {
                     `소유권: ${project.owner_binding_verified ? "검증됨" : "확인 불가"}`,
                     `응답 방: ${project.reply_rooms?.map((room) => `${room.name ?? room.room_id}${room.require_mention === true ? " (멘션 필요)" : ""}`).join(", ") || "확인 불가"}`,
                     `역할: ${project.roles?.map((role) => `${role.role_id} · ${role.configured_model} · ${role.configured_effort}`).join("\n") || "배정 없음 또는 조회 불가"}`,
-                    `작업 원장: ${project.task_ledger_scope === "legacy_community_only" ? "중앙 작업 원장 · 새 Buzz 코드 제안은 저장소 결속, 기존 작업은 미결속" : "이 커뮤니티에는 연결되지 않음"}`,
+                    `작업 원장: ${project.task_ledger_scope === "community_isolated" ? "커뮤니티별 분리 원장 · 현재 조회 확인" : "이 커뮤니티 원장 조회 불가 · 최신 소유권 snapshot 확인 필요"}`,
                     "코드 프로젝트와 커뮤니티 연결은 별개입니다.",
                   ].join("\n"),
                 )
                 .join("\n\n") +
-              `\n\n중앙 코드 프로젝트: buzz (contentscoin/buzz)\n총괄: Hostinger main\n작업 공간 확인: ${result.managed_code_project.observed_role_bindings.length}/5개 역할\n제안: 소유자 Telegram 개인 대화에서 총괄자에게 요청\n실행: 직접 /fmg_task 해시 승인 필요\n원장: BD 기본 연결 · fmg 원장 접근/자동 보고는 연결되지 않음\n연결 정상과 작업 공간 확인은 실제 실행 완료를 뜻하지 않습니다.`,
+              `\n\n중앙 코드 프로젝트: buzz (contentscoin/buzz)\n총괄: Hostinger main\n작업 공간 확인: ${result.managed_code_project.observed_role_bindings.length}/5개 역할\n제안: 소유자 Telegram 개인 대화에서 총괄자에게 요청\n실행: 직접 /fmg_task 해시 승인 필요\n원장: community_id로 선택 · 생략하면 BD · 커뮤니티별 기록과 문서 권한 분리\n코드 작업 공간: 공용 buzz 저장소 · 커뮤니티별 별도 저장소와 자동 보고는 미구현\n연결 정상과 작업 공간 확인은 실제 실행 완료를 뜻하지 않습니다.`,
           };
         } finally {
           binding.key.fill(0);

@@ -1,4 +1,9 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
+import {
+  audienceScope,
+  distinctCommunities,
+  closeCommunities,
+} from "../../fmg-computer/src/community-binding.mjs";
 import { createTaskWorker, registerTaskCommand } from "./tasks.mjs";
 import { registerDocumentCommand } from "./document-command.mjs";
 import {
@@ -111,7 +116,7 @@ function ownedProfile(event, owner) {
 }
 
 /** This producer exports only allowlisted summaries; the MCP never gets Buzz keys. */
-async function createProducer(context, settings) {
+async function createProducer(context, settings, legacy = true) {
   const binding = await identity(context.config);
   const owner = settings.ownerPubkey;
   const generation = randomUUID();
@@ -120,10 +125,20 @@ async function createProducer(context, settings) {
     timer,
     running;
   await mkdir(root, { recursive: true, mode: 0o700 });
+  const scope = audienceScope({
+    owner_pubkey: owner,
+    relay_origin: binding.origin,
+    gateway_agent_pubkey: binding.agent,
+  });
   async function save(data) {
-    const temporary = `${root}/snapshot.${generation}.tmp`;
-    await writeFile(temporary, JSON.stringify(data), { mode: 0o600 });
-    await rename(temporary, `${root}/snapshot.json`);
+    for (const name of [
+      `snapshot-${scope}.json`,
+      ...(legacy ? ["snapshot.json"] : []),
+    ]) {
+      const temporary = `${root}/${name}.${generation}.tmp`;
+      await writeFile(temporary, JSON.stringify(data), { mode: 0o600 });
+      await rename(temporary, `${root}/${name}`);
+    }
   }
   const signal = () =>
     AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]);
@@ -424,14 +439,35 @@ const entry = definePluginEntry({
         const settings =
           context.config.plugins?.entries?.["fmg-supervisor"]?.config ??
           api.pluginConfig;
-        stop = await createProducer(context, settings);
-        stopTasks = await createTaskWorker(context, settings);
+        const producers = [];
+        try {
+          for (const entry of await distinctCommunities(context.config))
+            producers.push(
+              await createProducer(
+                { ...context, config: entry.config },
+                settings,
+                entry.accountId === "default",
+              ),
+            );
+          stop = () => closeCommunities(producers);
+          stopTasks = await createTaskWorker(context, settings);
+        } catch (error) {
+          await closeCommunities(producers);
+          stop = undefined;
+          throw error;
+        }
       },
       async stop() {
-        await stopTasks?.();
-        stopTasks = undefined;
-        await stop?.();
-        stop = undefined;
+        try {
+          await stopTasks?.();
+        } finally {
+          stopTasks = undefined;
+          try {
+            await stop?.();
+          } finally {
+            stop = undefined;
+          }
+        }
       },
     });
   },

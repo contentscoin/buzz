@@ -1,4 +1,9 @@
 import { identity, profileOwner } from "./binding.mjs";
+import {
+  audienceScope,
+  distinctCommunities,
+  closeCommunities,
+} from "./community-binding.mjs";
 import { taskView } from "./task-view.mjs";
 import {
   documentActions,
@@ -37,17 +42,6 @@ const schema = {
   required: ["ownerPubkey", "browserProfile"],
   additionalProperties: false,
 };
-const actions = new Set([
-  "capabilities.get",
-  "state.get",
-  "tabs.list",
-  "tab.read",
-  "screen.capture",
-  "transcript.list",
-  "tasks.list",
-  "tasks.get",
-  ...documentActions,
-]);
 
 function requireCondition(condition, code) {
   if (!condition) throw new Error(code);
@@ -64,7 +58,7 @@ function safeUrl(raw) {
 }
 
 /** One service instance owns its lease, connection, queue, and encrypted receipts. */
-async function createBroker(context, settings) {
+async function createBroker(context, settings, legacy = true) {
   const binding = await identity(context.config);
   const { key, agent, origin, encoded } = binding,
     owner = settings.ownerPubkey;
@@ -75,7 +69,36 @@ async function createBroker(context, settings) {
     BUZZ_PRIVATE_KEY: encoded,
     BUZZ_AUTH_TAG: binding.authTag ? JSON.stringify(binding.authTag) : "",
   };
-  const root = "/data/.openclaw/fmg-computer";
+  const actions = legacy
+    ? new Set([
+        "capabilities.get",
+        "state.get",
+        "tabs.list",
+        "tab.read",
+        "screen.capture",
+        "transcript.list",
+        "tasks.list",
+        "tasks.get",
+        ...documentActions,
+      ])
+    : new Set([
+        "capabilities.get",
+        "tasks.list",
+        "tasks.get",
+        ...documentActions,
+      ]);
+  const baseRoot = "/data/.openclaw/fmg-computer";
+  const root = legacy
+    ? baseRoot
+    : join(
+        baseRoot,
+        "communities",
+        audienceScope({
+          owner_pubkey: owner,
+          relay_origin: origin,
+          gateway_agent_pubkey: agent,
+        }),
+      );
   await mkdir(root, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(join(root, "receipts.sqlite"));
   db.exec(
@@ -295,7 +318,8 @@ async function createBroker(context, settings) {
     if (request.action === "capabilities.get")
       return {
         actions: [...actions],
-        browserProfile: settings.browserProfile,
+        browserProfile: legacy ? settings.browserProfile : null,
+        browserAvailable: legacy,
         readOnly: false,
         documentWritesRequireProposingClientGrant: true,
       };
@@ -626,10 +650,22 @@ const entry = definePluginEntry({
         ],
       },
       async start(context) {
-        stop = await createBroker(
-          context,
-          context.config.plugins.entries["fmg-computer"].config,
-        );
+        const brokers = [];
+        try {
+          for (const entry of await distinctCommunities(context.config))
+            brokers.push(
+              await createBroker(
+                { ...context, config: entry.config },
+                context.config.plugins.entries["fmg-computer"].config,
+                entry.accountId === "default",
+              ),
+            );
+          stop = () => closeCommunities(brokers);
+        } catch (error) {
+          await closeCommunities(brokers);
+          stop = undefined;
+          throw error;
+        }
       },
       async stop() {
         await stop?.();

@@ -1,3 +1,16 @@
+# Community task/document brokers 0.4.0
+
+Uses only explicitly registered Supervisor community accounts. The default broker
+keeps its existing browser/profile/receipt storage. Additional brokers expose only
+`capabilities.get`, task reads and explicitly delegated document actions. They use
+isolated audience-hashed receipt directories, exact relay checks, signed requests,
+NIP-44 responses and live owner verification. No browser actions are permitted.
+Startup checks duplicate audiences before creating brokers; partial startup closes
+all created services. A missing broker/expired snapshot is unavailable, not an empty
+success. Desktop .21 task/document RPC requires no binary change for this server slice.
+
+## Earlier implementation notes
+
 # FMG Server Computer 0.3.0
 
 ## Private result documents (source implementation; deployment is separate)

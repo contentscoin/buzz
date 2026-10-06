@@ -1,3 +1,16 @@
+# Community operator scopes 0.9.0
+
+Private operator task/document actions select producer-written audience-hashed
+snapshots with the existing 90-second owner verification. Missing or invalid scopes
+deny access; no fallback to default. OAuth tasks/documents continue to use the
+default snapshot and original proposing client. Schema 3/4 proposals remain intact.
+Protocol 7 is required to claim work after this deployment; old workers fail closed.
+Main proposal UUID deduplication and document CAS/immutable receipts remain scoped
+to owner/community/Gateway. No existing tasks, grants, result sources or documents
+are moved to another community. Physical coding worktrees remain shared per role.
+
+## Earlier implementation notes
+
 # FMG Buzz Supervisor MCP
 
 ## Desktop document connection (server 0.7.0 source)

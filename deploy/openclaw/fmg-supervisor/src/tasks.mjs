@@ -1,4 +1,8 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
+import {
+  audienceConfig,
+  communityConfig,
+} from "../../fmg-computer/src/community-binding.mjs";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
@@ -69,9 +73,12 @@ export async function operator(settings, action, args = {}) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-/** Verify the default Buzz owner and return only its public audience binding. */
+/** Verify the selected registered audience and return only its public binding. */
 export async function owner(config, settings, expected) {
-  const binding = await identity(config);
+  const selected = expected
+    ? await audienceConfig(config, settings.ownerPubkey, expected)
+    : config;
+  const binding = await identity(selected);
   try {
     if (
       (await profileOwner(binding, AbortSignal.timeout(12000))) !==
@@ -125,7 +132,12 @@ export function registerTaskCommand(api) {
         const parts = (context.args ?? "").trim().split(/\s+/);
         const action = parts[0];
         let args;
-        if (action === "list" && parts.length === 1) args = {};
+        if (
+          action === "list" &&
+          parts.length <= 2 &&
+          (parts.length === 1 || /^[a-z0-9][a-z0-9_-]{0,39}$/.test(parts[1]))
+        )
+          args = {};
         else if (action === "get" && parts.length === 2 && uuid.test(parts[1]))
           args = { task_id: parts[1] };
         else if (
@@ -137,9 +149,16 @@ export function registerTaskCommand(api) {
           args = { task_id: parts[1], proposal_hash: parts[2] };
         else
           return {
-            text: "사용법: /fmg_task list\n/fmg_task get <작업 ID>\n/fmg_task approve <작업 ID> <전체 해시>\n/fmg_task cancel <작업 ID> <전체 해시>\n/fmg_task reconcile <작업 ID> <전체 해시>\n닷에서 제안 내용을 먼저 확인하세요.",
+            text: "사용법: /fmg_task list [커뮤니티 ID]\n/fmg_task get <작업 ID>\n/fmg_task approve <작업 ID> <전체 해시>\n/fmg_task cancel <작업 ID> <전체 해시>\n/fmg_task reconcile <작업 ID> <전체 해시>\n닷에서 제안 내용을 먼저 확인하세요.",
           };
-        await owner(context.config, settings);
+        const taskBefore =
+          action === "list"
+            ? null
+            : await operator(settings, "get", { task_id: args.task_id });
+        const audience =
+          action === "list"
+            ? await owner(communityConfig(context.config, parts[1]), settings)
+            : await owner(context.config, settings, taskBefore.proposal);
         directOwner(context, settings);
         const result =
           action === "reconcile"
@@ -148,7 +167,19 @@ export function registerTaskCommand(api) {
                 owner,
                 directOwner,
               })
-            : await operator(settings, action, args);
+            : await operator(
+                settings,
+                action === "list"
+                  ? "view_list"
+                  : action === "get"
+                    ? "view_get"
+                    : action,
+                ["list", "get"].includes(action)
+                  ? { ...audience, ...args }
+                  : args,
+              );
+        await owner(context.config, settings, audience);
+        directOwner(context, settings);
         if (action === "list")
           return {
             text:
@@ -325,8 +356,8 @@ export async function createTaskWorker(context, settings) {
       pending = undefined;
       return;
     }
-    await owner(context.config, settings);
-    const claim = await operator(settings, "claim", { worker_protocol: 6 });
+    // Claim checks the stored audience's fresh snapshot; dispatch verifies that live owner.
+    const claim = await operator(settings, "claim", { worker_protocol: 7 });
     if (!claim.task) return;
     let result;
     try {

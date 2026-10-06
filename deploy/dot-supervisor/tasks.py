@@ -87,11 +87,11 @@ class Tasks:
         proposal = json.loads(row["proposal"])
         return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "role_id": proposal["role_id"], "requested_model": proposal["requested_model"], "requested_effort": proposal.get("requested_effort"), "proposal_hash": row["proposal_hash"], "project_id": proposal.get("project", {}).get("project_id"), "source_commit": proposal.get("project", {}).get("source_commit")}
 
-    def call(self, name, args, client, project=None):
+    def call(self, name, args, client, project=None, audience=None):
         if not isinstance(args, dict):
             raise ValueError("object_required")
         with self.store.lock, self.store.db:
-            snapshot()  # Revoked or expired owner observations also deny stored result access.
+            snapshot(audience)  # Revoked or expired observations also deny stored result access.
             self.expire()
             if name == "fmg_buzz_get_task" and set(args) == {"task_id"}:
                 result = self.view(self.read(args["task_id"], client))
@@ -109,7 +109,7 @@ class Tasks:
                         raise ValueError("request_conflict")
                     result = self.view(old)
                 else:
-                    current = snapshot()
+                    current = snapshot(audience)
                     role = next((row for row in current["gateway"]["roles"] if row["role_id"] == args["role_id"]), None)
                     if not role or not re.fullmatch(r"[a-z0-9_-]+/[a-zA-Z0-9._:-]{1,100}", role.get("configured_model", "")) or not re.fullmatch(r"[0-9a-f]{64}", role.get("model_binding", "")):
                         raise ValueError("role_model_unavailable")
@@ -143,7 +143,7 @@ class Tasks:
             if action == "propose_project":
                 binding_keys = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
                 expected = set(binding_keys) | {"request_id", "role_id", "instructions", "project"}
-                current = snapshot()
+                current = snapshot(args)
                 if set(args) not in (expected, expected | {"effort"}) or any(args[key] != current[key] for key in binding_keys):
                     raise ValueError("audience_changed")
                 parameters = {key: args[key] for key in ("request_id", "role_id", "instructions", "effort") if key in args}
@@ -160,11 +160,11 @@ class Tasks:
                 if not isinstance(project, dict) or project not in current.get("project_bindings", []) or project.get("project_id") != "buzz" or project.get("role_id") != args["role_id"]:
                     raise ValueError("project_binding_unavailable")
                 # Reserved namespace: never borrow a ChatGPT OAuth client's document rights.
-                return self.call("fmg_buzz_propose_task", parameters, client, project)["structuredContent"]
+                return self.call("fmg_buzz_propose_task", parameters, client, project, args)["structuredContent"]
             if action in ("view_list", "view_get"):
                 binding_keys = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
                 expected_keys = set(binding_keys) | ({"task_id"} if action == "view_get" else set())
-                current = snapshot()
+                current = snapshot(args)
                 if set(args) != expected_keys or any(args[key] != current[key] for key in binding_keys):
                     raise ValueError("audience_changed")
                 def matches(row):
@@ -197,8 +197,8 @@ class Tasks:
                 return self.view(self.read(row["id"]))
             if action == "reconcile" and set(args) == {"task_id", "proposal_hash", "revision", "result", "evidence"}:
                 row = self.read(args["task_id"])
-                current = snapshot()
                 proposal = json.loads(row["proposal"])
+                current = snapshot(proposal)
                 if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")):
                     raise ValueError("audience_changed")
                 if row["status"] != "needs_reconcile" or type(args["revision"]) is not int or row["revision"] != args["revision"] or not isinstance(args["proposal_hash"], str) or not secrets.compare_digest(row["proposal_hash"], args["proposal_hash"]):
@@ -235,8 +235,8 @@ class Tasks:
                 row = self.read(args["task_id"])
                 if not isinstance(args["proposal_hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", args["proposal_hash"]) or not secrets.compare_digest(row["proposal_hash"], args["proposal_hash"]):
                     raise ValueError("proposal_changed")
-                current = snapshot()
                 proposal = json.loads(row["proposal"])
+                current = snapshot(proposal)
                 if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")):
                     raise ValueError("audience_changed")
                 if action == "approve":
@@ -254,14 +254,14 @@ class Tasks:
                 self.store.db.execute("UPDATE tasks SET status=?,revision=revision+1,updated=? WHERE id=? AND revision=?", (status, time.time(), row["id"], row["revision"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))
-            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 6:
+            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 7:
                 if self.store.db.execute("SELECT 1 FROM tasks WHERE status IN ('dispatching','cancel_requested','needs_reconcile') LIMIT 1").fetchone():
                     return {"task": None, "reason": "busy_or_unreconciled"}
                 row = self.store.db.execute("SELECT * FROM tasks WHERE status='approved' ORDER BY created LIMIT 1").fetchone()
                 if not row:
                     return {"task": None}
-                current = snapshot()
                 proposal = json.loads(row["proposal"])
+                current = snapshot(proposal)
                 role = next((item for item in current["gateway"]["roles"] if item["role_id"] == proposal["role_id"]), None)
                 project_valid = (proposal.get("schema") == 3 and "project" not in proposal) or (proposal.get("schema") == 4 and proposal.get("project") in current.get("project_bindings", []))
                 if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")) or not project_valid or not role or role["configured_model"] != proposal["requested_model"] or not re.fullmatch(r"[0-9a-f]{64}", proposal.get("model_binding", "")) or role.get("model_binding") != proposal["model_binding"] or proposal.get("requested_effort") not in role.get("supported_efforts", []):

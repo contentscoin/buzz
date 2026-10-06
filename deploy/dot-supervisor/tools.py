@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from store import canonical
+from store import canonical, digest
 
 NAMES = ("get_status", "list_agents", "get_activity")
 DESCRIPTIONS = (
@@ -19,9 +19,20 @@ CATALOG = [{"name": "fmg_buzz_"+name, "description": description,
     for name, description in zip(NAMES, DESCRIPTIONS)]
 
 
-def snapshot():
+def snapshot(audience=None):
     path = Path(os.environ.get("FMG_SNAPSHOT", "/snapshot/snapshot.json"))
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    keys = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
+    if audience is not None:
+        if not isinstance(audience, dict) or any(not isinstance(audience.get(key), str) for key in keys):
+            raise ValueError("audience_changed")
+        binding = {key: audience[key] for key in keys}
+        if binding["owner_pubkey"] != os.environ["FMG_OWNER_PUBKEY"]:
+            raise ValueError("owner_binding_changed")
+        path = path.parent / ("snapshot-" + digest(canonical(binding).encode()) + ".json")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise ValueError("observation_unavailable") from error
     with os.fdopen(fd, "rb") as source:
         raw = source.read(131073)
     if len(raw) > 131072:
@@ -31,6 +42,8 @@ def snapshot():
         raise ValueError("observation_unavailable")
     if value.get("owner_pubkey") != os.environ["FMG_OWNER_PUBKEY"]:
         raise ValueError("owner_binding_changed")
+    if audience is not None and any(value.get(key) != audience[key] for key in keys):
+        raise ValueError("audience_changed")
     observed = datetime.fromisoformat(value["observed_at"]).timestamp()
     expires = datetime.fromisoformat(value["expires_at"]).timestamp()
     now = time.time()

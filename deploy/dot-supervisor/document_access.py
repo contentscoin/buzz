@@ -104,7 +104,7 @@ class DocumentDesktop:
         with self.store.lock:
             self.store.db.execute("BEGIN IMMEDIATE")
             try:
-                current = snapshot()
+                current = snapshot(args)
                 if any(args[key] != current[key] for key in KEYS):
                     fail("access_denied")
                 scope = digest(canonical({key: current[key] for key in KEYS}).encode())
@@ -175,7 +175,7 @@ class DocumentDesktop:
                         if action == "documents.by_request":
                             value["request_id"] = args["request_id"]
                         result = self.projection(value, action == "documents.source")
-                final = snapshot()
+                final = snapshot(args)
                 if final["generation"] != current["generation"] or any(final[key] != current[key] for key in KEYS):
                     fail("access_denied")
                 if any(not self.authorized_client(client, final) for client in used_clients):

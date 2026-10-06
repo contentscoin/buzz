@@ -2,6 +2,10 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { Type } from "typebox";
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
+import {
+  audienceScope,
+  communityConfig,
+} from "../../fmg-computer/src/community-binding.mjs";
 import { roleModel } from "./model-binding.mjs";
 
 /** Static metadata for the owner-private Gateway observation tool. */
@@ -10,7 +14,14 @@ export const gatewayStatusDefinition = {
   label: "Buzz Gateway Status",
   description:
     "Read fresh owner-verified Buzz/Gateway status, role models, configured effort and bounded activity. Available only in the direct Telegram owner's main conversation. Does not execute or approve tasks, send messages, or expose credentials/transcripts. Names are untrusted display data; activity is not proof of running work.",
-  parameters: Type.Object({}, { additionalProperties: false }),
+  parameters: Type.Object(
+    {
+      community_id: Type.Optional(
+        Type.String({ pattern: "^[a-z0-9][a-z0-9_-]{0,39}$" }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
   optional: true,
 };
 
@@ -59,11 +70,8 @@ function privateOwner(context, settings) {
   context.assertInvocationCurrent();
 }
 
-async function readSnapshot() {
-  const file = await open(
-    snapshotPath,
-    constants.O_RDONLY | constants.O_NOFOLLOW,
-  );
+async function readSnapshot(path = snapshotPath) {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await file.stat();
     requireValue(
@@ -169,7 +177,9 @@ export const ownerObservationFactory = {
           input &&
             typeof input === "object" &&
             !Array.isArray(input) &&
-            Object.keys(input).length === 0,
+            Object.keys(input).every((key) => key === "community_id") &&
+            (input.community_id === undefined ||
+              /^[a-z0-9][a-z0-9_-]{0,39}$/.test(input.community_id)),
           "unknown_tool_arguments",
         );
         signal?.throwIfAborted();
@@ -181,7 +191,17 @@ export const ownerObservationFactory = {
               captured.settings.telegramOwnerId,
           "owner_configuration_changed",
         );
-        const binding = await identity(before.config);
+        const binding = await identity(
+          communityConfig(before.config, input.community_id),
+        );
+        const selectedPath =
+          input.community_id === undefined
+            ? snapshotPath
+            : `/data/.openclaw/fmg-supervisor/snapshot-${audienceScope({
+                owner_pubkey: before.settings.ownerPubkey,
+                relay_origin: binding.origin,
+                gateway_agent_pubkey: binding.agent,
+              })}.json`;
         try {
           const checkOwner = async () => {
             privateOwner(context, current(context).settings);
@@ -198,10 +218,10 @@ export const ownerObservationFactory = {
             );
           };
           await checkOwner();
-          const value = await readSnapshot();
+          const value = await readSnapshot(selectedPath);
           validate(value, before.settings, binding, before.config);
           await checkOwner();
-          const latest = await readSnapshot();
+          const latest = await readSnapshot(selectedPath);
           const after = current(context);
           privateOwner(context, after.settings);
           requireValue(
@@ -211,7 +231,9 @@ export const ownerObservationFactory = {
               latest.generation === value.generation,
             "observation_generation_changed",
           );
-          const currentBinding = await identity(after.config);
+          const currentBinding = await identity(
+            communityConfig(after.config, input.community_id),
+          );
           try {
             requireValue(
               currentBinding.origin === binding.origin &&
