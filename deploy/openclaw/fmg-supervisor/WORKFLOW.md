@@ -1,6 +1,6 @@
 # GPT dot · Buzz 작업 운영 안내
 
-## 커뮤니티와 코드 프로젝트 연결 (Supervisor 0.12.0)
+## 커뮤니티와 코드 프로젝트 연결 (Supervisor 0.12.1)
 
 커뮤니티의 `codeProjectId: buzz`를 명시한 경우에만 등록된 coding 역할의
 작업 공간 결속을 해당 커뮤니티의 저장소 제안에 사용한다. FMG는 공용

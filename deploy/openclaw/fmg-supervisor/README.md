@@ -1,4 +1,7 @@
-# Supervisor 0.12.0 — explicit community code-project execution binding
+# Supervisor 0.12.1 — explicit community code-project execution binding
+
+Scoped snapshot producers use the full runtime registry for code routing while
+keeping relay ownership probes scoped to their individual channel account.
 
 An optional `projects[].codeProjectId: "buzz"` explicitly maps a registered
 conversation community to the existing prepared Buzz repository. Its assigned

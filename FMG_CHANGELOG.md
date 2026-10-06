@@ -1,6 +1,8 @@
 # 2026-10-07 — FMG와 중앙 코드 프로젝트 실행 연결
 
-- Supervisor 0.12.0. task server 0.10.0, worker protocol 7, Desktop .21 유지.
+- Supervisor 0.12.1. task server 0.10.0, worker protocol 7, Desktop .21 유지.
+- 커뮤니티별 snapshot producer는 전체 registry로 코드 실행 매핑을 확인하고,
+  relay 소유권 조회에는 해당 커뮤니티 계정만 사용한다.
 - 등록된 커뮤니티의 `codeProjectId: buzz`로 명시적으로 실행 프로젝트를 연결한다.
 - 저장소·실행 준비 상태는 실제 역할 작업 공간 검사를 반영한다.
   고정 not_configured 표시를 제거하고 확인 실패는 requires_review/unavailable로 구분한다.

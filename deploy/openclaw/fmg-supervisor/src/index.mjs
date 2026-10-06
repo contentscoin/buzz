@@ -128,6 +128,7 @@ async function createProducer(
   legacy = true,
   registryGeneration,
   communityId,
+  routingConfig,
 ) {
   const binding = await identity(context.config);
   const owner = settings.ownerPubkey;
@@ -370,13 +371,13 @@ async function createProducer(
         observedProfiles.length >= 201 || authors.length >= 50,
       gateway,
       project_bindings: scopedProjectBindings(
-        context.config,
+        routingConfig,
         legacy && communityId === "default" ? undefined : communityId,
         codeBindings,
         legacy,
       ),
       project_execution_binding: projectExecutionObservation(
-        context.config,
+        routingConfig,
         legacy && communityId === "default" ? undefined : communityId,
         codeBindings,
       ),
@@ -481,6 +482,7 @@ const entry = definePluginEntry({
                 entry.accountId === "default",
                 registry.generation,
                 entry.id ?? "default",
+                context.config,
               ),
             );
           stop = async () => {
