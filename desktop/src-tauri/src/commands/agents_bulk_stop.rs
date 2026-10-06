@@ -26,6 +26,9 @@ pub async fn stop_all_local_managed_agents(
     expected_signer_pubkey: String,
     app: AppHandle,
 ) -> Result<StopAllLocalManagedAgentsResult, String> {
+    if expected_relay_url.trim().is_empty() || expected_signer_pubkey.trim().is_empty() {
+        return Err("전체 중지에는 현재 커뮤니티와 소유자 확인이 필요합니다.".into());
+    }
     let state = app.state::<AppState>();
     let _workspace = state.workspace_apply_lock.lock().await;
     crate::relay::bind_expected_relay_scope(
