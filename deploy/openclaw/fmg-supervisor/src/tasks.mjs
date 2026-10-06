@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
 import { approvedExecution, publicModel } from "./model-binding.mjs";
 import { finalResult } from "./terminal.mjs";
+import { assertProjectBinding } from "./project-binding.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
 const tokenFile = "/data/.openclaw/secrets/fmg-supervisor-operator.token";
@@ -18,7 +19,8 @@ const roles = new Set([
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-async function operator(settings, action, args = {}) {
+/** Authenticated internal ledger transport; callers must verify admitted owner authority. */
+export async function operator(settings, action, args = {}) {
   if (settings.operatorUrl !== endpoint || settings.tokenFile !== tokenFile)
     throw new Error("operator_config_invalid");
   const file = await open(tokenFile, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -146,13 +148,17 @@ export function registerTaskCommand(api) {
               result.tasks
                 .map(
                   (task) =>
-                    `${task.task_id} · ${task.role_id} · ${task.status}`,
+                    `${task.task_id} · ${task.project_id ?? "기존 작업"} · ${task.role_id} · ${task.status}`,
                 )
                 .join("\n") || "저장된 작업 제안이 없습니다.",
           };
         const task = result;
+        const project = task.proposal.project;
+        const projectText = project
+          ? `코드 프로젝트: ${project.project_id}\n저장소: ${project.repository_url}\n기준 commit: ${project.source_commit}\n역할 브랜치: ${project.branch}\n`
+          : "저장소 결속: 이전 작업 · 기록 없음\n";
         return {
-          text: `작업: ${task.task_id}\n상태: ${task.status}\n실행 ID: ${task.run_id ?? "아직 기록 없음"}\n역할: ${task.proposal.role_id}\n모델: ${task.proposal.requested_model}\neffort: ${task.proposal.requested_effort ?? "이전 작업 · 기록 없음"}\n요청:\n${clean(task.proposal.instructions, 5000)}\n해시: ${task.proposal_hash}\n승인: ${task.approve_command}\n${task.result ? `결과(에이전트 출력):\n${clean(task.result.reply, 18000) ?? task.result.error_code ?? task.result.status}` : "실행 완료 결과가 아직 없습니다."}\n${task.recovery_note ?? ""}\n실행 중 취소는 요청 상태이며 종료 확인을 뜻하지 않습니다.`,
+          text: `작업: ${task.task_id}\n상태: ${task.status}\n실행 ID: ${task.run_id ?? "아직 기록 없음"}\n${projectText}역할: ${task.proposal.role_id}\n모델: ${task.proposal.requested_model}\neffort: ${task.proposal.requested_effort ?? "이전 작업 · 기록 없음"}\n요청:\n${clean(task.proposal.instructions, 5000)}\n해시: ${task.proposal_hash}\n승인: ${task.approve_command}\n${task.result ? `결과(에이전트 출력):\n${clean(task.result.reply, 18000) ?? task.result.error_code ?? task.result.status}` : "실행 완료 결과가 아직 없습니다."}\n${task.recovery_note ?? ""}\n실행 중 취소는 요청 상태이며 종료 확인을 뜻하지 않습니다.`,
         };
       } catch {
         return {
@@ -191,6 +197,7 @@ export async function createTaskWorker(context, settings) {
       throw new Error("proposal_invalid");
     await owner(context.config, settings, proposal);
     await approvedExecution(proposal);
+    await assertProjectBinding(proposal, AbortSignal.timeout(30000));
     const admitted = await operator(settings, "get", { task_id: task.task_id });
     if (stopped || admitted.status !== "dispatching")
       return {
@@ -248,6 +255,7 @@ export async function createTaskWorker(context, settings) {
       }, 5000);
       // The immutable run ID is stored before admission. Execution is never retried.
       const selected = await approvedExecution(proposal);
+      await assertProjectBinding(proposal, controller.signal);
       if (stopped) throw new Error("worker_stopped_before_dispatch");
       receipt = await gateway(
         context.config,
@@ -311,7 +319,7 @@ export async function createTaskWorker(context, settings) {
       return;
     }
     await owner(context.config, settings);
-    const claim = await operator(settings, "claim", { worker_protocol: 5 });
+    const claim = await operator(settings, "claim", { worker_protocol: 6 });
     if (!claim.task) return;
     let result;
     try {

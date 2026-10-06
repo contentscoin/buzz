@@ -61,7 +61,7 @@ export async function approvedExecution(proposal) {
   );
   const selected = roleModel(config, proposal.role_id);
   if (
-    proposal.schema !== 3 ||
+    ![3, 4].includes(proposal.schema) ||
     selected.model !== proposal.requested_model ||
     selected.binding !== proposal.model_binding ||
     !selected.supportedEfforts.includes(proposal.requested_effort)

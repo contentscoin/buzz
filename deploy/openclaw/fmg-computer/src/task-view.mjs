@@ -116,6 +116,13 @@ export async function taskView(config, binding, request, signal) {
       requested_model: value.proposal.requested_model,
       requested_effort: value.proposal.requested_effort ?? null,
       instructions: value.proposal.instructions,
+      ...(value.proposal.schema === 4 &&
+      value.proposal.project?.project_id === "buzz"
+        ? {
+            project: value.proposal.project,
+            proposal_account: value.proposal.proposal_account,
+          }
+        : {}),
     },
     result: value.result
       ? {

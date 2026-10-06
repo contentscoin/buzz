@@ -7,6 +7,11 @@ import {
   registerProjectTools,
 } from "./projects.mjs";
 import { roleModel } from "./model-binding.mjs";
+import { projectBindings } from "./project-binding.mjs";
+import {
+  gatewayProposalDefinition,
+  registerGatewayProposalTool,
+} from "./gateway-proposal.mjs";
 import {
   gatewayStatusDefinition,
   registerGatewayStatusTool,
@@ -329,6 +334,10 @@ async function createProducer(context, settings) {
       buzz_agents_truncated:
         observedProfiles.length >= 201 || authors.length >= 50,
       gateway,
+      project_bindings: await projectBindings(
+        context.config,
+        controller.signal,
+      ),
       capabilities: ["status.read", "agents.list", "activity.summary"],
       task_dispatch:
         settings.telegramOwnerId && settings.operatorUrl && settings.tokenFile
@@ -398,6 +407,7 @@ const entry = definePluginEntry({
     registerProjectTools(api);
     registerGatewayStatusTool(api);
     registerGatewayTaskTools(api);
+    registerGatewayProposalTool(api);
     api.registerService({
       id: "fmg-supervisor",
       reload: {
@@ -436,6 +446,7 @@ Object.defineProperty(entry, toolPluginMetadataSymbol, {
       gatewayStatusDefinition,
       ...gatewayTaskDefinitions,
       gatewayProjectsDefinition,
+      gatewayProposalDefinition,
     ],
   },
   enumerable: false,

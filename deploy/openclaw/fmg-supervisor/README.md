@@ -21,9 +21,33 @@ exclusive preparation lock for operator review.
 The private manifest at `/data/.openclaw/projects/buzz/manifest.json` records
 prepared worktrees, not task execution. Existing models, effort, tool permissions
 and the approval protocol are unchanged. Each new execution still needs proposal
-binding to repository/baseline/role branch before automatic project assignment
-can be represented as implemented. This preparation neither adds project-aware
-queue dispatch nor merges, pushes, publishes messages or runs tests/models.
+binding to repository/baseline/role branch before admission. Version 0.9.0 adds
+that binding for explicit central proposals, not autonomous multi-role scheduling.
+Preparation itself does not merge, push, publish messages or run tests/models.
+
+## Version 0.9.0 central coding proposals
+
+The optional `fmg_buzz_gateway_propose_task` uses the admitted private Telegram
+owner main context, live ownership fences and independently observed clean role
+worktrees. It persists schema 4 proposals only: project `buzz`, repository URL,
+current commit, role branch, an opaque workspace binding, full execution prompt,
+model/auth binding and requested effort are covered by the immutable hash.
+Only direct human `/fmg_task approve ID HASH` admits a run. UUID retries return
+the original proposal; changed inputs conflict. The operator namespace is scoped
+to owner/community/Gateway and cannot borrow OAuth document rights.
+
+Server 0.8.0 accepts protocol 6 workers and preserves schema 3 legacy proposals.
+The worker rechecks repository/branch/HEAD/clean state before checkpoint and
+SDK admission. Changed bindings remain uncertain for direct recovery; there is
+no reset or automatic rerun. Durable intent and terminal completion contracts
+remain unchanged. An admission binding is not proof of code edits or tests.
+
+The private snapshot contains up to five observed coding bindings, without
+private paths or credentials. `/fmg_project list` distinguishes conversation
+connections from this central code project and reports independently observed
+worktree counts. The ledger remains bound to the default BD audience; fmg does
+not gain cross-community task/document access. No automatic report publication,
+Gateway document saving, branch merging or multi-role scheduling is introduced.
 
 ## Version 0.8.0 project registry (first management stage)
 

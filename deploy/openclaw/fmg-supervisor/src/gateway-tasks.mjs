@@ -111,6 +111,8 @@ export function registerGatewayTaskTools(api) {
                     status: task.status,
                     revision: task.revision,
                     role_id: task.role_id,
+                    project_id: task.project_id ?? null,
+                    source_commit: task.source_commit ?? null,
                     requested_model: task.requested_model,
                     requested_effort: task.requested_effort ?? null,
                     proposal_hash: task.proposal_hash,

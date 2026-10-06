@@ -1,8 +1,8 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.8.0",
-  "description": "Owner verified multi-community project registry and directly approved legacy task execution.",
+  "version": "0.9.0",
+  "description": "Owner verified community connections and directly approved repository-bound central task proposals.",
   "activation": {
     "onStartup": true
   },
@@ -68,7 +68,8 @@
       "fmg_buzz_gateway_status",
       "fmg_buzz_gateway_get_task",
       "fmg_buzz_gateway_list_tasks",
-      "fmg_buzz_gateway_projects"
+      "fmg_buzz_gateway_projects",
+      "fmg_buzz_gateway_propose_task"
     ]
   },
   "toolMetadata": {
@@ -82,6 +83,9 @@
       "optional": true
     },
     "fmg_buzz_gateway_projects": {
+      "optional": true
+    },
+    "fmg_buzz_gateway_propose_task": {
       "optional": true
     }
   }

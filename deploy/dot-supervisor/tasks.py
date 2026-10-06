@@ -85,9 +85,9 @@ class Tasks:
 
     def summary(self, row):
         proposal = json.loads(row["proposal"])
-        return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "role_id": proposal["role_id"], "requested_model": proposal["requested_model"], "requested_effort": proposal.get("requested_effort"), "proposal_hash": row["proposal_hash"]}
+        return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "role_id": proposal["role_id"], "requested_model": proposal["requested_model"], "requested_effort": proposal.get("requested_effort"), "proposal_hash": row["proposal_hash"], "project_id": proposal.get("project", {}).get("project_id"), "source_commit": proposal.get("project", {}).get("source_commit")}
 
-    def call(self, name, args, client):
+    def call(self, name, args, client, project=None):
         if not isinstance(args, dict):
             raise ValueError("object_required")
         with self.store.lock, self.store.db:
@@ -102,7 +102,7 @@ class Tasks:
                 instructions = text(args["instructions"], 15000)
                 if len(instructions) > 5000 or args["role_id"] not in ROLES:
                     raise ValueError("invalid_task")
-                request_hash = digest(canonical(args).encode())
+                request_hash = digest(canonical(dict(args, project_id=project["project_id"]) if project else args).encode())
                 old = self.store.db.execute("SELECT * FROM tasks WHERE client=? AND request_id=?", (client, request)).fetchone()
                 if old:
                     if old["input_hash"] != request_hash:
@@ -121,6 +121,10 @@ class Tasks:
                         raise ValueError("task_capacity")
                     identifier, now = str(uuid.uuid4()), time.time()
                     proposal = {"schema": 3, "owner_pubkey": current["owner_pubkey"], "relay_origin": current["relay_origin"], "gateway_agent_pubkey": current["gateway_agent_pubkey"], "role_id": args["role_id"], "requested_model": role["configured_model"], "requested_effort": effort, "model_binding": role["model_binding"], "instructions": instructions, "session_key": f'agent:{args["role_id"]}:fmg-task:{identifier}', "timeout_seconds": 120, "deliver": False}
+                    if project is not None:
+                        if project not in current.get("project_bindings", []) or project.get("role_id") != args["role_id"]:
+                            raise ValueError("project_binding_unavailable")
+                        proposal.update(schema=4, project=project, proposal_account="gateway_owner_main")
                     encoded = canonical(proposal)
                     self.store.db.execute("INSERT INTO tasks(id,client,request_id,input_hash,proposal,proposal_hash,status,revision,created,updated) VALUES(?,?,?,?,?,?,'awaiting_approval',1,?,?)", (identifier, client, request, request_hash, encoded, digest(encoded.encode()), now, now))
                     self.store.db.commit()
@@ -136,6 +140,27 @@ class Tasks:
             raise ValueError("operator_shape_invalid")
         with self.store.lock, self.store.db:
             self.expire()
+            if action == "propose_project":
+                binding_keys = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
+                expected = set(binding_keys) | {"request_id", "role_id", "instructions", "project"}
+                current = snapshot()
+                if set(args) not in (expected, expected | {"effort"}) or any(args[key] != current[key] for key in binding_keys):
+                    raise ValueError("audience_changed")
+                parameters = {key: args[key] for key in ("request_id", "role_id", "instructions", "effort") if key in args}
+                client = "gateway-owner-main:" + digest(canonical({key: current[key] for key in binding_keys}).encode())
+                request = task_id(args["request_id"])
+                old = self.store.db.execute("SELECT * FROM tasks WHERE client=? AND request_id=?", (client, request)).fetchone()
+                if old:
+                    if old["input_hash"] != digest(canonical(dict(parameters, project_id="buzz")).encode()):
+                        raise ValueError("request_conflict")
+                    return self.view(old)
+                project = args["project"]
+                if project is None:
+                    return {"proposal": None, "request_id": request}
+                if not isinstance(project, dict) or project not in current.get("project_bindings", []) or project.get("project_id") != "buzz" or project.get("role_id") != args["role_id"]:
+                    raise ValueError("project_binding_unavailable")
+                # Reserved namespace: never borrow a ChatGPT OAuth client's document rights.
+                return self.call("fmg_buzz_propose_task", parameters, client, project)["structuredContent"]
             if action in ("view_list", "view_get"):
                 binding_keys = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
                 expected_keys = set(binding_keys) | ({"task_id"} if action == "view_get" else set())
@@ -229,7 +254,7 @@ class Tasks:
                 self.store.db.execute("UPDATE tasks SET status=?,revision=revision+1,updated=? WHERE id=? AND revision=?", (status, time.time(), row["id"], row["revision"]))
                 self.store.db.commit()
                 return self.view(self.read(row["id"]))
-            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 5:
+            if action == "claim" and set(args) == {"worker_protocol"} and type(args["worker_protocol"]) is int and args["worker_protocol"] == 6:
                 if self.store.db.execute("SELECT 1 FROM tasks WHERE status IN ('dispatching','cancel_requested','needs_reconcile') LIMIT 1").fetchone():
                     return {"task": None, "reason": "busy_or_unreconciled"}
                 row = self.store.db.execute("SELECT * FROM tasks WHERE status='approved' ORDER BY created LIMIT 1").fetchone()
@@ -238,7 +263,8 @@ class Tasks:
                 current = snapshot()
                 proposal = json.loads(row["proposal"])
                 role = next((item for item in current["gateway"]["roles"] if item["role_id"] == proposal["role_id"]), None)
-                if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")) or proposal.get("schema") != 3 or not role or role["configured_model"] != proposal["requested_model"] or not re.fullmatch(r"[0-9a-f]{64}", proposal.get("model_binding", "")) or role.get("model_binding") != proposal["model_binding"] or proposal.get("requested_effort") not in role.get("supported_efforts", []):
+                project_valid = (proposal.get("schema") == 3 and "project" not in proposal) or (proposal.get("schema") == 4 and proposal.get("project") in current.get("project_bindings", []))
+                if any(proposal[key] != current[key] for key in ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")) or not project_valid or not role or role["configured_model"] != proposal["requested_model"] or not re.fullmatch(r"[0-9a-f]{64}", proposal.get("model_binding", "")) or role.get("model_binding") != proposal["model_binding"] or proposal.get("requested_effort") not in role.get("supported_efforts", []):
                     self.store.db.execute("UPDATE tasks SET status='needs_reconcile',revision=revision+1,updated=? WHERE id=?", (time.time(), row["id"]))
                     self.store.db.commit()
                     return {"task": None, "reason": "approved_binding_changed"}
