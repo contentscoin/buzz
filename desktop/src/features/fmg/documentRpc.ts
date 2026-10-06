@@ -297,7 +297,7 @@ export async function documentSource(
 export function documentError(failure: unknown): string {
   const messages: Record<string, string> = {
     desktop_access_required:
-      "원래 제안한 GPT dot 연결에서 이 작업의 Desktop 문서 접근을 허용해야 합니다.",
+      "이 작업의 원 제안 계정에서 Desktop 문서 접근을 허용해야 합니다. Hostinger main 제안은 소유자 Telegram 문서 접근 명령을 사용하세요.",
     completion_evidence_unavailable:
       "실제 성공 종료 증거를 확인할 수 없어 저장할 수 없습니다.",
     version_conflict:

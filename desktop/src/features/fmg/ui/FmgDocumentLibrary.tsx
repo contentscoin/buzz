@@ -137,7 +137,11 @@ function DocumentLibraryViewer({ scope }: { scope: ComputerScope }) {
             {new Date(item.saved_at * 1000).toLocaleString("ko-KR")} ·{" "}
             {item.content_bytes.toLocaleString("ko-KR")} 바이트
           </p>
-          <FmgDocumentLauncher scope={scope} taskId={item.source.task_id} />
+          <FmgDocumentLauncher
+            scope={scope}
+            taskId={item.source.task_id}
+            sourceProposalHash={item.source.proposal_hash}
+          />
         </section>
       ))}
       {cursor ? (

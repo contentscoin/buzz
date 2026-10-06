@@ -37,10 +37,12 @@ export function FmgDocumentLauncher({
   scope,
   taskId,
   proposalHash,
+  sourceProposalHash,
 }: {
   scope: ComputerScope;
   taskId: string;
   proposalHash?: string;
+  sourceProposalHash?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [closeError, setCloseError] = React.useState("");
@@ -118,6 +120,7 @@ export function FmgDocumentLauncher({
               scope={scope}
               taskId={taskId}
               proposalHash={proposalHash}
+              sourceProposalHash={sourceProposalHash}
               registerFlush={flush}
             />
           ) : null}
@@ -131,12 +134,14 @@ function DocumentEditor({
   scope,
   taskId,
   proposalHash,
+  sourceProposalHash,
   registerFlush,
 }: {
   scope: ComputerScope;
   taskId: string;
   registerFlush: React.RefObject<(() => Promise<void>) | null>;
   proposalHash?: string;
+  sourceProposalHash?: string;
 }) {
   const editor = useDocumentEditor(scope, taskId);
   const [preview, setPreview] = React.useState(false);
@@ -149,6 +154,11 @@ function DocumentEditor({
     };
   }, [registerFlush, editor.ready, editor.flush]);
   const disabled = editor.busy || !editor.ready;
+  const ownerProposalHash =
+    proposalHash ??
+    (editor.access?.proposal_account === "gateway_owner_main"
+      ? sourceProposalHash
+      : undefined);
   return (
     <div className="space-y-4" aria-busy={editor.busy}>
       <p className="break-all text-xs text-muted-foreground">
@@ -168,11 +178,11 @@ function DocumentEditor({
       <p role="status" className="text-sm">
         {editor.busy ? "문서 처리 중" : editor.notice || editor.localStatus}
       </p>
-      {proposalHash && editor.access ? (
+      {ownerProposalHash && editor.access ? (
         <FmgOwnerDocumentAccess
           key={`${editor.access.revision}:${editor.access.enabled}`}
           taskId={taskId}
-          proposalHash={proposalHash}
+          proposalHash={ownerProposalHash}
           revision={
             editor.access.proposal_account === "gateway_owner_main"
               ? editor.access.revision
