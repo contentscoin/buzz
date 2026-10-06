@@ -27,6 +27,8 @@ export function useDocumentEditor(scope: ComputerScope, taskId: string) {
   const [access, setAccess] = React.useState<{
     enabled: boolean;
     completion_verified: boolean;
+    revision?: number;
+    proposal_account?: "gateway_owner_main";
   }>();
   const [versions, setVersions] = React.useState<DocumentMeta[]>([]);
   const [shown, setShown] = React.useState<DocumentDetail>();

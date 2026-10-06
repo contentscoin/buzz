@@ -6,6 +6,7 @@ from completion import validate_completion
 from store import canonical, digest
 from tools import snapshot
 from document_access import DocumentDesktop, ACCESS_CATALOG
+from document_owner import PREFIX, validate_main_task
 
 MAX_BYTES = 32768
 MAX_VERSIONS = 20
@@ -111,6 +112,8 @@ class Documents:
             proposal = json.loads(row["proposal"])
             if any(proposal[key] != current[key] for key in BINDING_KEYS):
                 raise ValueError()
+            if client.startswith(PREFIX):
+                validate_main_task(row, proposal, current)
         except (ValueError, KeyError, TypeError):
             raise DocumentError("document_unavailable") from None
         if completed:

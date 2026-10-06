@@ -5,7 +5,8 @@ import { writeTextToClipboard } from "@/shared/lib/clipboard";
 import type { TaskDetail } from "../taskRpc";
 import { taskMobileSummary, taskOwnerCommands } from "../taskPresentation";
 
-function CopyAction({ text, label }: { text: string; label: string }) {
+/** Copy only on an explicit action; keep failures visible for manual recovery. */
+export function CopyAction({ text, label }: { text: string; label: string }) {
   const [busy, setBusy] = React.useState(false);
   const [feedback, setFeedback] = React.useState("");
   const [error, setError] = React.useState("");

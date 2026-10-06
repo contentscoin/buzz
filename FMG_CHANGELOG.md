@@ -1,5 +1,22 @@
 # FMG Buzz changelog
 
+## 0.5.26-fmg.21
+
+Base: FMG desktop `0.5.26-fmg.20`.
+
+- Connect Hostinger main schema 4 proposals to the private Markdown editor with
+  separate per-task grants. OAuth clients retain their original token checks.
+- Add direct Telegram `/fmg_document access/allow/revoke` commands with the full
+  proposal hash, access revision and durable request UUID. Replaying a lost
+  response returns the prior receipt and current state without reversing a
+  later revocation. Grant commands are not exposed as LLM tools.
+- Copy Desktop access commands only with a server-observed revision. Saving
+  still requires verified successful terminal evidence and explicit access.
+- Reuse immutable versions, hashes, save-response recovery and encrypted local
+  drafts. Revocation preserves stored versions and downloaded drafts.
+- Requires task server `0.8.1` and Supervisor plugin `0.9.1`. Source checks,
+  deployment, installation and user workflow observations are separate evidence.
+
 ## 0.5.26-fmg.20
 
 Base: FMG desktop `0.5.26-fmg.19`.

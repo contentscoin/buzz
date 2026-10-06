@@ -229,6 +229,8 @@ export async function documentAccess(
       task_id: z.uuid(),
       enabled: z.boolean(),
       completion_verified: z.boolean(),
+      revision: z.number().int().min(0).max(2147483647).optional(),
+      proposal_account: z.literal("gateway_owner_main").optional(),
     }),
     response.result,
   );

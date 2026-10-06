@@ -4,6 +4,7 @@ import json
 import time
 from store import canonical, digest
 from tools import snapshot
+from document_owner import OwnerDocumentAccess, reserved_client
 
 KEYS = ("owner_pubkey", "relay_origin", "gateway_agent_pubkey")
 UUID = {"type": "string", "format": "uuid", "maxLength": 36}
@@ -45,8 +46,11 @@ class DocumentDesktop:
             revision INTEGER NOT NULL CHECK(revision>0), updated REAL NOT NULL,
             PRIMARY KEY(scope,client,task_id), FOREIGN KEY(task_id) REFERENCES tasks(id));
         """)
+        self.owner_access = OwnerDocumentAccess(documents)
 
-    def authorized_client(self, client):
+    def authorized_client(self, client, current):
+        if client == reserved_client(current):
+            return True
         return bool(self.resource and self.store.db.execute("SELECT 1 FROM tokens WHERE client_id=? AND scope='buzz:tasks' AND resource=? AND kind IN ('access','refresh') AND expires>? LIMIT 1", (client, self.resource, time.time())).fetchone())
 
     def access(self, name, args, scope, client, current):
@@ -89,7 +93,9 @@ class DocumentDesktop:
         """Called only after private operator authentication and broker signature checks."""
         from documents import identifier
         action, args = data.get("action"), data.get("arguments")
-        extras = {"documents.access": {"task_id"}, "documents.list": {"cursor"}, "documents.get": {"task_id", "document_id", "version"},
+        extras = {"documents.owner_get": {"task_id"},
+                  "documents.owner_set": {"task_id", "request_id", "proposal_hash", "enabled", "expected_revision"},
+                  "documents.access": {"task_id"}, "documents.list": {"cursor"}, "documents.get": {"task_id", "document_id", "version"},
                   "documents.versions": {"task_id"}, "documents.task_source": {"task_id"}, "documents.source": {"task_id", "document_id", "version"},
                   "documents.by_request": {"task_id", "request_id"},
                   "documents.save": {"task_id", "request_id", "document_id", "expected_version", "markdown_base64"}}
@@ -103,21 +109,25 @@ class DocumentDesktop:
                     fail("access_denied")
                 scope = digest(canonical({key: current[key] for key in KEYS}).encode())
                 used_clients = set()
-                if action == "documents.access":
+                if action in ("documents.owner_get", "documents.owner_set"):
+                    result = self.owner_access.call(action, args, scope, current)
+                elif action == "documents.access":
                     task = self.docs.tasks.read(identifier(args["task_id"]))
                     self.docs.source_task(task["id"], task["client"], current)
-                    grant = self.store.db.execute("SELECT enabled FROM document_desktop_access WHERE scope=? AND client=? AND task_id=?", (scope, task["client"], task["id"])).fetchone()
+                    grant = self.store.db.execute("SELECT * FROM document_desktop_access WHERE scope=? AND client=? AND task_id=?", (scope, task["client"], task["id"])).fetchone()
                     try:
                         self.docs.source_task(task["id"], task["client"], current, True)
                         verified = True
                     except ValueError:
                         verified = False
-                    result = {"task_id": task["id"], "enabled": bool(grant and grant[0] and self.authorized_client(task["client"])), "completion_verified": verified}
+                    result = {"task_id": task["id"], "enabled": bool(grant and grant["enabled"] and self.authorized_client(task["client"], current)), "completion_verified": verified, "revision": grant["revision"] if grant else 0}
+                    if task["client"] == reserved_client(current):
+                        result["proposal_account"] = "gateway_owner_main"
                 elif action == "documents.list":
                     cursor = args["cursor"]
                     if cursor is not None:
                         identifier(cursor)
-                    rows = self.store.db.execute("SELECT d.* FROM documents d JOIN document_desktop_access a ON a.scope=d.scope AND a.client=d.client AND a.task_id=d.task_id WHERE d.scope=? AND a.enabled=1 AND d.id>? AND EXISTS(SELECT 1 FROM tokens t WHERE t.client_id=d.client AND t.scope='buzz:tasks' AND t.resource=? AND t.kind IN ('access','refresh') AND t.expires>?) ORDER BY d.id LIMIT 21", (scope, cursor or "", self.resource, time.time())).fetchall()
+                    rows = self.store.db.execute("SELECT d.* FROM documents d JOIN document_desktop_access a ON a.scope=d.scope AND a.client=d.client AND a.task_id=d.task_id WHERE d.scope=? AND a.enabled=1 AND d.id>? AND (d.client=? OR EXISTS(SELECT 1 FROM tokens t WHERE t.client_id=d.client AND t.scope='buzz:tasks' AND t.resource=? AND t.kind IN ('access','refresh') AND t.expires>?)) ORDER BY d.id LIMIT 21", (scope, cursor or "", reserved_client(current), self.resource, time.time())).fetchall()
                     used_clients.update(row["client"] for row in rows[:20])
                     result = {"documents": [self.projection(self.docs.view(row["id"], None, scope, row["client"], current, False)) for row in rows[:20]], "limit": 20, "next_cursor": rows[19]["id"] if len(rows) > 20 else None}
                 else:
@@ -126,7 +136,7 @@ class DocumentDesktop:
                     if not grant:
                         fail("desktop_access_required")
                     client = grant["client"]
-                    if not self.authorized_client(client):
+                    if not self.authorized_client(client, current):
                         fail("desktop_access_required")
                     used_clients.add(client)
                     if action == "documents.task_source":
@@ -168,7 +178,7 @@ class DocumentDesktop:
                 final = snapshot()
                 if final["generation"] != current["generation"] or any(final[key] != current[key] for key in KEYS):
                     fail("access_denied")
-                if any(not self.authorized_client(client) for client in used_clients):
+                if any(not self.authorized_client(client, final) for client in used_clients):
                     fail("access_denied")
                 if len(canonical(result).encode()) > 56000:
                     fail("response_size_limit")

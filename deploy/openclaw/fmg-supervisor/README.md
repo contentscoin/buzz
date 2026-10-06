@@ -1,5 +1,19 @@
 # FMG supervisor producer
 
+## Version 0.9.1 main proposal document delegation
+
+Task server 0.8.1 accepts direct-owner `/fmg_document access`, `allow` and
+`revoke` commands for the current audience's reserved main proposal account.
+Changes bind the exact task/proposal hash, expected access revision and request
+UUID. Same-input replay returns the immutable receipt plus current access;
+replaying a prior allow cannot undo a later revoke. No grant tool is registered
+for models or the Computer broker. Existing OAuth delegation stays separate.
+Desktop 0.5.26-fmg.21 copies commands and opens the existing Markdown editor.
+Document save still requires successful terminal evidence. Revocation denies
+server access; it does not erase immutable documents or downloaded local drafts.
+Source/build/deployment evidence must not be reported as an observed owner
+command or completed Desktop save workflow.
+
 ## Hostinger central manager and code preparation
 
 The human owner selected the Hostinger OpenClaw `main` as the central manager.

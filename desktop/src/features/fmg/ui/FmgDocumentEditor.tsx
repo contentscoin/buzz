@@ -12,6 +12,7 @@ import {
 import type { ComputerScope } from "../computerRpc";
 import { documentError } from "../documentRpc";
 import { useDocumentEditor } from "../useDocumentEditor";
+import { FmgOwnerDocumentAccess } from "./FmgOwnerDocumentAccess";
 
 /** Result content is rendered without raw HTML, remote images or active links. */
 function DocumentPreview({ markdown }: { markdown: string }) {
@@ -35,9 +36,11 @@ function DocumentPreview({ markdown }: { markdown: string }) {
 export function FmgDocumentLauncher({
   scope,
   taskId,
+  proposalHash,
 }: {
   scope: ComputerScope;
   taskId: string;
+  proposalHash?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [closeError, setCloseError] = React.useState("");
@@ -114,6 +117,7 @@ export function FmgDocumentLauncher({
               key={`${scope.relay}:${scope.owner}:${scope.agent}:${taskId}`}
               scope={scope}
               taskId={taskId}
+              proposalHash={proposalHash}
               registerFlush={flush}
             />
           ) : null}
@@ -126,11 +130,13 @@ export function FmgDocumentLauncher({
 function DocumentEditor({
   scope,
   taskId,
+  proposalHash,
   registerFlush,
 }: {
   scope: ComputerScope;
   taskId: string;
   registerFlush: React.RefObject<(() => Promise<void>) | null>;
+  proposalHash?: string;
 }) {
   const editor = useDocumentEditor(scope, taskId);
   const [preview, setPreview] = React.useState(false);
@@ -162,7 +168,19 @@ function DocumentEditor({
       <p role="status" className="text-sm">
         {editor.busy ? "문서 처리 중" : editor.notice || editor.localStatus}
       </p>
-      {editor.access && !editor.access.enabled ? (
+      {proposalHash && editor.access ? (
+        <FmgOwnerDocumentAccess
+          key={`${editor.access.revision}:${editor.access.enabled}`}
+          taskId={taskId}
+          proposalHash={proposalHash}
+          revision={
+            editor.access.proposal_account === "gateway_owner_main"
+              ? editor.access.revision
+              : undefined
+          }
+          enabled={editor.access.enabled}
+        />
+      ) : editor.access && !editor.access.enabled ? (
         <p className="rounded-lg border p-3 text-sm">
           원래 작업을 제안한 GPT dot 연결에서 이 작업의 Desktop 문서 접근을
           허용해야 합니다. 작업 ID를 전달하고 문서 Desktop 접근 허용을

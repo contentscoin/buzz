@@ -376,18 +376,16 @@ function TasksViewer({ scope }: { scope: ComputerScope }) {
                 relay={scope.relay}
                 checkedAt={checkedAt}
               />
-              {detail.proposal.proposal_account === "gateway_owner_main" ? (
-                <p className="text-sm text-muted-foreground">
-                  Hostinger OpenClaw에서 제안한 작업의 결과는 여기서 조회할 수
-                  있습니다. 이 제안 계정의 불변 문서 저장은 후속 기능입니다.
-                </p>
-              ) : (
-                <FmgDocumentLauncher
-                  key={detail.task_id}
-                  scope={scope}
-                  taskId={detail.task_id}
-                />
-              )}
+              <FmgDocumentLauncher
+                key={detail.task_id}
+                scope={scope}
+                taskId={detail.task_id}
+                proposalHash={
+                  detail.proposal.proposal_account === "gateway_owner_main"
+                    ? detail.proposal_hash
+                    : undefined
+                }
+              />
             </>
           ) : (
             <p className="text-sm text-muted-foreground">

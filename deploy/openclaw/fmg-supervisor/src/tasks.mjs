@@ -69,7 +69,8 @@ export async function operator(settings, action, args = {}) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function owner(config, settings, expected) {
+/** Verify the default Buzz owner and return only its public audience binding. */
+export async function owner(config, settings, expected) {
   const binding = await identity(config);
   try {
     if (
@@ -84,12 +85,18 @@ async function owner(config, settings, expected) {
         expected.relay_origin !== binding.origin)
     )
       throw new Error("audience_changed");
+    return {
+      owner_pubkey: settings.ownerPubkey,
+      gateway_agent_pubkey: binding.agent,
+      relay_origin: binding.origin,
+    };
   } finally {
     binding.key.fill(0);
   }
 }
 
-function directOwner(context, settings) {
+/** Require a human command in the configured owner's Telegram main conversation. */
+export function directOwner(context, settings) {
   const normalized = (value) => String(value ?? "").replace(/^telegram:/, "");
   if (
     context.channel !== "telegram" ||

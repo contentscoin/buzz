@@ -1,5 +1,6 @@
 import { identity, profileOwner } from "../../fmg-computer/src/binding.mjs";
 import { createTaskWorker, registerTaskCommand } from "./tasks.mjs";
+import { registerDocumentCommand } from "./document-command.mjs";
 import {
   gatewayProjectsDefinition,
   projectsSchema,
@@ -403,6 +404,7 @@ const entry = definePluginEntry({
   register(api) {
     let stop, stopTasks;
     registerTaskCommand(api);
+    registerDocumentCommand(api);
     registerProjectCommand(api);
     registerProjectTools(api);
     registerGatewayStatusTool(api);
