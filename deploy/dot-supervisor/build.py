@@ -6,8 +6,9 @@ from pathlib import Path
 root = Path(__file__).resolve().parent
 output = root / "dist"
 output.mkdir(exist_ok=True)
-for name in ("server.py", "store.py", "tools.py", "tasks.py", "auth.py", "deploy.py", "completion.py", "documents.py", "document_access.py", "document_owner.py", "communities.py"):
+for name in ("server.py", "store.py", "tools.py", "tasks.py", "auth.py", "deploy.py", "completion.py", "documents.py", "document_access.py", "document_owner.py", "communities.py", "approvals.py", "approval_pages.py"):
     shutil.copyfile(root / name, output / name)
+shutil.copyfile(root / "approval_widget.html", output / "approval_widget.html")
 for path in output.glob("*.py"):
     ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 print("Supervisor Python sources staged; syntax parsed.")

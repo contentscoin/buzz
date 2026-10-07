@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buzz 작업 승인</title>
+<style>
+body{font:14px/1.6 system-ui,sans-serif;margin:0;padding:20px;color:#202124;background:white}
+h1{font-size:19px;margin:0 0 12px}dl{display:grid;grid-template-columns:90px 1fr;gap:8px}dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}
+pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border:1px solid #ccc;border-radius:8px;max-height:320px;overflow:auto}
+button,a{font:inherit}button{padding:10px 14px;border:1px solid #777;border-radius:8px;background:#1b4e35;color:white;cursor:pointer}button:disabled{opacity:.6;cursor:default}
+button:focus-visible,a:focus-visible{outline:3px solid #2860cf;outline-offset:3px}#error{color:#a51c19}small{overflow-wrap:anywhere}
+@media(prefers-color-scheme:dark){body{background:#1a1a1a;color:#eee}}
+</style>
+<main>
+<h1>Buzz 작업 소유자 승인</h1>
+<p id="status" role="status">승인 내용을 불러오는 중입니다.</p>
+<dl id="fields"></dl>
+<h2>작업 지시문</h2><pre id="instructions"></pre>
+<small id="hash"></small>
+<p>소유자 확인 화면에서 기존 MCP 연결 비밀번호를 확인하고 최종 승인합니다.</p>
+<button id="approve" type="button" disabled>소유자 승인 화면 열기</button>
+<button id="refresh" type="button" disabled>작업 상태 새로 고침</button>
+<p><a id="link" target="_blank" rel="noopener noreferrer" hidden>승인 화면 링크로 열기</a></p>
+<p id="error" role="alert"></p>
+</main>
+<script>
+(() => {
+  let data, sequence = 0;
+  const pending = new Map();
+  const el = id => document.getElementById(id);
+  const errors = { task_unavailable: "이 연결에서 작업을 조회할 수 없습니다.", community_access_required: "커뮤니티 접근 권한을 확인하세요." };
+  function request(method, params) {
+    if (pending.size >= 4) return Promise.reject(new Error("요청이 진행 중입니다."));
+    const id = ++sequence;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error("응답이 늦습니다. 새로 고침으로 현재 상태를 확인하세요.")); }, 15000);
+      pending.set(id, { resolve, reject, timer });
+      window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+    });
+  }
+  function render(next) {
+    if (!next?.task || !next?.approval) return;
+    data = next;
+    const task = data.task, proposal = task.proposal, approval = data.approval;
+    el("status").textContent = `커뮤니티 ${approval.community_id} · 상태 ${task.status} · revision ${task.revision}`;
+    el("fields").replaceChildren();
+    const fields = [["작업", task.task_id], ["역할", proposal.role_id], ["모델", proposal.requested_model], ["effort", proposal.requested_effort], ["저장소", proposal.project ? JSON.stringify(proposal.project) : "코드 프로젝트 연결 없는 제안"]];
+    for (const [key, value] of fields) {
+      const label = document.createElement("dt"), content = document.createElement("dd");
+      label.textContent = key; content.textContent = value;
+      el("fields").append(label, content);
+    }
+    el("instructions").textContent = proposal.instructions;
+    el("hash").textContent = `전체 제안 SHA-256: ${task.proposal_hash}`;
+    // Only the exact server-generated HTTPS owner page is an actionable destination.
+    let url;
+    try { url = new URL(approval.url); } catch { url = null; }
+    const safe = url?.origin === "https://buzz-dnb0.srv2006121.hstgr.cloud" && url.pathname === "/dot-supervisor/tasks/approval" && /^[0-9a-f]{64}$/.test(url.searchParams.get("token") || "");
+    const available = safe && task.status === "awaiting_approval" && approval.status === "awaiting_owner_browser" && approval.expires_at * 1000 > Date.now();
+    el("approve").disabled = !available;
+    el("refresh").disabled = false;
+    el("link").hidden = !available;
+    if (safe) el("link").href = url.href;
+    else el("link").removeAttribute("href");
+    if (!available) el("error").textContent = "승인 가능한 화면인지 작업 상태를 다시 조회하세요. 만료됐으면 닷에서 새 승인 화면을 요청하세요.";
+    else el("error").textContent = "";
+  }
+  window.addEventListener("message", event => {
+    if (event.source !== window.parent || event.data?.jsonrpc !== "2.0") return;
+    const message = event.data;
+    const item = pending.get(message.id);
+    if (item) {
+      clearTimeout(item.timer); pending.delete(message.id);
+      if (message.error) item.reject(new Error(message.error.message || "호스트 요청 실패"));
+      else item.resolve(message.result);
+    } else if (message.method === "ui/notifications/tool-result") render(message.params?.structuredContent);
+  });
+  el("approve").onclick = async event => {
+    if (!event.isTrusted || el("approve").disabled) return;
+    try {
+      if (window.openai?.openExternal) await window.openai.openExternal({ href: data.approval.url });
+      else await request("ui/open-link", { url: data.approval.url });
+    } catch { el("error").textContent = "승인 화면 링크로 열기를 눌러 진행하세요."; }
+  };
+  el("refresh").onclick = async () => {
+    if (!data) return;
+    el("refresh").disabled = true;
+    try {
+      const result = await request("tools/call", { name: "fmg_buzz_get_task", arguments: { task_id: data.task.task_id, community_id: data.approval.community_id } });
+      if (result?.isError) throw new Error(errors[result.structuredContent?.error_code] || "작업 상태 조회에 실패했습니다.");
+      if (!result?.structuredContent?.proposal) throw new Error("현재 작업 상태를 확인하지 못했습니다.");
+      render({ ...data, task: result.structuredContent });
+    } catch (error) { el("error").textContent = error.message; }
+    finally { el("refresh").disabled = false; }
+  };
+  request("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "FMG Buzz Owner Approval", version: "1.0.0" }, appCapabilities: {} })
+    .then(() => window.parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} }, "*"))
+    .catch(() => { el("error").textContent = "화면을 표시하지 못하면 닷이 제공한 소유자 승인 링크로 진행하세요."; });
+  if (window.openai?.toolOutput) render(window.openai.toolOutput);
+})();
+</script>
+</html>

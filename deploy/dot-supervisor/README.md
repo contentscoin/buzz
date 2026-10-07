@@ -1,4 +1,42 @@
-# GPT dot community selection 0.10.0
+# GPT dot owner approval 0.11.0
+
+`fmg_buzz_prepare_task_approval` creates a ten-minute owner approval screen for
+an exact original-client task UUID, full SHA-256 and revision. It never approves
+or executes a task. ChatGPT can display the MCP Apps approval card; the returned
+link is a fallback when the host cannot render it. Opening the link shows only
+the owner login form. The full review is available after verification with the
+existing MCP connection owner password, entered solely on the TLS server page.
+The owner then presses a separate final approval button. There is no model-visible
+or app-only MCP approval mutation; tool annotations or a model-supplied boolean
+are not evidence of human consent. The server cannot interpret natural-language
+"approve" alone as this authenticated browser approval.
+
+Browser approval requires the original OAuth token family to remain active,
+current original-client community access, the fresh owner/community/Gateway
+snapshot, unchanged model/effort binding, and any immutable schema-4 repository
+binding. A five-minute hashed browser session, Secure HttpOnly SameSite=Strict
+cookie, session-bound CSRF and exact Origin protect the final POST. Password
+attempts are durably limited to five per peer and thirty globally in ten minutes.
+No password, OAuth token, browser session or CSRF enters MCP tool output.
+
+The task CAS (`awaiting_approval` to `approved`, revision +1) and immutable approval
+receipt are one SQLite commit. The existing protocol-7 worker alone claims and
+runs approved work, with its existing dispatch and reconcile checks. Telegram
+approval/cancel remains available. Concurrent browser/Telegram approval cannot
+enqueue the same proposal twice. Same request UUID returns its original screen;
+changed arguments conflict, and expiry needs a new UUID. A lost final HTTP response
+is recovered through the same screen or `fmg_buzz_get_task.dot_approval_receipt`;
+it never reruns work. Browser sessions and the receipt survive server restarts.
+
+Limits: 10,000 durable screen/receipt rows (no automatic eviction), twenty live
+screens per client, 2,000 live browser sessions and twenty per screen. Expired
+browser sessions and password-attempt windows are pruned on owner authentication.
+No deployment creates a proposal, grants a community, approves work or runs a model.
+The current dot connection must refresh its tools and resources to expose the new
+screen tool. Actual ChatGPT rendering and an owner-approved execution remain
+separate evidence; source/build/deployment do not demonstrate either.
+
+## Previous community selection 0.10.0
 
 Task and private document MCP tools accept optional `community_id` (`bd`, `fmg`,
 or another explicitly registered ID). Omission preserves default BD. The new
@@ -164,7 +202,8 @@ immutable task, read a result and list the proposing client's latest tasks.
 Requests use a UUID idempotency key. Proposals bind the signed Buzz owner,
 community, Gateway identity, configured role/model and isolated session key.
 
-Only the owner can approve/cancel from a direct Telegram `/fmg_task` command.
+Only the owner can approve via the authenticated dot browser screen or a direct
+Telegram `/fmg_task` command. Cancellation remains a direct Telegram command.
 The LLM tool catalog has no approval method. An authenticated operator API on
 internal port 8001 serves the Gateway plugin; Traefik only routes port 8000.
 The dedicated operator token has no Buzz/Gateway credential powers. It is

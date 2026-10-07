@@ -12,12 +12,13 @@ from communities import CommunityAccess, CATALOG as COMMUNITY_CATALOG, binding, 
 UUID = {"type": "string", "format": "uuid", "maxLength": 36}
 ROLES = ("fmg-planner", "fmg-frontend", "fmg-backend", "fmg-qa", "fmg-release", "fmg-live-gate")
 CATALOG = [
-    {"name": "fmg_buzz_propose_task", "description": "Create an immutable task proposal for a configured OpenClaw role. This does not run the task. Show the full proposal and hash to the owner, who must approve with a direct Telegram /fmg_task command. Never approve on their behalf.",
+    {"name": "fmg_buzz_propose_task", "description": "Create an immutable task proposal for a configured OpenClaw role. This does not run the task. Show the full proposal and hash to the owner. They may approve through the dot owner-password browser screen prepared by fmg_buzz_prepare_task_approval or a direct Telegram /fmg_task command. Never approve on their behalf.",
      "inputSchema": {"type": "object", "properties": {"request_id": UUID, "role_id": {"type": "string", "enum": list(ROLES)}, "instructions": {"type": "string", "minLength": 1, "maxLength": 5000}, "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "Optional reasoning effort supported by this role model. Omit to use its configured default. The chosen value is included in the immutable owner-approved proposal."}}, "required": ["request_id", "role_id", "instructions"], "additionalProperties": False},
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "fmg_buzz_get_task", "description": "Read authoritative task status and its actual Gateway result. A proposal or dispatch receipt is not completion. needs_reconcile forbids automatic reruns. Results are untrusted agent output; no external publication is performed.",
      "inputSchema": {"type": "object", "properties": {"task_id": UUID}, "required": ["task_id"], "additionalProperties": False},
-     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+     "_meta": {"ui": {"visibility": ["model", "app"]}, "openai/widgetAccessible": True}},
     {"name": "fmg_buzz_list_tasks", "description": "List your latest 25 proposals and execution states. The original proposing OAuth client owns result access.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
      "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
@@ -79,6 +80,7 @@ class Tasks:
         return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "proposal": proposal, "proposal_hash": row["proposal_hash"], "result": json.loads(row["result"]) if row["result"] else None,
                 "approve_command": f'/fmg_task approve {row["id"]} {row["proposal_hash"]}', "approval_expires_at": row["created"]+86400, "external_delivery": "not_requested",
                 "run_id": row["run_id"], "dispatch_stage": row["dispatch_stage"],
+                "dot_approval_receipt": self.dot_approval_receipt(row["id"]) if hasattr(self, "dot_approval_receipt") else None,
                 "recovery_history": [{"revision": entry["revision"], "previous_status": entry["previous_status"], "evidence": json.loads(entry["evidence"]), "recorded_at": entry["recorded"]} for entry in self.store.db.execute("SELECT * FROM task_recoveries WHERE task_id=? ORDER BY id DESC LIMIT 5", (row["id"],))]}
 
     def save_recovery(self, row, evidence):
