@@ -2,8 +2,8 @@
   "schema": 2,
   "channel": "fmg-live",
   "desktop": {
-    "version": "0.5.26-fmg.21",
-    "tag": "fmg-desktop-v0.5.26-fmg.21",
+    "version": "0.5.26-fmg.22",
+    "tag": "fmg-desktop-v0.5.26-fmg.22",
     "product_name": "Buzz",
     "identifier": "xyz.block.buzz.app",
     "artifact": "windows-nsis-x86_64",

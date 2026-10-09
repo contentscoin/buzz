@@ -74,9 +74,10 @@ export function FmgTasksLauncher() {
           <DialogHeader>
             <DialogTitle>GPT dot · Buzz 작업 목록과 결과</DialogTitle>
             <DialogDescription>
-              최근 작업 25건을 조회합니다. GPT dot이나 Hostinger OpenClaw에서
-              작업을 제안하고 텔레그램에서 직접 승인한 뒤, 여기서 상태와 결과를
-              새로 고침하세요.
+              최근 작업 25건을 조회합니다. GPT dot 작업은 닷에서 받은 승인
+              화면이나 소유자 Telegram 개인 대화에서 승인하세요. Hostinger
+              OpenClaw 작업은 소유자 Telegram 개인 대화에서 승인한 뒤, 여기서
+              상태와 결과를 새로 고침하세요.
             </DialogDescription>
           </DialogHeader>
           <Button

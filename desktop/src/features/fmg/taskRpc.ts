@@ -69,7 +69,9 @@ export const taskDetailSchema = summary
         requested_effort: z.string().max(20).nullable().optional(),
         instructions: z.string().max(5000),
         project: projectBinding.optional(),
-        proposal_account: z.literal("gateway_owner_main").optional(),
+        proposal_account: z
+          .enum(["gateway_owner_main", "original_oauth_client"])
+          .optional(),
       })
       .refine(
         (value) => !value.project || value.project.role_id === value.role_id,
