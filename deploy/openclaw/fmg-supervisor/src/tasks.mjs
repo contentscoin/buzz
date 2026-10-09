@@ -7,7 +7,7 @@ import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
 import { approvedExecution, publicModel } from "./model-binding.mjs";
-import { finalResult } from "./terminal.mjs";
+import { executionResult } from "./execution-result.mjs";
 import { assertProjectBinding } from "./project-binding.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
@@ -253,6 +253,7 @@ export async function createTaskWorker(context, settings) {
       checkpoint.dispatch_stage !== "intent_recorded"
     )
       throw new Error("dispatch_intent_invalid");
+    task.dispatch_stage = checkpoint.dispatch_stage;
     if (stopped)
       return {
         status: "canceled",
@@ -318,7 +319,7 @@ export async function createTaskWorker(context, settings) {
       activeController = undefined;
       activeTask = undefined;
     }
-    const completed = finalResult(receipt, task, clean);
+    const completed = await executionResult(receipt, task, clean, canceled);
     if (completed) return completed;
     const meta = receipt?.result?.meta;
     const metadata = meta?.agentMeta;

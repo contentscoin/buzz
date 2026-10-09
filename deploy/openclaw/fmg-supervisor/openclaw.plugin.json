@@ -1,7 +1,7 @@
 {
   "id": "fmg-supervisor",
   "name": "FMG Dot Supervisor",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Owner verified community connections and directly approved repository-bound central task proposals.",
   "activation": {
     "onStartup": true

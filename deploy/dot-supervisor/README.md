@@ -1,3 +1,41 @@
+# GPT dot repository-bound proposals 0.12.0
+
+`fmg_buzz_propose_task` accepts optional `project_id: "buzz"`. For a code task,
+specify the intended `community_id` and coding role as well. The server resolves
+exactly one producer-verified repository/worktree binding for that community and
+role and stores it, its source commit, the model and requested effort in the
+immutable schema-4 proposal and approval hash. The proposer remains the original
+OAuth connection (`proposal_account: "original_oauth_client"`); this does not
+borrow the Gateway main account or its document permissions. Omitting `project_id`
+preserves existing schema-3 generic proposals without a repository binding.
+
+Missing, ambiguous, malformed or other-community repository mappings are denied.
+The server never creates a checkout, grants community access or enables Desktop
+document access as part of proposing. A caller cannot supply a repository URL,
+branch, commit or workspace binding. The existing owner browser approval, worker
+claim and pre-execution Gateway checks reject a changed repository binding.
+Lost-response retries with the same UUID and input recover the original immutable
+proposal even if the current checkout has changed; they do not silently rebind it
+or permit its approval. A new proposal requires a new request UUID and owner review.
+
+`test_project_proposals.py` exercises the production Tasks and Approvals entry
+points with isolated SQLite, OAuth and snapshot fixtures: generic compatibility,
+community and account isolation, immutable UUID replay, exact mapping admission,
+browser approval and claim rejection after a repository change. These tests never
+run a model. Actual dot discovery, human approval and repository-bound execution
+remain distinct live acceptance checks.
+
+The encrypted Desktop document library now filters explicitly revoked proposing
+connections before pagination. One connection's community revocation no longer
+hides another authorized connection's documents. No metadata from excluded
+documents is projected. Candidate scanning is bounded by the global 1,000-document
+limit and permission checks are cached per connection within the request. A missing
+snapshot, changed community generation or unavailable community verification remains
+an error. The final owner/community/Gateway and per-client checks still reject a
+scope or permission change during the read. `test_document_library.py` covers
+valid, partial and complete revocation, OAuth revocation, pagination and these
+failure boundaries with isolated real storage.
+
 # GPT dot owner approval 0.11.0
 
 `fmg_buzz_prepare_task_approval` creates a ten-minute owner approval screen for

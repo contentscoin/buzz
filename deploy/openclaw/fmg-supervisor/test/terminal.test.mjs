@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { finalResult } from "../src/terminal.mjs";
 import { runtimeResult } from "../src/runtime-recovery.mjs";
+import { executionResult } from "../src/execution-result.mjs";
 
 const clean = (s, n) =>
   typeof s === "string" ? Array.from(s).slice(0, n).join("") : null;
 const run = "76fc8565-8b9e-4c71-8a80-736b6eca5178";
 const task = {
+  status: "dispatching",
   task_id: run,
   run_id: run,
   created_at: Date.now() / 1000 - 60,
@@ -129,6 +131,142 @@ test("SDK normal stop has bound success evidence", () => {
   assert.equal(r.status, "succeeded");
   assert.equal(r.reply, "완료\n응답");
   assert.equal(r.completion_evidence.source, "gateway.agent.final");
+});
+
+test("live dispatch with missing SDK receipt binds the durable no-tool end", async () => {
+  const receipt = final();
+  delete receipt.result.meta.agentMeta.terminalReceipt;
+  let reads = 0;
+  const result = await executionResult(
+    receipt,
+    task,
+    clean,
+    false,
+    async (current, sanitize) => {
+      reads++;
+      assert.equal(current, task);
+      return runtimeResult(runtime(), current, sanitize);
+    },
+  );
+  assert.equal(reads, 1);
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.run_id, task.run_id);
+  assert.equal(result.reply, "완료\n응답");
+  assert.equal(result.completion_evidence.source, "gateway.runtime.no_tools");
+});
+
+test("valid SDK completion never reads the runtime database", async () => {
+  const result = await executionResult(
+    final(),
+    task,
+    clean,
+    false,
+    async () => {
+      assert.fail("unexpected fallback");
+    },
+  );
+  assert.equal(result.completion_evidence.source, "gateway.agent.final");
+});
+
+for (const [name, mutateReceipt, mutateTask, canceled] of [
+  ["wrong RPC run", (r) => (r.runId = "other")],
+  ["accepted response", (r) => (r.summary = "accepted")],
+  ["aborted receipt", (r) => (r.result.meta.aborted = true)],
+  ["yielded receipt", (r) => (r.result.meta.yielded = true)],
+  ["tool continuation", (r) => (r.result.meta.pendingToolCalls = [{}])],
+  ["RPC error", (r) => (r.error = "failed")],
+  ["error payload", (r) => (r.result.payloads[0].isError = true)],
+  [
+    "malformed inner receipt",
+    (r) => (r.result.meta.agentMeta.terminalReceipt = {}),
+  ],
+  [
+    "contradictory model metadata",
+    (r) =>
+      (r.result.meta.agentMeta = {
+        provider: "anthropic",
+        model: "claude-opus-5-5",
+      }),
+  ],
+  [
+    "incomplete model metadata",
+    (r) => (r.result.meta.agentMeta.model = "gpt-6.1-sol"),
+  ],
+  ["missing durable intent", null, (t) => (t.dispatch_stage = null)],
+  ["foreign task run", null, (t) => (t.task_id = "other")],
+  ["historical uncertain task", null, (t) => (t.status = "needs_reconcile")],
+  ["cancellation requested", null, null, true],
+])
+  test(`live completion does not fall back for ${name}`, async () => {
+    const receipt = final(),
+      current = structuredClone(task);
+    delete receipt.result.meta.agentMeta.terminalReceipt;
+    mutateReceipt?.(receipt);
+    mutateTask?.(current);
+    const result = await executionResult(
+      receipt,
+      current,
+      clean,
+      canceled,
+      async () => {
+        assert.fail("ineligible receipt must not access runtime evidence");
+      },
+    );
+    assert.equal(result, null);
+  });
+
+for (const [name, mutate] of [
+  ["missing end", (e) => e.pop()],
+  ["tools used", (e) => (e[3].data.toolMetas = [{}])],
+  ["wrong effort", (e) => (e[1].data.model.thinkLevel = "low")],
+  ["different prompt", (e) => (e[2].data.finalPromptText = "other")],
+  [
+    "no final response",
+    (e) => (e[2].data.messagesSnapshot.at(-1).diagnostics = []),
+  ],
+])
+  test(`live completion preserves uncertainty for ${name}`, async () => {
+    const receipt = final(),
+      events = runtime();
+    delete receipt.result.meta.agentMeta.terminalReceipt;
+    mutate(events);
+    assert.equal(
+      await executionResult(
+        receipt,
+        task,
+        clean,
+        false,
+        async (current, sanitize) => runtimeResult(events, current, sanitize),
+      ),
+      null,
+    );
+  });
+
+test("RPC reply mismatch cannot borrow another stored reply", async () => {
+  const receipt = final();
+  delete receipt.result.meta.agentMeta.terminalReceipt;
+  receipt.result.payloads[0].text = "different";
+  assert.equal(
+    await executionResult(
+      receipt,
+      task,
+      clean,
+      false,
+      async (current, sanitize) => runtimeResult(runtime(), current, sanitize),
+    ),
+    null,
+  );
+});
+
+test("read failure propagates to worker's durable uncertain outcome", async () => {
+  const receipt = final();
+  delete receipt.result.meta.agentMeta.terminalReceipt;
+  await assert.rejects(
+    executionResult(receipt, task, clean, false, async () => {
+      throw new Error("sqlite unavailable");
+    }),
+    /sqlite unavailable/,
+  );
 });
 for (const [name, mutate] of [
   ["wrong run", (r) => (r.runId = "other")],

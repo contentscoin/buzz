@@ -48,12 +48,14 @@ class DocumentDesktop:
         """)
         self.owner_access = OwnerDocumentAccess(documents)
 
-    def authorized_client(self, client, current):
+    def authorized_client(self, client, current, strict=False):
         if client == reserved_client(current):
             return True
         try:
             self.docs.tasks.communities.authorize(client, current)
-        except (ValueError, KeyError, TypeError, OSError):
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            if strict and str(error) != "community_access_required":
+                fail("community_unavailable")
             return False
         return bool(self.resource and self.store.db.execute("SELECT 1 FROM tokens WHERE client_id=? AND scope='buzz:tasks' AND resource=? AND kind IN ('access','refresh') AND expires>? LIMIT 1", (client, self.resource, time.time())).fetchone())
 
@@ -95,7 +97,7 @@ class DocumentDesktop:
 
     def operator(self, data):
         """Called only after private operator authentication and broker signature checks."""
-        from documents import identifier
+        from documents import identifier, MAX_DOCUMENTS
         action, args = data.get("action"), data.get("arguments")
         extras = {"documents.owner_get": {"task_id"},
                   "documents.owner_set": {"task_id", "request_id", "proposal_hash", "enabled", "expected_revision"},
@@ -131,7 +133,20 @@ class DocumentDesktop:
                     cursor = args["cursor"]
                     if cursor is not None:
                         identifier(cursor)
-                    rows = self.store.db.execute("SELECT d.* FROM documents d JOIN document_desktop_access a ON a.scope=d.scope AND a.client=d.client AND a.task_id=d.task_id WHERE d.scope=? AND a.enabled=1 AND d.id>? AND (d.client=? OR EXISTS(SELECT 1 FROM tokens t WHERE t.client_id=d.client AND t.scope='buzz:tasks' AND t.resource=? AND t.kind IN ('access','refresh') AND t.expires>?)) ORDER BY d.id LIMIT 21", (scope, cursor or "", reserved_client(current), self.resource, time.time())).fetchall()
+                    candidates = self.store.db.execute("SELECT d.* FROM documents d JOIN document_desktop_access a ON a.scope=d.scope AND a.client=d.client AND a.task_id=d.task_id WHERE d.scope=? AND a.enabled=1 AND d.id>? AND (d.client=? OR EXISTS(SELECT 1 FROM tokens t WHERE t.client_id=d.client AND t.scope='buzz:tasks' AND t.resource=? AND t.kind IN ('access','refresh') AND t.expires>?)) ORDER BY d.id LIMIT ?", (scope, cursor or "", reserved_client(current), self.resource, time.time(), MAX_DOCUMENTS+1)).fetchall()
+                    if len(candidates) > MAX_DOCUMENTS:
+                        fail("storage_capacity")
+                    # Filter explicit per-client revocation before pagination. A stale or
+                    # unavailable community observation is an error, never an empty library.
+                    rows, eligible = [], {}
+                    for row in candidates:
+                        client = row["client"]
+                        if client not in eligible:
+                            eligible[client] = self.authorized_client(client, current, strict=True)
+                        if eligible[client]:
+                            rows.append(row)
+                            if len(rows) == 21:
+                                break
                     used_clients.update(row["client"] for row in rows[:20])
                     result = {"documents": [self.projection(self.docs.view(row["id"], None, scope, row["client"], current, False)) for row in rows[:20]], "limit": 20, "next_cursor": rows[19]["id"] if len(rows) > 20 else None}
                 else:
@@ -182,7 +197,7 @@ class DocumentDesktop:
                 final = snapshot(args)
                 if final["generation"] != current["generation"] or any(final[key] != current[key] for key in KEYS):
                     fail("access_denied")
-                if any(not self.authorized_client(client, final) for client in used_clients):
+                if any(not self.authorized_client(client, final, strict=action == "documents.list") for client in used_clients):
                     fail("access_denied")
                 if len(canonical(result).encode()) > 56000:
                     fail("response_size_limit")

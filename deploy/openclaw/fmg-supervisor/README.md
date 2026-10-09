@@ -1,4 +1,17 @@
-# Supervisor 0.12.1 — explicit community code-project execution binding
+# Supervisor 0.12.2 — persist proven no-tool completion during live dispatch
+
+When a completed SDK reply omits its inner terminal receipt, the live worker
+reads the same strictly validated, bounded persisted trajectory used by manual
+recovery. Only an exact run/session/prompt/model/effort match with a final model
+response, no tools or delivery, normal end flags and an identical reply can
+finish successfully. An observed cancellation, contradictory receipt, missing evidence,
+tool run or read failure stays uncertain. No agent execution is retried.
+
+Previously stored `needs_reconcile` tasks still require direct owner recovery;
+the update does not rewrite their state or remove the queue's recovery fence.
+Worker protocol 7 and completion contract v2 stay unchanged.
+
+## Supervisor 0.12.1 — explicit community code-project execution binding
 
 ## Owner Telegram command menu maintenance
 

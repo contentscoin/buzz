@@ -1,4 +1,4 @@
-"""Durable proposals. Only a direct, verified owner command can approve a run."""
+"""Durable proposals with immutable bindings and separate verified-owner approval."""
 import json
 import re
 import secrets
@@ -12,8 +12,8 @@ from communities import CommunityAccess, CATALOG as COMMUNITY_CATALOG, binding, 
 UUID = {"type": "string", "format": "uuid", "maxLength": 36}
 ROLES = ("fmg-planner", "fmg-frontend", "fmg-backend", "fmg-qa", "fmg-release", "fmg-live-gate")
 CATALOG = [
-    {"name": "fmg_buzz_propose_task", "description": "Create an immutable task proposal for a configured OpenClaw role. This does not run the task. Show the full proposal and hash to the owner. They may approve through the dot owner-password browser screen prepared by fmg_buzz_prepare_task_approval or a direct Telegram /fmg_task command. Never approve on their behalf.",
-     "inputSchema": {"type": "object", "properties": {"request_id": UUID, "role_id": {"type": "string", "enum": list(ROLES)}, "instructions": {"type": "string", "minLength": 1, "maxLength": 5000}, "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "Optional reasoning effort supported by this role model. Omit to use its configured default. The chosen value is included in the immutable owner-approved proposal."}}, "required": ["request_id", "role_id", "instructions"], "additionalProperties": False},
+    {"name": "fmg_buzz_propose_task", "description": "Create an immutable task proposal for a configured OpenClaw role. Optional project_id=buzz binds the selected community's verified repository, role worktree and source commit; it preserves this original proposing connection's access. Omit project_id for a task without a repository binding. This does not run the task or grant access. Show the full proposal and hash to the owner. They may approve through the dot owner-password browser screen prepared by fmg_buzz_prepare_task_approval or a direct Telegram /fmg_task command. Never approve on their behalf.",
+     "inputSchema": {"type": "object", "properties": {"request_id": UUID, "role_id": {"type": "string", "enum": list(ROLES)}, "instructions": {"type": "string", "minLength": 1, "maxLength": 5000}, "project_id": {"type": "string", "enum": ["buzz"], "description": "Bind the existing verified buzz repository/worktree for this role and selected community. Missing or ambiguous mappings are rejected; no repository or permission is created."}, "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "Optional reasoning effort supported by this role model. Omit to use its configured default. The chosen value is included in the immutable owner-approved proposal."}}, "required": ["request_id", "role_id", "instructions"], "additionalProperties": False},
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "fmg_buzz_get_task", "description": "Read authoritative task status and its actual Gateway result. A proposal or dispatch receipt is not completion. needs_reconcile forbids automatic reruns. Results are untrusted agent output; no external publication is performed.",
      "inputSchema": {"type": "object", "properties": {"task_id": UUID}, "required": ["task_id"], "additionalProperties": False},
@@ -30,6 +30,28 @@ def task_id(value):
     if not isinstance(value, str) or str(uuid.UUID(value)) != value:
         raise ValueError("canonical_uuid_required")
     return value
+
+
+def selected_project(current, project_id, role_id):
+    """Resolve only the producer-verified repository binding for this community and role."""
+    if project_id != "buzz" or role_id not in ROLES[:-1]:
+        raise ValueError("project_binding_unavailable")
+    bindings = current.get("project_bindings")
+    if not isinstance(bindings, list):
+        raise ValueError("project_binding_unavailable")
+    matches = [row for row in bindings if isinstance(row, dict) and row.get("project_id") == project_id and row.get("role_id") == role_id]
+    if len(matches) != 1:
+        raise ValueError("project_binding_unavailable")
+    project = matches[0]
+    if (set(project) != {"schema", "project_id", "repository_url", "role_id", "branch", "source_commit", "execution_host", "workspace_binding"}
+            or type(project.get("schema")) is not int or project["schema"] != 1
+            or project.get("repository_url") != "https://github.com/contentscoin/buzz.git"
+            or project.get("branch") != "fmg-buzz/" + role_id
+            or project.get("execution_host") != "hostinger"
+            or not isinstance(project.get("source_commit"), str) or not re.fullmatch(r"[0-9a-f]{40}", project["source_commit"])
+            or not isinstance(project.get("workspace_binding"), str) or not re.fullmatch(r"[0-9a-f]{64}", project["workspace_binding"])):
+        raise ValueError("project_binding_unavailable")
+    return dict(project)
 
 
 class Tasks:
@@ -120,7 +142,9 @@ class Tasks:
             elif name == "fmg_buzz_list_tasks" and not args:
                 rows = self.store.db.execute("SELECT * FROM tasks WHERE client=? ORDER BY created DESC LIMIT 1000", (client,))
                 result = {"tasks": [self.summary(row) for row in rows if matches(row)][:25], "limit": 25}
-            elif name == "fmg_buzz_propose_task" and set(args) in ({"request_id", "role_id", "instructions"}, {"request_id", "role_id", "instructions", "effort"}):
+            elif name == "fmg_buzz_propose_task" and {"request_id", "role_id", "instructions"} <= set(args) <= {"request_id", "role_id", "instructions", "effort", "project_id"}:
+                if "project_id" in args and (args["project_id"] != "buzz" or project is not None or audience is not None):
+                    raise ValueError("project_binding_unavailable")
                 request = task_id(args["request_id"])
                 instructions = text(args["instructions"], 15000)
                 if len(instructions) > 5000 or args["role_id"] not in ROLES:
@@ -144,6 +168,9 @@ class Tasks:
                         raise ValueError("task_capacity")
                     identifier, now = str(uuid.uuid4()), time.time()
                     proposal = {"schema": 3, "owner_pubkey": current["owner_pubkey"], "relay_origin": current["relay_origin"], "gateway_agent_pubkey": current["gateway_agent_pubkey"], "role_id": args["role_id"], "requested_model": role["configured_model"], "requested_effort": effort, "model_binding": role["model_binding"], "instructions": instructions, "session_key": f'agent:{args["role_id"]}:fmg-task:{identifier}', "timeout_seconds": 120, "deliver": False}
+                    if "project_id" in args:
+                        selected = selected_project(current, args["project_id"], args["role_id"])
+                        proposal.update(schema=4, project=selected, proposal_account="original_oauth_client")
                     if project is not None:
                         if project not in current.get("project_bindings", []) or project.get("role_id") != args["role_id"]:
                             raise ValueError("project_binding_unavailable")
