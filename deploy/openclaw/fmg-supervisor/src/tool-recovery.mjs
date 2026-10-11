@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import * as zlib from "node:zlib";
 import { completionEvidence } from "./completion.mjs";
 import { publicModel } from "./model-binding.mjs";
+import { closedToolRoots } from "./closed-tools.mjs";
 
 const source = "gateway.runtime.read_exec";
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -69,10 +70,6 @@ export function toolRuntimeResult(events, transcript, entry, task, clean) {
         result.seq >= completed.seq || result.data.name !== name || result.data.success !== true ||
         result.data.result?.isError === true || meta.toolName !== name || meta.isError !== false)
       return null;
-    const details = result.data.result?.details;
-    if (name === "exec" && (details?.status !== "completed" || details.exitCode !== 0 ||
-        details.exitSignal != null || details.exitReason !== "exit" ||
-        details.noOutputTimedOut !== false || details.sessionId != null)) return null;
   }
 
   const messages = transcript.filter((e) => e.type === "message").map((e) => e.message);
@@ -99,9 +96,7 @@ export function toolRuntimeResult(events, transcript, entry, task, clean) {
       `${m.provider}/${m.model}` === task.proposal.requested_model ?
       m.content.filter((item) => item.type === "toolCall") : [{ invalid: true }]);
   const transcriptResults = messages.filter((m) => m.role === "toolResult");
-  if (transcriptCalls.length !== calls.length || transcriptResults.length !== calls.length ||
-      calls.some((c) => transcriptCalls.filter((item) => item.id === c.data.toolCallId && item.name === c.data.name).length !== 1 ||
-        transcriptResults.filter((m) => m.toolCallId === c.data.toolCallId && m.toolName === c.data.name && m.isError === false).length !== 1)) return null;
+  if (!closedToolRoots(calls, results, transcriptCalls, transcriptResults)) return null;
 
   const actual = publicModel(`${final.provider}/${final.responseModel ?? final.model}`);
   if (actual === "not_reported") return null;

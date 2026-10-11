@@ -19,6 +19,21 @@ no task is rerun, approved or automatically rewritten by installation.
 
 # Supervisor 0.12.3 — validate terminal receipts with the last working observation
 
+## Supervisor 0.12.5 — bounded closed-tool completion
+
+The live dispatch path also uses the existing durable read/exec validator.
+Runtime code orchestration is accepted only when every child is a closed
+read/shell call, its exact parent runtime ID and chronological lifecycle match,
+telemetry accounts for every nested call, and the original private transcript
+contains matching root calls/results and a provider-confirmed final answer.
+Runtime diagnostic arguments are redacted and do not prove command semantics;
+these checks prove completion, not enforcement of read-only instructions.
+The existing OpenAI-only validator and all run/session/model/effort/end fences
+remain. Anthropic transcript support is not inferred from OpenAI fixtures.
+`working` can enter the live durable fallback only for a completed normal-stop
+envelope and is never sufficient without the matching persisted final proof.
+Historical uncertain tasks still require a direct owner recovery command.
+
 OpenClaw emits its last `working` liveness observation even on a normal end.
 This value describes the embedded turn, not proof that the completed run is
 still executing. The final RPC path accepts it only with `ok`, `completed`, a

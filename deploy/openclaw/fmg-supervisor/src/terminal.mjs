@@ -2,7 +2,7 @@ import { completionEvidence } from "./completion.mjs";
 import { publicModel } from "./model-binding.mjs";
 
 /** Check the completed RPC envelope without assuming it includes a terminal attestation. */
-export function completedEnvelope(receipt, task) {
+export function completedEnvelope(receipt, task, durableFallback = false) {
   const meta = receipt?.result?.meta;
   return Boolean(
     receipt?.runId === task.run_id &&
@@ -34,7 +34,7 @@ export function completedEnvelope(receipt, task) {
       // Missing/foreign receipts still cannot use this completion path.
       (meta.livenessState !== "working" ||
         (meta.stopReason === "stop" &&
-          meta.agentMeta?.terminalReceipt?.runId === task.run_id)) &&
+          (durableFallback || meta.agentMeta?.terminalReceipt?.runId === task.run_id))) &&
       !receipt.result.payloads.some((item) => item?.isError === true),
   );
 }

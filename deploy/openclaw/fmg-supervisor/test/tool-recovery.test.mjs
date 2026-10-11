@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { toolRuntimeResult } from "../src/tool-recovery.mjs";
+import { executionResult } from "../src/execution-result.mjs";
 
 const run = "76fc8565-8b9e-4c71-8a80-736b6eca5178";
 const clean = (text, n) => typeof text === "string" ? text.slice(0, n) : null;
@@ -52,6 +53,71 @@ function fixture() {
   return { task, events, transcript, entry: { sessionId: "session", status: "done",
     lastRunId: run, endedAt: now+800, abortedLastRun: false } };
 }
+
+function facadeFixture() {
+  const f = fixture();
+  const parent = f.events[2], result = f.events[3];
+  const id = "call_root|response_root", child = "tool_search_code:call_root_response_root:read:1";
+  parent.data = { toolCallId: id, name: "exec", args: { code: "return await read({path:'README.md'});" } };
+  result.data = { toolCallId: id, name: "exec", success: true, result: { details: {
+    status: "completed", replaySafe: false, telemetry: { counterScope: "a".repeat(32),
+      catalogSize: 39, sources: { openclaw: 39, mcp: 0, client: 0 },
+      searchCount: 0, describeCount: 0, callCount: 1, visibleTools: ["exec", "wait"] } } } };
+  const childCall = { ...structuredClone(parent), data: { toolCallId: child, name: "read", args: {path:"README.md"} } };
+  const childResult = { ...structuredClone(result), data: { toolCallId: child, name: "read", success: true, result: {} } };
+  f.events.splice(3, 0, childCall, childResult);
+  const start = Date.parse(f.events[0].ts);
+  f.events.forEach((e, i) => { e.seq = i; e.ts = new Date(start+i*100).toISOString(); });
+  f.entry.endedAt = Date.parse(f.events.at(-1).ts);
+  const artifacts = f.events.find(e=>e.type==="trace.artifacts");
+  artifacts.data.toolMetas[0] = { toolCallId: id, toolName: "exec", isError: false };
+  artifacts.data.toolMetas.push({ toolCallId: child, toolName: "read", isError: false });
+  artifacts.data.itemLifecycle.startedCount = artifacts.data.itemLifecycle.completedCount = 3;
+  f.transcript[1].message.content[0] = { type: "toolCall", id, name: "exec", arguments: parent.data.args };
+  f.transcript[2].message.toolCallId = id;
+  f.transcript[2].message.toolName = "exec";
+  parent.data.args = {code:"[Malfo…ted]"};
+  result.data.result.details.telemetry.counterScope = "a".repeat(24);
+  return f;
+}
+
+test("closed runtime facade read binds its root transcript and nested lifecycle", () => {
+  const f = facadeFixture();
+  const recovered = toolRuntimeResult(f.events, f.transcript, f.entry, f.task, clean);
+  assert.equal(recovered.result.status, "succeeded");
+  assert.equal(recovered.result.completion_evidence.validation_contract, "fmg-terminal-v3");
+});
+
+for (const [name, mutate] of [
+  ["parent mismatch", f=>f.events[3].data.toolCallId = "tool_search_code:foreign:read:1"],
+  ["untraced facade call", f=>f.events[5].data.result.details.telemetry.callCount = 2],
+  ["unfinished facade", f=>f.events[5].data.result.details.status = "running"],
+  ["background facade", f=>f.events[5].data.result.details.sessionId = "running"],
+  ["foreign runtime source", f=>f.events[5].data.result.details.telemetry.sources.mcp = 1],
+  ["missing telemetry", f=>delete f.events[5].data.result.details.telemetry],
+  ["missing original code", f=>f.transcript[1].message.content[0].arguments = {}],
+  ["borrowed child order", f=>f.events[3].seq = 1],
+  ["nested unclosed shell", f=>{f.events[3].data.name = "exec";}],
+  ["borrowed root transcript", f=>f.transcript[1].message.content[0].id = "other"],
+]) test(`facade completion rejects ${name}`, () => {
+  const f=facadeFixture();mutate(f);
+  assert.equal(toolRuntimeResult(f.events,f.transcript,f.entry,f.task,clean),null);
+});
+
+test("live dispatch connects the same strict closed-tool reader without execution retry", async () => {
+  const f=facadeFixture();f.task.status="dispatching";
+  const receipt={runId:f.task.run_id,status:"ok",summary:"completed",result:{payloads:[{text:"완료"}],meta:{stopReason:"stop",livenessState:"working",agentMeta:{provider:"openai",model:"gpt-6.1-sol"}}}};
+  let reads=0;
+  const result=await executionResult(receipt,f.task,clean,false,async()=>null,async(task,sanitize)=>{
+    reads++;return toolRuntimeResult(f.events,f.transcript,f.entry,task,sanitize);
+  });
+  assert.equal(reads,1);assert.equal(result.status,"succeeded");
+  assert.equal(result.completion_evidence.source,"gateway.runtime.read_exec");
+  f.task.status="needs_reconcile";
+  assert.equal(await executionResult(receipt,f.task,clean,false,async()=>null,async()=>{
+    assert.fail("historical task requires direct owner recovery");
+  }),null);
+});
 
 test("durable closed read/exec turn requires the original transcript final answer", () => {
   const { events, transcript, entry, task } = fixture();

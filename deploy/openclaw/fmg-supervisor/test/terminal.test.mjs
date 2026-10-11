@@ -144,12 +144,18 @@ test("SDK completed receipt admits the last working observation", async () => {
   assert.equal(result.completion_evidence.source, "gateway.agent.final");
 });
 
-test("working metadata cannot trigger the missing-receipt runtime fallback", async () => {
+test("working metadata without matching durable final proof remains unconfirmed", async () => {
   const receipt = final();
   receipt.result.meta.livenessState = "working";
   delete receipt.result.meta.agentMeta.terminalReceipt;
+  let reads = 0;
   assert.equal(await executionResult(receipt, task, clean, false, async () => {
-    assert.fail("working metadata alone is not a completion receipt");
+    reads++; return null;
+  }, async () => null), null);
+  assert.equal(reads, 1);
+  delete receipt.result.meta.stopReason;
+  assert.equal(await executionResult(receipt, task, clean, false, async () => {
+    assert.fail("working without normal stop cannot use durable fallback");
   }), null);
 });
 
