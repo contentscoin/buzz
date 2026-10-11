@@ -268,9 +268,9 @@ class Tasks:
                 if evidence.get("source") == "durable_no_dispatch_intent":
                     if row["dispatch_stage"] is not None or row["run_id"] is not None or result["status"] != "canceled" or evidence.get("run_id") is not None:
                         raise ValueError("no_dispatch_not_proven")
-                elif evidence.get("source") in ("gateway.agent.wait", "gateway.runtime.no_tools"):
+                elif evidence.get("source") in ("gateway.agent.wait", "gateway.runtime.no_tools", "gateway.runtime.read_exec"):
                     ended = evidence.get("ended_at")
-                    if evidence.get("source") == "gateway.runtime.no_tools" and (result["status"] != "succeeded" or evidence.get("stop_reason") != "stop"):
+                    if evidence.get("source") in ("gateway.runtime.no_tools", "gateway.runtime.read_exec") and (result["status"] != "succeeded" or evidence.get("stop_reason") != "stop"):
                         raise ValueError("runtime_recovery_not_successful")
                     if row["dispatch_stage"] != "intent_recorded" or row["run_id"] != row["id"] or result.get("run_id") != row["run_id"] or evidence.get("run_id") != row["run_id"] or type(ended) not in (int, float) or not row["created"]*1000-5000 <= ended <= time.time()*1000+5000:
                         raise ValueError("gateway_terminal_evidence_invalid")

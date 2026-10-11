@@ -1,3 +1,22 @@
+# Supervisor 0.12.4 — durable recovery of closed read/exec tool turns
+
+Direct owner recovery can additionally validate one dedicated OpenAI turn with
+1–16 completed read/exec tools from the private agent SQLite database. Contract
+`fmg-terminal-v3` binds all runtime events, exact prompt/model/effort, closed
+matching tool IDs, zero active tools, foreground exec exit 0, session done for
+the same run, persisted final assistant signature/provider completion and an
+identical final reply. The original transcript is read without migrations in
+one bounded SQLite read transaction, including bounded zstd decompression.
+Truncated trajectory message snapshots are never used as a final answer; the
+persisted transcript is required. Unknown tools, failures, missing/truncated
+terminal fields, extra turns, delivery records, limits and read errors deny
+recovery. The no-tool validator remains unchanged. This is terminal proof,
+not a claim that arbitrary exec commands were safe or had no side effects.
+
+Task server 0.12.1 accepts this authenticated worker completion contract.
+Existing uncertain tasks still require the direct owner's recovery command;
+no task is rerun, approved or automatically rewritten by installation.
+
 # Supervisor 0.12.3 — validate terminal receipts with the last working observation
 
 OpenClaw emits its last `working` liveness observation even on a normal end.

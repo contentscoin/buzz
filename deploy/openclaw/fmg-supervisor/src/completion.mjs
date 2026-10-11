@@ -17,6 +17,7 @@ export function completionEvidence(
       "gateway.agent.final",
       "gateway.agent.wait",
       "gateway.runtime.no_tools",
+      "gateway.runtime.read_exec",
     ].includes(source)
   )
     throw new Error("completion_binding_invalid");
@@ -27,7 +28,9 @@ export function completionEvidence(
   return {
     schema: 1,
     validation_contract:
-      source === "gateway.runtime.no_tools"
+      source === "gateway.runtime.read_exec"
+        ? "fmg-terminal-v3"
+        : source === "gateway.runtime.no_tools"
         ? "fmg-terminal-v2"
         : "fmg-terminal-v1",
     source,
