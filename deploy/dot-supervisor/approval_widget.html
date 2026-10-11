@@ -17,8 +17,9 @@ button:focus-visible,a:focus-visible{outline:3px solid #2860cf;outline-offset:3p
 <dl id="fields"></dl>
 <h2>작업 지시문</h2><pre id="instructions"></pre>
 <small id="hash"></small>
-<p>소유자 확인 화면에서 기존 MCP 연결 비밀번호를 확인하고 최종 승인합니다.</p>
+<p>소유자 확인을 이 브라우저에서 30분간 유지할 수 있습니다. 여러 작업은 한 화면에서 전체 내용을 검토하고 직접 승인하세요.</p>
 <button id="approve" type="button" disabled>소유자 승인 화면 열기</button>
+<button id="batch" type="button" disabled>대기 작업 함께 검토</button>
 <button id="refresh" type="button" disabled>작업 상태 새로 고침</button>
 <p><a id="link" target="_blank" rel="noopener noreferrer" hidden>승인 화면 링크로 열기</a></p>
 <p id="error" role="alert"></p>
@@ -58,6 +59,10 @@ button:focus-visible,a:focus-visible{outline:3px solid #2860cf;outline-offset:3p
     const safe = url?.origin === "https://buzz-dnb0.srv2006121.hstgr.cloud" && url.pathname === "/dot-supervisor/tasks/approval" && /^[0-9a-f]{64}$/.test(url.searchParams.get("token") || "");
     const available = safe && task.status === "awaiting_approval" && approval.status === "awaiting_owner_browser" && approval.expires_at * 1000 > Date.now();
     el("approve").disabled = !available;
+    let batchUrl;
+    try { batchUrl = new URL(approval.batch_url); } catch { batchUrl = null; }
+    const batchSafe = safe && batchUrl?.origin === url.origin && batchUrl.pathname === url.pathname && batchUrl.searchParams.get("token") === url.searchParams.get("token") && batchUrl.searchParams.get("view") === "batch" && [...batchUrl.searchParams.keys()].sort().join(",") === "token,view";
+    el("batch").disabled = !available || !batchSafe;
     el("refresh").disabled = false;
     el("link").hidden = !available;
     if (safe) el("link").href = url.href;
@@ -81,6 +86,13 @@ button:focus-visible,a:focus-visible{outline:3px solid #2860cf;outline-offset:3p
       if (window.openai?.openExternal) await window.openai.openExternal({ href: data.approval.url });
       else await request("ui/open-link", { url: data.approval.url });
     } catch { el("error").textContent = "승인 화면 링크로 열기를 눌러 진행하세요."; }
+  };
+  el("batch").onclick = async event => {
+    if (!event.isTrusted || el("batch").disabled) return;
+    try {
+      if (window.openai?.openExternal) await window.openai.openExternal({ href: data.approval.batch_url });
+      else await request("ui/open-link", { url: data.approval.batch_url });
+    } catch { el("error").textContent = "개별 승인 화면을 열고 ‘대기 작업을 한 화면에서 검토’를 눌러 주세요."; }
   };
   el("refresh").onclick = async () => {
     if (!data) return;

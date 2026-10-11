@@ -278,3 +278,30 @@ from an older worker is never treated as proof of no execution. Gateway
 `agent.wait` observations are a short-lived cache, not durable history. Missing
 or expired records and bare wait timeouts remain unresolved. No manual success
 marking or automatic rerun tool is exposed to the dot.
+# Owner browser sign-in and grouped review (task server 0.13.0)
+
+The password form offers a checked, visible option to retain owner confirmation
+in that browser for 30 minutes. The opaque cookie is Secure, HttpOnly and
+SameSite=Strict, scoped to the approval route. Only its hash is stored. The
+absolute expiry never extends on reads. It is bound to the original OAuth
+client and family, community, owner/relay/Gateway audience and current owner
+password hash. Another community or connection needs its own confirmation.
+The owner can end the session with the CSRF-protected logout button. Existing
+five-minute per-screen sessions remain compatible when the option is unchecked.
+
+`fmg_buzz_prepare_task_approval` additionally returns `approval.batch_url`.
+The owner may review up to ten already prepared, unexpired proposals from the
+same connection and audience in one page. All full instructions, models, efforts,
+repository bindings, revisions and hashes are displayed before the final
+button. The CSRF proof seals exactly those immutable approval rows. New
+proposals prepared later are never added to a submitted group. Each individual
+screen remains available. Revalidation or storage failure aborts the entire
+group; task revisions and individual receipts commit in one SQLite transaction.
+An immutable group receipt makes identical form resubmission idempotent.
+
+This retains human final approval. It grants no standing execution permission,
+cannot approve future tasks, and does not let a model visit or submit approval.
+OAuth revocation, community access withdrawal and changed audience/model/worktree
+still deny approval. Approval screens still expire after ten minutes. Browser
+sign-in reduces password entry and grouped review reduces final clicks; actual
+execution success must still be verified from its termination receipt.

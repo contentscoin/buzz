@@ -10,12 +10,13 @@ from urllib.parse import urlencode
 from communities import binding, scoped_catalog, split
 from store import canonical, digest
 from tasks import UUID, task_id
+from approval_convenience import ApprovalConvenience
 
 UI_URI = "ui://fmg-buzz/task-approval-v1.html"
 NAME = "fmg_buzz_prepare_task_approval"
 CATALOG = scoped_catalog([{
     "name": NAME, "title": "Buzz 작업 승인 화면 열기",
-    "description": "Prepare an owner approval screen for your own immutable proposal. This NEVER approves or executes work. First get the task and pass its exact hash and revision. Show the owner the returned link/widget; ONLY the human owner enters their existing MCP connection password on the server page and presses the final approve button. Never navigate the approval page, request the password in chat, or submit approval for the owner. Reuse request_id after response loss; an expired screen needs a new UUID.",
+    "description": "Prepare an owner approval screen for your own immutable proposal. This NEVER approves or executes work. First get the task and pass its exact hash and revision. Show the owner the returned link/widget; batch_url opens full review of up to 10 prepared tasks in the same original account/community/Gateway. ONLY the human owner signs in with their connection password (optionally remembered in that browser for 30 minutes), reviews the full proposals and presses final approve. Never navigate the approval page, request the password in chat, or submit approval for the owner. Reuse request_id after response loss; an expired screen needs a new UUID.",
     "inputSchema": {"type": "object", "properties": {
         "request_id": UUID, "task_id": UUID,
         "proposal_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$", "maxLength": 64},
@@ -34,7 +35,8 @@ class ApprovalError(ValueError):
     pass
 
 
-class Approvals:
+class Approvals(ApprovalConvenience):
+    error = ApprovalError
     def __init__(self, tasks, oauth, secret):
         self.tasks, self.store, self.oauth = tasks, tasks.store, oauth
         self.secret = secret.encode()
@@ -63,6 +65,7 @@ class Approvals:
           peer TEXT PRIMARY KEY, count INTEGER NOT NULL, updated REAL NOT NULL);
         """)
         self.tasks.dot_approval_receipt = self.receipt
+        self.init_convenience()
 
     def receipt(self, task):
         row = self.store.db.execute("SELECT receipt FROM dot_task_approvals WHERE task_id=? AND receipt IS NOT NULL ORDER BY created DESC LIMIT 1", (task,)).fetchone()
@@ -135,6 +138,7 @@ class Approvals:
             approval = {"request_id": request, "expires_at": row["expires"], "community_id": row["community_id"],
                         "status": "recorded" if row["receipt"] else "expired" if row["expires"] <= time.time() else "awaiting_owner_browser",
                         "url": self.oauth.issuer + "/approval?" + urlencode({"token": self.token(row)}),
+                        "batch_url": self.oauth.issuer + "/approval?" + urlencode({"token": self.token(row), "view": "batch"}),
                         "requires": "owner_connection_password_then_explicit_approve",
                         "receipt": json.loads(row["receipt"]) if row["receipt"] else None}
             result = {"task": self.tasks.view(task), "approval": approval, "execution_approval_performed": False}
@@ -148,7 +152,7 @@ class Approvals:
             raise ApprovalError("approval_unavailable")
         return row
 
-    def authenticate(self, row, password, peer):
+    def authenticate(self, row, password, peer, remember=False):
         now, peer = time.time(), digest(peer.encode())
         self.store.db.execute("DELETE FROM dot_approval_failures WHERE updated<?", (now-600,))
         previous = self.store.db.execute("SELECT * FROM dot_approval_failures WHERE peer=?", (peer,)).fetchone()
@@ -165,6 +169,10 @@ class Approvals:
         if not secrets.compare_digest(actual, expected):
             raise ApprovalError("owner_authentication_failed")
         self.current(row, pending=not row["receipt"])
+        if remember:
+            session = self.remember_session(row)
+            self.store.db.commit()
+            return session
         self.store.db.execute("DELETE FROM dot_approval_sessions WHERE expires<?", (now,))
         if self.store.db.execute("SELECT COUNT(*) FROM dot_approval_sessions").fetchone()[0] >= 2000 or self.store.db.execute("SELECT COUNT(*) FROM dot_approval_sessions WHERE approval_id=?", (row["id"],)).fetchone()[0] >= 20:
             raise ApprovalError("approval_capacity")
@@ -176,7 +184,7 @@ class Approvals:
     def session(self, row, session):
         if not isinstance(session, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", session):
             return False
-        return bool(self.store.db.execute("SELECT 1 FROM dot_approval_sessions WHERE hash=? AND approval_id=? AND expires>?", (digest(session.encode()), row["id"], time.time())).fetchone())
+        return self.remembered(row, session) or bool(self.store.db.execute("SELECT 1 FROM dot_approval_sessions WHERE hash=? AND approval_id=? AND expires>?", (digest(session.encode()), row["id"], time.time())).fetchone())
 
     def approve(self, token, session, csrf):
         with self.store.lock, self.store.db:
@@ -190,15 +198,17 @@ class Approvals:
             final = self.tasks.communities.current(row["client"], row["community_id"])
             if final["generation"] != current["generation"] or binding(final) != binding(current):
                 raise ApprovalError("approval_binding_changed")
-            now = time.time()
-            receipt = {"schema": 1, "request_id": row["request_id"], "task_id": task["id"],
+            return self.commit_approval(row, task, current, time.time())
+
+    def commit_approval(self, row, task, current, now):
+        # Caller holds the lock and transaction: groups must commit all receipts together.
+        receipt = {"schema": 1, "request_id": row["request_id"], "task_id": task["id"],
                        "proposal_hash": task["proposal_hash"], "previous_revision": task["revision"], "approved_revision": task["revision"]+1,
                        "client_id": row["client"], "community_id": row["community_id"], "audience": binding(current),
                        "source": "chatgpt_dot_owner_password_browser", "approved_at": now, "status": "approved"}
-            receipt["receipt_hash"] = digest(canonical(receipt).encode())
-            updated = self.store.db.execute("UPDATE tasks SET status='approved',revision=revision+1,updated=? WHERE id=? AND client=? AND status='awaiting_approval' AND revision=? AND proposal_hash=?", (now, task["id"], row["client"], row["revision"], row["proposal_hash"]))
-            if updated.rowcount != 1:
-                raise ApprovalError("approval_state_conflict")
-            self.store.db.execute("UPDATE dot_task_approvals SET receipt=? WHERE id=? AND receipt IS NULL", (canonical(receipt), row["id"]))
-            self.store.db.commit()
-            return receipt
+        receipt["receipt_hash"] = digest(canonical(receipt).encode())
+        updated = self.store.db.execute("UPDATE tasks SET status='approved',revision=revision+1,updated=? WHERE id=? AND client=? AND status='awaiting_approval' AND revision=? AND proposal_hash=?", (now, task["id"], row["client"], row["revision"], row["proposal_hash"]))
+        if updated.rowcount != 1:
+            raise ApprovalError("approval_state_conflict")
+        self.store.db.execute("UPDATE dot_task_approvals SET receipt=? WHERE id=? AND receipt IS NULL", (canonical(receipt), row["id"]))
+        return receipt
