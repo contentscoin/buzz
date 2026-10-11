@@ -1,3 +1,19 @@
+# Supervisor 0.12.3 — validate terminal receipts with the last working observation
+
+OpenClaw emits its last `working` liveness observation even on a normal end.
+This value describes the embedded turn, not proof that the completed run is
+still executing. The final RPC path accepts it only with `ok`, `completed`, a
+normal `stop` and a bound SDK terminal receipt. Direct owner recovery accepts
+it only with `ok`, a valid bounded `endedAt`, normal `stop` and a validated
+same-run terminal receipt and terminal reply. Paused, blocked, abandoned,
+yielded, pending, timeout, errors and missing/contradictory receipts stay
+unconfirmed. The no-tool fallback remains strictly no-tool and is not widened.
+
+Existing uncertain tasks still require the direct owner's recovery command.
+No task is rerun or automatically rewritten. Worker protocol 7 and completion
+contracts remain unchanged. A live recovery and document save must be observed
+separately from the regression tests and plugin installation.
+
 # Supervisor 0.12.2 — persist proven no-tool completion during live dispatch
 
 When a completed SDK reply omits its inner terminal receipt, the live worker

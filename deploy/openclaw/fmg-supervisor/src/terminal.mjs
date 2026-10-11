@@ -27,9 +27,14 @@ export function completedEnvelope(receipt, task) {
         "error",
         "timeout",
       ].includes(meta.stopReason) &&
-      !["working", "paused", "blocked", "abandoned"].includes(
+      !["paused", "blocked", "abandoned"].includes(
         meta.livenessState,
       ) &&
+      // A final normal stop can retain the SDK's last working observation.
+      // Missing/foreign receipts still cannot use this completion path.
+      (meta.livenessState !== "working" ||
+        (meta.stopReason === "stop" &&
+          meta.agentMeta?.terminalReceipt?.runId === task.run_id)) &&
       !receipt.result.payloads.some((item) => item?.isError === true),
   );
 }

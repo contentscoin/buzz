@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { finalResult } from "../src/terminal.mjs";
 import { runtimeResult } from "../src/runtime-recovery.mjs";
 import { executionResult } from "../src/execution-result.mjs";
+import { recoveredResult } from "../src/wait-result.mjs";
 
 const clean = (s, n) =>
   typeof s === "string" ? Array.from(s).slice(0, n).join("") : null;
@@ -132,6 +133,102 @@ test("SDK normal stop has bound success evidence", () => {
   assert.equal(r.reply, "완료\n응답");
   assert.equal(r.completion_evidence.source, "gateway.agent.final");
 });
+
+test("SDK completed receipt admits the last working observation", async () => {
+  const receipt = final();
+  receipt.result.meta.livenessState = "working";
+  const result = await executionResult(receipt, task, clean, false, async () => {
+    assert.fail("a valid SDK terminal receipt must not use runtime fallback");
+  });
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.completion_evidence.source, "gateway.agent.final");
+});
+
+test("working metadata cannot trigger the missing-receipt runtime fallback", async () => {
+  const receipt = final();
+  receipt.result.meta.livenessState = "working";
+  delete receipt.result.meta.agentMeta.terminalReceipt;
+  assert.equal(await executionResult(receipt, task, clean, false, async () => {
+    assert.fail("working metadata alone is not a completion receipt");
+  }), null);
+});
+
+function waitReceipt() {
+  return {
+    runId: run,
+    status: "ok",
+    endedAt: Date.now() - 1000,
+    stopReason: "stop",
+    livenessState: "working",
+    terminalReceipt: {
+      ...final().result.meta.agentMeta.terminalReceipt,
+      successfulToolNames: ["read", "exec"],
+      terminalDisposition: "visible",
+    },
+    terminalReply: { disposition: "visible", text: "완료\n응답" },
+  };
+}
+
+test("owner recovery validates the same completed tool run without rerunning", () => {
+  const result = recoveredResult(waitReceipt(), task, clean);
+  assert.equal(result.result.status, "succeeded");
+  assert.equal(result.result.reply, "완료\n응답");
+  assert.equal(result.result.actual_model, task.proposal.requested_model);
+  assert.equal(result.result.completion_evidence.source, "gateway.agent.wait");
+  assert.equal(result.result.completion_evidence.receipt_hash, result.evidence.receipt_hash);
+});
+
+for (const [name, mutate] of [
+  ["wrong run", (r) => (r.runId = "other")],
+  ["pending", (r) => (r.status = "pending")],
+  ["observation timeout", (r) => (r.status = "timeout")],
+  ["missing end", (r) => delete r.endedAt],
+  ["old end", (r) => (r.endedAt = task.created_at * 1000 - 10000)],
+  ["future end", (r) => (r.endedAt = Date.now() + 10000)],
+  ["pending error", (r) => (r.pendingError = true)],
+  ["yielded", (r) => (r.yielded = true)],
+  ["paused", (r) => (r.livenessState = "paused")],
+  ["blocked", (r) => (r.livenessState = "blocked")],
+  ["abandoned", (r) => (r.livenessState = "abandoned")],
+  ["tool continuation", (r) => (r.stopReason = "tool_calls")],
+  ["missing stop while working", (r) => delete r.stopReason],
+  ["aborted stop", (r) => (r.stopReason = "aborted")],
+  ["timeout phase", (r) => (r.timeoutPhase = "provider")],
+  ["reported error", (r) => (r.error = "failed")],
+  ["missing terminal receipt", (r) => delete r.terminalReceipt],
+  ["foreign terminal run", (r) => (r.terminalReceipt.runId = "other")],
+  ["missing terminal session", (r) => delete r.terminalReceipt.sessionId],
+  ["missing terminal turn", (r) => delete r.terminalReceipt.turnId],
+  ["wrong requested model", (r) => (r.terminalReceipt.requested.model = "other")],
+  ["missing effective model", (r) => delete r.terminalReceipt.effective.model],
+  ["missing reply", (r) => delete r.terminalReply],
+  ["unfinished reply", (r) => (r.terminalReply.disposition = "pending")],
+  ["non-text visible reply", (r) => (r.terminalReply.text = null)],
+])
+  test(`owner recovery rejects working metadata with ${name}`, () => {
+    const receipt = waitReceipt();
+    mutate(receipt);
+    assert.equal(recoveredResult(receipt, task, clean), null);
+  });
+
+for (const [name, mutate] of [
+  ["missing receipt", (r) => delete r.result.meta.agentMeta.terminalReceipt],
+  ["wrong receipt run", (r) => (r.result.meta.agentMeta.terminalReceipt.runId = "other")],
+  ["wrong model", (r) => (r.result.meta.agentMeta.terminalReceipt.requested.model = "other")],
+  ["not completed", (r) => (r.summary = "accepted")],
+  ["no normal stop", (r) => delete r.result.meta.stopReason],
+  ["pending continuation", (r) => (r.result.meta.continuationPending = true)],
+  ["timeout phase", (r) => (r.result.meta.timeoutPhase = "provider")],
+  ["paused", (r) => (r.result.meta.livenessState = "paused")],
+  ["blocked", (r) => (r.result.meta.livenessState = "blocked")],
+  ["abandoned", (r) => (r.result.meta.livenessState = "abandoned")],
+])
+  test(`SDK working final rejects ${name}`, () => {
+    const receipt = final();
+    receipt.result.meta.livenessState = "working";
+    mutate(receipt);
+    assert.equal(finalResult(receipt, task, clean), null);
+  });
 
 test("live dispatch with missing SDK receipt binds the durable no-tool end", async () => {
   const receipt = final();
