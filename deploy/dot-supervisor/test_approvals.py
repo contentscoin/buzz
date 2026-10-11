@@ -271,6 +271,38 @@ class ApprovalTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;", review)
         self.assertNotIn("<script>", review)
 
+    def test_browser_pages_keep_form_origin_without_referrer_token(self):
+        class CaptureHandler:
+            headers = {}
+
+            def reply(self, status, body=None, headers=None, html=False):
+                return {"status": status, "headers": headers or {}, "body": body}
+
+        token = parse_qs(urlsplit(self.prepare()["approval"]["url"]).query)["token"][0]
+        pages, handler = ApprovalPages(self.approvals), CaptureHandler()
+        login = pages.get(handler, {"token": token})
+        self.assertEqual(login["status"], 200)
+        self.assertEqual(login["headers"]["Referrer-Policy"], "strict-origin")
+        self.assertIn("form-action 'self'", login["headers"]["Content-Security-Policy"])
+        self.assertEqual(login["headers"]["X-Frame-Options"], "DENY")
+        failed = pages.post(handler, {"action": "review", "token": token, "password": "wrong"}, "fixture-peer")
+        self.assertEqual(failed["status"], 409)
+        self.assertEqual(failed["headers"]["Referrer-Policy"], "strict-origin")
+        review_redirect = pages.post(handler, {"action": "review", "token": token, "password": self.password}, "fixture-peer")
+        self.assertEqual(review_redirect["status"], 303)
+        self.assertEqual(review_redirect["headers"]["Referrer-Policy"], "strict-origin")
+        cookie_value = review_redirect["headers"]["Set-Cookie"].split(";", 1)[0]
+        handler.headers = {"Cookie": cookie_value}
+        review = pages.get(handler, {"token": token})
+        self.assertEqual(review["status"], 200)
+        self.assertEqual(review["headers"]["Referrer-Policy"], "strict-origin")
+        session = cookie_value.split("=", 1)[1]
+        approved = pages.post(handler, {"action": "approve", "token": token,
+                                       "csrf": self.approvals.csrf(token, session)}, "fixture-peer")
+        self.assertEqual(approved["status"], 303)
+        self.assertEqual(approved["headers"]["Referrer-Policy"], "strict-origin")
+        self.assertEqual(self.tasks.read(self.task["task_id"])["status"], "approved")
+
 
 if __name__ == "__main__":
     unittest.main()

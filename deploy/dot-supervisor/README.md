@@ -57,6 +57,12 @@ cookie, session-bound CSRF and exact Origin protect the final POST. Password
 attempts are durably limited to five per peer and thirty globally in ten minutes.
 No password, OAuth token, browser session or CSRF enters MCP tool output.
 
+Owner approval pages and their redirects use `Referrer-Policy: strict-origin`.
+This sends only the HTTPS origin as the referrer, excluding the approval token,
+and preserves the browser's Origin on form POSTs. `no-referrer` would instead
+make navigation-mode forms send `Origin: null` and fail the unchanged exact-Origin
+check. The page-header regression covers login, review, errors and both redirects.
+
 The task CAS (`awaiting_approval` to `approved`, revision +1) and immutable approval
 receipt are one SQLite commit. The existing protocol-7 worker alone claims and
 runs approved work, with its existing dispatch and reconcile checks. Telegram

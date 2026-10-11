@@ -6,6 +6,9 @@ from urllib.parse import urlencode, urlsplit
 from approvals import ApprovalError
 
 COOKIE = "__Secure-fmg-dot-approval"
+# no-referrer makes navigation-mode form POSTs send Origin: null. Keep the
+# exact-Origin guard while omitting the approval token from Referer headers.
+REFERRER_POLICY = "strict-origin"
 MESSAGES = {
     "owner_authentication_failed": "소유자 연결 비밀번호가 일치하지 않습니다.",
     "approval_password_rate_limit": "확인 요청이 많습니다. 10분 뒤 다시 시도하세요.",
@@ -46,7 +49,7 @@ class ApprovalPages:
         self.path = urlsplit(approvals.oauth.issuer).path + "/approval"
 
     def reply(self, handler, status, body, headers=None):
-        values = {"Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+        values = {"Referrer-Policy": REFERRER_POLICY, "X-Frame-Options": "DENY",
                   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}
         values.update(headers or {})
         return handler.reply(status, page(body), values, html=True)
@@ -98,10 +101,10 @@ class ApprovalPages:
                     session = self.approvals.authenticate(row, args["password"], peer)
                     headers = {"Set-Cookie": COOKIE+'='+session+'; Path='+self.path+'; Max-Age=300; Secure; HttpOnly; SameSite=Strict',
                                "Location": self.path + "?" + urlencode({"token": token})}
-                    return handler.reply(303, headers={**headers, "Referrer-Policy": "no-referrer"})
+                    return handler.reply(303, headers={**headers, "Referrer-Policy": REFERRER_POLICY})
                 if args.get("action") == "approve" and set(args) == {"action", "token", "csrf"}:
                     self.approvals.approve(token, cookie(handler.headers), args["csrf"])
-                    return handler.reply(303, headers={"Location": self.path + "?" + urlencode({"token": token}), "Referrer-Policy": "no-referrer"})
+                    return handler.reply(303, headers={"Location": self.path + "?" + urlencode({"token": token}), "Referrer-Policy": REFERRER_POLICY})
                 raise ApprovalError("approval_request_invalid")
         except (ValueError, KeyError, TypeError, OSError) as error:
             body = '<p class="error" role="alert">'+escaped(MESSAGES.get(str(error), "승인을 확인하지 못했습니다. 닷에서 작업 상태를 조회하세요. 같은 요청을 조회해 승인 기록을 복구할 수 있습니다."))+'</p>'
