@@ -1,49 +1,82 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import '../../shared/fmg/fmg_management.dart';
+import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
 import 'fmg_ui_labels.dart';
 
 /// Exposes connection/recovery state and never treats a publish ACK as execution completion.
-class FmgControlStatus extends HookWidget {
+class FmgControlStatus extends HookConsumerWidget {
   const FmgControlStatus({
     super.key,
     required this.management,
     required this.onConnected,
+    this.onDisconnected,
   });
   final FmgManagement management;
   final VoidCallback onConnected;
+  final VoidCallback? onDisconnected;
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final busy = useState(false);
     final message = useState<String?>(null);
+    final generation = useRef(0);
+    final session = ref.watch(relaySessionProvider).status;
+    final lifecycle = ref.watch(appLifecycleProvider);
     Future<void> connect() async {
-      if (busy.value) return;
+      if (!context.mounted || busy.value) return;
+      final attempt = ++generation.value;
       busy.value = true;
+      message.value = 'PC의 모바일 제어 응답을 확인하고 있습니다. 이전 연결을 다시 찾는 경우 최대 30초 걸립니다.';
+      onDisconnected?.call();
       try {
         final result = await management.connect();
-        if (context.mounted) {
+        if (context.mounted && generation.value == attempt) {
           message.value =
               'PC 연결됨 · ${(result['deviceId'] as String).substring(0, 8)}';
           onConnected();
         }
       } catch (error) {
-        if (context.mounted) {
+        if (context.mounted && generation.value == attempt) {
           message.value =
               '${fmgDisplayError(error)}\nPC의 새 Buzz를 실행하고 FMG를 선택하세요.';
         }
       } finally {
-        if (context.mounted) busy.value = false;
+        if (context.mounted && generation.value == attempt) busy.value = false;
       }
     }
 
+    useEffect(() {
+      var retired = false;
+      // Run after build so parent readiness changes do not set state while building.
+      Future.microtask(() {
+        if (retired || !context.mounted) return;
+        generation.value++;
+        busy.value = false;
+        if (lifecycle == AppLifecycleState.resumed &&
+            session == SessionStatus.connected) {
+          connect();
+        } else {
+          onDisconnected?.call();
+          message.value = 'FMG 커뮤니티에 연결되면 PC 연결을 자동으로 확인합니다.';
+        }
+      });
+      return () {
+        retired = true;
+        generation.value++;
+      };
+    }, [management, session, lifecycle]);
+
     Future<void> recover({bool resend = false}) async {
+      if (busy.value) return;
+      final attempt = ++generation.value;
       busy.value = true;
       try {
         final result = await management.recover(resendUnreceived: resend);
-        if (!context.mounted) return;
+        if (!context.mounted || generation.value != attempt) return;
         message.value = switch (result['status']) {
-          'none' => '확인 대기 중인 변경이 없습니다.',
+          'none' => '확인 대기 중인 변경이 없습니다. PC 연결 상태는 연결 버튼으로 확인하세요.',
           'done' =>
             result['error'] == null
                 ? '이전 변경의 종료 응답을 확인했습니다.'
@@ -105,11 +138,24 @@ class FmgControlStatus extends HookWidget {
             await recover(resend: true);
           }
         }
-        if (context.mounted) onConnected();
+        // Local absence of a pending write is not evidence of a PC connection.
+        if (context.mounted &&
+            generation.value == attempt &&
+            result['status'] != 'none') {
+          final connected = await management.connect();
+          if (context.mounted && generation.value == attempt) {
+            message.value =
+                '${message.value}\nPC 연결됨 · ${(connected['deviceId'] as String).substring(0, 8)}';
+            onConnected();
+          }
+        }
       } catch (error) {
-        if (context.mounted) message.value = fmgDisplayError(error);
+        if (context.mounted && generation.value == attempt) {
+          message.value = fmgDisplayError(error);
+          onDisconnected?.call();
+        }
       } finally {
-        if (context.mounted) busy.value = false;
+        if (context.mounted && generation.value == attempt) busy.value = false;
       }
     }
 
@@ -135,6 +181,7 @@ class FmgControlStatus extends HookWidget {
               ),
             ],
           ),
+          if (busy.value) const LinearProgressIndicator(),
           if (message.value != null)
             Text(message.value!, style: context.textTheme.bodySmall),
         ],

@@ -52,6 +52,11 @@ class FmgRequestException implements Exception {
   String toString() => switch (code) {
     'offline' => '서버에 연결되지 않았습니다. 연결 후 새로 고침하세요.',
     'timeout' => '서버 응답 시간이 초과됐습니다. 다시 조회하세요.',
+    'desktop_timeout' =>
+      'PC의 모바일 제어 응답이 없습니다. PC에서 같은 계정의 FMG를 선택하고 업데이트를 적용했는지 확인하세요.',
+    'device_changed' => '이전 PC 연결이 변경됐습니다. 기존 요청 확인을 마친 뒤 새 PC를 연결하세요.',
+    'publish_failed' => '릴레이가 요청을 수락하지 않았습니다. 커뮤니티 연결을 확인하세요.',
+    'publish_timeout' => '릴레이의 요청 수신을 확인하지 못했습니다. 변경 요청은 이전 요청 확인으로 조회하세요.',
     'scope_changed' => '계정이나 커뮤니티가 변경됐습니다. FMG 메뉴를 다시 여세요.',
     'owner_mismatch' => 'FMG 소유자 계정이 아닙니다. 기존 데스크톱 소유자 계정으로 기기를 페어링하세요.',
     'cache_clear_failed' => '접근을 확인할 수 없고 목록 캐시 제거에도 실패했습니다. 연결 후 다시 조회하세요.',
@@ -77,7 +82,6 @@ class FmgRequestException implements Exception {
     'journal_full' ||
     'journal_unavailable' ||
     'journal_invalid' => '변경 기록을 안전하게 보관할 수 없습니다. 저장 공간과 이전 요청을 확인하세요.',
-    'device_changed' => '이전 요청을 처리한 PC에 연결해야 합니다. 기존 PC의 Buzz를 실행하세요.',
     'response_too_large' => '조회 내용이 너무 큽니다. 항목별 상세 화면에서 확인하세요.',
     'confirmation_required' => '검토 화면에 표시된 현재 변경 커밋을 정확히 입력해 주세요.',
     'parallelism_invalid' => '동시 작업 수가 실행기의 허용 범위를 벗어났습니다.',
@@ -193,9 +197,12 @@ class FmgRpc {
     unawaited(done.future.catchError((Object _) => <String, dynamic>{}));
     _pending.add(done);
     void Function()? unsubscribe;
-    final timer = Timer(const Duration(seconds: 60), () {
+    final discovery = desktop && action == 'desktop.discover';
+    final timer = Timer(Duration(seconds: discovery ? 15 : 60), () {
       if (!done.isCompleted) {
-        done.completeError(const FmgRequestException('timeout'));
+        done.completeError(
+          FmgRequestException(desktop ? 'desktop_timeout' : 'timeout'),
+        );
       }
     });
     final started = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -317,7 +324,7 @@ class FmgRpc {
           'relay': fmgRelayOrigin,
           'expiresAt': DateTime.now()
               .toUtc()
-              .add(const Duration(seconds: 55))
+              .add(Duration(seconds: discovery ? 14 : 55))
               .toIso8601String(),
           'action': action,
           ...target,
@@ -336,7 +343,14 @@ class FmgRpc {
         secretKey: _privateKey,
         verify: false,
       );
-      final send = _session.publish(NostrEvent.fromJson(signed.toMap()));
+      final send = _session
+          .publish(NostrEvent.fromJson(signed.toMap()))
+          .catchError((Object error) {
+            if (error is TimeoutException) {
+              throw const FmgRequestException('publish_timeout');
+            }
+            throw const FmgRequestException('publish_failed');
+          });
       final results = await Future.wait([done.future, send], eagerError: true);
       if (_closed) throw const FmgRequestException('scope_changed');
       return results.first as Map<String, dynamic>;

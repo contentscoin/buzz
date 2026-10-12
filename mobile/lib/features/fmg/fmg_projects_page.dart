@@ -24,8 +24,13 @@ class FmgProjectsPage extends HookConsumerWidget {
       [management, ready.value, refresh.value],
     );
     final snapshot = useFuture(future);
-    final projects = (snapshot.data?['projects'] as List? ?? [])
-        .cast<Map<String, dynamic>>();
+    final projects =
+        (ready.value &&
+                    snapshot.connectionState == ConnectionState.done &&
+                    !snapshot.hasError
+                ? ((snapshot.data?['projects'] as List?) ?? [])
+                : [])
+            .cast<Map<String, dynamic>>();
     Future<void> create() async {
       if (management == null) return;
       final result = await Navigator.push<Map<String, dynamic>>(
@@ -83,11 +88,15 @@ class FmgProjectsPage extends HookConsumerWidget {
               children: [
                 FmgControlStatus(
                   management: management,
+                  onDisconnected: () {
+                    ready.value = false;
+                  },
                   onConnected: () {
                     ready.value = true;
                     refresh.value++;
                   },
                 ),
+                if (!ready.value) const Text('PC 연결이 확인되면 프로젝트 목록을 불러옵니다.'),
                 if (snapshot.connectionState == ConnectionState.waiting)
                   const LinearProgressIndicator(),
                 if (snapshot.hasError)

@@ -42,6 +42,7 @@ export async function startMobileBridge(
   owner: string,
   relayUrl: string,
   handler: MobileHandler,
+  signal?: AbortSignal,
 ): Promise<() => void> {
   if (origin(relayUrl) !== "https://fmg.communities.buzz.xyz") return () => {};
   if (!navigator.locks) throw new Error("coordination_unavailable");
@@ -58,19 +59,33 @@ export async function startMobileBridge(
   void navigator.locks
     .request(
       `fmg.mobile.bridge:${origin(relayUrl)}:${owner}`,
-      { ifAvailable: true },
+      // Wait for an earlier mount to finish retiring. A non-blocking lease can
+      // silently abandon this mount while the old async initializer still owns it.
+      { ...(signal ? { signal } : {}) },
       async (lock) => {
         if (!lock) {
           resolveReady(() => {});
           return;
         }
         try {
-          const stop = await startBridgeInternal(owner, relayUrl, handler);
-          resolveReady(() => {
+          const stop = await startBridgeInternal(
+            owner,
+            relayUrl,
+            handler,
+            signal,
+          );
+          const cleanup = () => {
             stop();
             release();
-          });
-          await held;
+          };
+          signal?.addEventListener("abort", cleanup, { once: true });
+          try {
+            if (signal?.aborted) cleanup();
+            resolveReady(cleanup);
+            await held;
+          } finally {
+            signal?.removeEventListener("abort", cleanup);
+          }
         } catch (error) {
           rejectReady(error);
         }
@@ -84,6 +99,7 @@ async function startBridgeInternal(
   owner: string,
   relayUrl: string,
   handler: MobileHandler,
+  signal?: AbortSignal,
 ) {
   const relay = origin(relayUrl);
   if (relay !== "https://fmg.communities.buzz.xyz") return () => {};
@@ -97,7 +113,12 @@ async function startBridgeInternal(
         getIdentity(),
         getRelayHttpUrl(),
       ]);
-      if (stopped || identity.pubkey !== owner || origin(nativeRelay) !== relay)
+      if (
+        stopped ||
+        signal?.aborted ||
+        identity.pubkey !== owner ||
+        origin(nativeRelay) !== relay
+      )
         throw new Error("scope_changed");
     },
   };
@@ -468,6 +489,11 @@ async function startBridgeInternal(
         });
     },
   );
+  if (signal?.aborted) {
+    stopped = true;
+    unsubscribe();
+    throw new Error("scope_changed");
+  }
   return () => {
     stopped = true;
     unsubscribe();

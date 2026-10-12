@@ -25,8 +25,13 @@ class FmgAgentsPage extends HookConsumerWidget {
       [management, ready.value, refresh.value],
     );
     final snapshot = useFuture(future);
-    final agents = (snapshot.data?['agents'] as List? ?? [])
-        .cast<Map<String, dynamic>>();
+    final agents =
+        (ready.value &&
+                    snapshot.connectionState == ConnectionState.done &&
+                    !snapshot.hasError
+                ? ((snapshot.data?['agents'] as List?) ?? [])
+                : [])
+            .cast<Map<String, dynamic>>();
     Future<void> action(
       String name, [
       Map<String, dynamic> input = const {},
@@ -307,11 +312,16 @@ class FmgAgentsPage extends HookConsumerWidget {
               children: [
                 FmgControlStatus(
                   management: management,
+                  onDisconnected: () {
+                    ready.value = false;
+                  },
                   onConnected: () {
                     ready.value = true;
                     refresh.value++;
                   },
                 ),
+                if (!ready.value)
+                  const Text('PC 연결이 확인되면 에이전트 목록과 제어 버튼을 사용할 수 있습니다.'),
                 Wrap(
                   spacing: Grid.xs,
                   children: [

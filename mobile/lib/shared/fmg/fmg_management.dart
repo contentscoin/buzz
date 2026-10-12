@@ -91,6 +91,7 @@ class FmgManagement {
   static const _storage = FlutterSecureStorage();
   static Future<void> _tail = Future.value();
   String? deviceId;
+  Future<Map<String, dynamic>>? _connecting;
   String get _key => 'fmg.mobile.management.v1:${rpc.scope}';
 
   Future<T> _serialized<T>(Future<T> Function() work) {
@@ -123,13 +124,42 @@ class FmgManagement {
   }
 
   /// Find the paired owner's Desktop; a durable device ID targets subsequent controls.
-  Future<Map<String, dynamic>> connect() async {
+  Future<Map<String, dynamic>> connect() {
+    final active = _connecting;
+    if (active != null) return active;
+    final next = _connect();
+    _connecting = next;
+    // Clear the shared in-flight read on either outcome without hiding errors.
+    next.then<void>(
+      (_) {
+        if (identical(_connecting, next)) _connecting = null;
+      },
+      onError: (Object _) {
+        if (identical(_connecting, next)) _connecting = null;
+      },
+    );
+    return next;
+  }
+
+  Future<Map<String, dynamic>> _connect() async {
     final saved = await _serialized(_state);
     final existing = saved['deviceId'];
     if (isFmgUuid(existing)) deviceId = existing as String;
-    final discovered = await rpc.request('desktop.discover', {
-      if (deviceId != null) 'deviceId': deviceId,
-    });
+    Map<String, dynamic> discovered;
+    try {
+      discovered = await rpc.request('desktop.discover', {
+        if (deviceId != null) 'deviceId': deviceId,
+      });
+    } on FmgRequestException catch (error) {
+      if (error.code != 'desktop_timeout' ||
+          deviceId == null ||
+          saved['pending'] != null) {
+        rethrow;
+      }
+      // A replaced PC profile may have a new durable device ID. Only discover
+      // afresh when no unresolved write is bound to the original PC.
+      discovered = await rpc.request('desktop.discover');
+    }
     if (!isFmgUuid(discovered['deviceId'])) {
       throw const FmgRequestException('invalid_response');
     }
@@ -137,12 +167,15 @@ class FmgManagement {
     if (deviceId != null && deviceId != found && saved['pending'] != null) {
       throw const FmgRequestException('device_changed');
     }
-    deviceId = found;
     await _serialized(() async {
       final state = await _state();
+      if (state['pending'] != null && state['deviceId'] != found) {
+        throw const FmgRequestException('device_changed');
+      }
       state['deviceId'] = found;
       await _save(state);
     });
+    deviceId = found;
     return discovered;
   }
 
