@@ -15,7 +15,9 @@ export function completedEnvelope(receipt, task, durableFallback = false) {
       !meta.aborted &&
       !meta.yielded &&
       !meta.continuationPending &&
-      !meta.replayInvalid &&
+      // OpenClaw also marks settled tool calls unsafe to replay. This flag
+      // prevents re-execution; completion needs an independent bound wait.
+      (!meta.replayInvalid || durableFallback) &&
       !meta.timeoutPhase &&
       !(meta.pendingToolCalls?.length > 0) &&
       ![

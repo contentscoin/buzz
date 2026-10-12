@@ -35,6 +35,9 @@ export async function executionResult(
   if (observation && observation.runId !== task.run_id) return null;
   const waited = observation && recoveredResult(observation, task, clean);
   if (waited && waited.result.status !== "succeeded") return null;
+  // Never infer completion from a replay-unsafe envelope or database trace.
+  // Only the independent ended run may attest its already-produced result.
+  if (receipt.result.meta.replayInvalid && (!terminal || !waited)) return null;
   // A present SDK identity must be independently confirmed, never ignored.
   if (terminal != null && (!waited ||
     observation.terminalReceipt.sessionId !== terminal.sessionId ||
@@ -64,7 +67,7 @@ export function completionObservation(receipt, task) {
     last_working: meta?.livenessState === "working",
     stop_missing: meta?.stopReason == null,
     normal_stop: meta?.stopReason === "stop",
-    eligible_envelope: completedEnvelope(receipt, task, true),
+    eligible_envelope: completedEnvelope(receipt, task, true) && !meta?.replayInvalid,
     rpc_error: !!receipt?.error,
     meta_error: !!meta?.error,
     aborted: !!meta?.aborted,

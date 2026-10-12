@@ -35,6 +35,35 @@ for (const [provider, model] of [["anthropic", "claude-opus-5-5"], ["openai", "g
     assert.equal(result.completion_evidence.source, "gateway.agent.wait");
   });
 }
+for (const [provider, model] of [["anthropic", "claude-opus-5-5"], ["openai", "gpt-6-luna"]]) {
+  test(`settled replay-unsafe ${provider} tool turn requires independent matching end`, async () => {
+    const { task, receipt, wait } = fixtures(provider, model);
+    receipt.result.meta.stopReason = "stop";
+    receipt.result.meta.replayInvalid = true;
+    const result = await executionResult(receipt, task, clean, false,
+      async () => assert.fail("no database fallback"), async () => assert.fail("no tool fallback"),
+      async () => wait);
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.completion_evidence.source, "gateway.agent.wait");
+  });
+}
+for (const [name, mutate] of [
+  ["missing wait", f => { f.wait = null; }],
+  ["missing receipt", f => { delete f.receipt.result.meta.agentMeta.terminalReceipt; }],
+  ["different session", f => { f.wait.terminalReceipt.sessionId = "other"; }],
+  ["compaction timeout", f => { f.receipt.result.meta.timeoutPhase = "compaction"; }],
+  ["paused compaction", f => { f.receipt.result.meta.livenessState = "paused"; }],
+  ["unfinished continuation", f => { f.receipt.result.meta.continuationPending = true; }],
+  ["provider error", f => { f.receipt.result.meta.error = {kind:"incomplete_turn"}; }],
+  ["pending tools", f => { f.receipt.result.meta.pendingToolCalls = [{}]; }],
+  ["historic recovery", f => { f.task.status = "needs_reconcile"; }],
+]) test(`replay-unsafe result retains uncertainty with ${name}`, async () => {
+  const f = fixtures(); f.receipt.result.meta.replayInvalid = true;
+  f.receipt.result.meta.stopReason = "stop"; mutate(f);
+  assert.equal(await executionResult(f.receipt, f.task, clean, false,
+    async () => assert.fail("no database fallback"), async () => assert.fail("no tool fallback"),
+    async () => f.wait), null);
+});
 for (const [name, mutate] of [
   ["missing independent wait", (f) => { f.wait = null; }],
   ["wrong outer run", (f) => { f.receipt.runId = "other"; }],
