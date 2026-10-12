@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { open, mkdir, lstat, realpath, rename, unlink } from "node:fs/promises";
 import { isAbsolute, relative, join } from "node:path";
+import { buzzProjectGuidance } from "./buzz-project-guidance.mjs";
 
 const root = "/data/.openclaw/projects/buzz";
 const repository = "https://github.com/contentscoin/buzz.git";
@@ -139,14 +140,7 @@ async function guidance(workspace, worktree, branch, roleId, receipt) {
     count(guideStart) === count(guideEnd) && count(guideStart) <= 1,
     "guide_markers_invalid",
   );
-  const block = `${guideStart}\n### Hostinger 중앙 총괄 · Buzz 코드\n\nBuzz 개발 작업을 받으면 BUZZ_PROJECT.md를 읽고 정확한 저장소·작업 브랜치를 확인한다.\n코드 준비는 실행 승인이나 완료 근거가 아니다. 기존 도구 권한과 소유자 승인 절차를 따른다.\n${guideEnd}`;
-  let updated;
-  if (text.includes(guideStart)) {
-    const start = text.indexOf(guideStart),
-      end = text.indexOf(guideEnd);
-    requireValue(end > start, "guide_markers_invalid");
-    updated = text.slice(0, start) + block + text.slice(end + guideEnd.length);
-  } else updated = `${text}${text.endsWith("\n") ? "\n" : "\n\n"}${block}\n`;
+  const updated = buzzProjectGuidance(text, roleId, worktree, branch);
   const guide = `# Hostinger 중앙 관리 · Buzz\n\n관리자: OpenClaw main (Hostinger)\n저장소: ${repository}\n개발 원격 브랜치: ${sourceBranch}\n준비 기준 commit: ${baseline}\n역할: ${roleId}\n코드 경로: ${worktree}\n작업 브랜치: ${branch}\n\n이 문서는 코드 작업 공간 준비 기록이다. 새로운 작업의 실행 승인은 아니다.\n기존 역할 도구 권한을 사용한다. 다른 역할의 작업 트리를 수정하거나 일괄 stage하지 않는다.\n새 작업을 시작할 때 현재 HEAD·변경 파일·실제 작업 지시문의 범위를 확인한다.\n이 기준 commit이 영구적인 최신 commit이라고 가정하지 않는다. 승인 후 코드를 변경하면\n현재 HEAD가 바뀔 수 있다. 기존 변경을 reset하거나 삭제해서 이 기준으로 되돌리지 않는다.\nmain이 배정안·상태·결과를 관리한다. 원격 push·병합·배포·메시지 게시는 별도 지시가\n있는 경우 수행한다. 작업 성공은 실제 종료 receipt와 코드 변경 근거로 보고한다.\nfmg·BD는 대화 연결 이름이며 서로 다른 코드 저장소라는 뜻은 아니다.\n\n이 작업 공간만으로 프로젝트별 제안 hash 바인딩·강제 접근 격리·자동 배정·자동 게시가\n구현됐다고 판단하지 않는다. 현재 코드 변경이나 모델 작업은 실행하지 않았다.\n`;
   const backup = join(workspace, ".fmg-project-backups", requestId);
   await directory(backup);
