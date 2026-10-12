@@ -5,6 +5,7 @@ from http.cookies import SimpleCookie, CookieError
 from urllib.parse import urlencode, urlsplit
 from approvals import ApprovalError
 from approval_convenience import OWNER_SESSION_SECONDS
+from control_pages import review as control_review
 
 COOKIE = "__Secure-fmg-dot-approval"
 # no-referrer makes navigation-mode form POSTs send Origin: null. Keep the
@@ -21,6 +22,8 @@ MESSAGES = {
     "owner_confirmation_required": "소유자 확인이 만료됐습니다. 비밀번호를 다시 확인하세요.",
     "approval_capacity": "승인 요청 보관 한도에 도달했습니다. 관리자에게 문의하세요.",
     "approval_request_invalid": "검토 화면의 요청이 달라졌습니다. 화면을 새로 열어 확인하세요.",
+    "dot_control_fmg_only": "닷 제어 모드는 FMG 연결에서 설정하세요.",
+    "request_conflict": "같은 요청의 내용이 달라졌습니다. 설정 화면을 다시 여세요.",
 }
 STYLE = """body{font-family:system-ui,sans-serif;max-width:780px;margin:32px auto;padding:0 20px;color:#202124;background:#fff}h1{font-size:24px}dt{font-weight:600;margin-top:12px}dd{margin:4px 0;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #ccc;padding:16px;border-radius:8px;font:inherit}button,input{font:inherit;padding:12px;border:1px solid #777;border-radius:6px}button{cursor:pointer;background:#1b4e35;color:white}button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #2860cf;outline-offset:3px}.error{color:#a51c19}small{overflow-wrap:anywhere}@media(prefers-color-scheme:dark){body{background:#1a1a1a;color:#eee}}"""
 
@@ -57,6 +60,8 @@ class ApprovalPages:
         return handler.reply(status, page(body), values, html=True)
 
     def login(self, token, view="single"):
+        if view == "control":
+            return '<h2>닷 제어 모드 설정</h2><p>소유자가 한 번 켜면 이후 허용 범위의 새 작업은 매번 비밀번호 없이 실행됩니다. 현재 연결 비밀번호로 본인 확인 후 허용 범위를 확인하세요. 비밀번호는 닷 대화창에 보내지 마세요.</p><form method="post" action="'+escaped(self.path)+'"><input type="hidden" name="action" value="review"><input type="hidden" name="token" value="'+escaped(token)+'"><input type="hidden" name="view" value="control"><label for="owner-password">소유자 연결 비밀번호</label><p><input id="owner-password" type="password" name="password" maxlength="512" autocomplete="current-password" required></p><button type="submit">소유자 확인 후 닷 제어 설정</button></form>'
         extra = '<input type="hidden" name="view" value="batch">' if view == "batch" else ''
         return '<p>연결할 때 사용한 소유자 비밀번호를 한 번 확인하고 작업 내용을 검토하세요.</p><form method="post" action="'+escaped(self.path)+'"><input type="hidden" name="action" value="review"><input type="hidden" name="token" value="'+escaped(token)+'">'+extra+'<label for="owner-password">소유자 연결 비밀번호</label><p><input id="owner-password" type="password" name="password" maxlength="512" autocomplete="current-password" required></p><p><label><input type="checkbox" name="remember" value="1" checked> 이 브라우저에서 소유자 확인을 30분간 유지</label></p><p>같은 연결 계정·커뮤니티·Gateway에만 적용됩니다. 각 작업은 내용을 검토한 뒤 직접 승인합니다. 비밀번호는 이 화면에만 입력하고 닷 대화창에는 보내지 마세요.</p><button type="submit">소유자 확인 후 작업 검토</button></form>'
 
@@ -86,7 +91,8 @@ class ApprovalPages:
 
     def navigation(self, token, session):
         query = urlencode({"token": token, "view": "batch"})
-        return '<p><a href="'+escaped(self.path+'?'+query)+'">이 연결의 대기 작업을 한 화면에서 검토</a></p><form method="post" action="'+escaped(self.path)+'"><input type="hidden" name="action" value="logout"><input type="hidden" name="token" value="'+escaped(token)+'"><input type="hidden" name="csrf" value="'+escaped(self.approvals.csrf(token, session))+'"><button type="submit">소유자 확인 종료</button></form>'
+        control = self.path+'?'+urlencode({'token':token,'view':'control'})
+        return '<p><a href="'+escaped(control)+'">닷 제어 모드 설정</a></p><p><a href="'+escaped(self.path+'?'+query)+'">이 연결의 대기 작업을 한 화면에서 검토</a></p><form method="post" action="'+escaped(self.path)+'"><input type="hidden" name="action" value="logout"><input type="hidden" name="token" value="'+escaped(token)+'"><input type="hidden" name="csrf" value="'+escaped(self.approvals.csrf(token, session))+'"><button type="submit">소유자 확인 종료</button></form>'
 
     def batch(self, row, token, session):
         rows, unavailable = self.approvals.pending_batch(row, session)
@@ -106,17 +112,20 @@ class ApprovalPages:
 
     def get(self, handler, args):
         try:
-            if set(args) not in ({"token"}, {"token", "view"}) or args.get("view", "single") not in ("single", "batch"):
+            if set(args) not in ({"token"}, {"token", "view"}) or args.get("view", "single") not in ("single", "batch", "control"):
                 raise ApprovalError("approval_unavailable")
             token = args["token"]
             with self.approvals.store.lock:
                 row = self.approvals.lookup(token)
                 session = cookie(handler.headers)
                 view = args.get("view", "single")
-                if self.approvals.session(row, session):
-                    body = (self.batch(row, token, session) if view == "batch" else self.review(row, token, session)) + self.navigation(token, session)
+                if view == 'control':
+                    self.approvals.control.current(row)
+                if (self.approvals.remembered(row, session) if view == 'control' else self.approvals.session(row, session)):
+                    body = (control_review(self,row,token,session) if view == 'control' else self.batch(row, token, session) if view == "batch" else self.review(row, token, session)) + self.navigation(token, session)
                 else:
-                    self.approvals.current(row, pending=not row["receipt"])
+                    if view != 'control':
+                        self.approvals.current(row, pending=not row["receipt"])
                     body = self.login(token, view)
             return self.reply(handler, 200, body)
         except (ValueError, KeyError, TypeError, OSError) as error:
@@ -128,13 +137,18 @@ class ApprovalPages:
             with self.approvals.store.lock, self.approvals.store.db:
                 row = self.approvals.lookup(token)
                 required = {"action", "token", "password"}
-                if args.get("action") == "review" and required <= set(args) <= required | {"remember", "view"} and args.get("remember", "1") == "1" and args.get("view", "single") in ("single", "batch"):
+                if args.get("action") == "review" and required <= set(args) <= required | {"remember", "view"} and args.get("remember", "1") == "1" and args.get("view", "single") in ("single", "batch", "control"):
                     remember = args.get("remember") == "1"
-                    session = self.approvals.authenticate(row, args["password"], peer, remember=remember)
-                    destination = {"token": token, **({"view": "batch"} if args.get("view") == "batch" else {})}
+                    session = self.approvals.authenticate(row, args["password"], peer, remember=remember, control=args.get('view') == 'control')
+                    destination = {"token": token, **({"view": args['view']} if args.get("view") in ('batch','control') else {})}
                     headers = {"Set-Cookie": COOKIE+'='+session+'; Path='+self.path+'; Max-Age='+str(OWNER_SESSION_SECONDS if remember else 300)+'; Secure; HttpOnly; SameSite=Strict',
                                "Location": self.path + "?" + urlencode(destination)}
                     return handler.reply(303, headers={**headers, "Referrer-Policy": REFERRER_POLICY})
+                if args.get('action') == 'configure_control' and set(args) == {'action','token','enabled','revision','scope','request_id','csrf'}:
+                    if args['enabled'] not in ('0','1') or not args['revision'].isdigit() or len(args['revision']) > 9 or len(args['scope'].encode()) > 8192:
+                        raise ApprovalError('approval_request_invalid')
+                    self.approvals.control.configure(token,cookie(handler.headers),args['enabled']=='1',int(args['revision']),args['scope'],args['request_id'],args['csrf'])
+                    return handler.reply(303,headers={'Location':self.path+'?'+urlencode({'token':token,'view':'control'}),'Referrer-Policy':REFERRER_POLICY})
                 if args.get("action") == "approve" and set(args) == {"action", "token", "csrf"}:
                     self.approvals.approve(token, cookie(handler.headers), args["csrf"])
                     return handler.reply(303, headers={"Location": self.path + "?" + urlencode({"token": token}), "Referrer-Policy": REFERRER_POLICY})
@@ -150,7 +164,7 @@ class ApprovalPages:
         except (ValueError, KeyError, TypeError, OSError) as error:
             body = '<p class="error" role="alert">'+escaped(MESSAGES.get(str(error), "승인을 확인하지 못했습니다. 닷에서 작업 상태를 조회하세요. 같은 요청을 조회해 승인 기록을 복구할 수 있습니다."))+'</p>'
             if reentry(token):
-                body += self.login(token, "batch" if args.get("view") == "batch" else "single")
+                body += self.login(token, args.get('view') if args.get('view') in ('batch','control') else 'control' if args.get('action') == 'configure_control' else 'single')
             return self.reply(handler, 409, body)
 
 

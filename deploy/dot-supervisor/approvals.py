@@ -11,12 +11,13 @@ from communities import binding, scoped_catalog, split
 from store import canonical, digest
 from tasks import UUID, task_id
 from approval_convenience import ApprovalConvenience
+from dot_control import DotControl
 
 UI_URI = "ui://fmg-buzz/task-approval-v1.html"
 NAME = "fmg_buzz_prepare_task_approval"
 CATALOG = scoped_catalog([{
     "name": NAME, "title": "Buzz 작업 승인 화면 열기",
-    "description": "Prepare an owner approval screen for your own immutable proposal. This NEVER approves or executes work. First get the task and pass its exact hash and revision. Show the owner the returned link/widget; batch_url opens full review of up to 10 prepared tasks in the same original account/community/Gateway. ONLY the human owner signs in with their connection password (optionally remembered in that browser for 30 minutes), reviews the full proposals and presses final approve. Never navigate the approval page, request the password in chat, or submit approval for the owner. Reuse request_id after response loss; an expired screen needs a new UUID.",
+    "description": "Prepare human owner screens for your own immutable task. This NEVER approves, executes or enables control. First get exact task hash/revision. Show the returned control_url to let ONLY the human owner enable persistent Dot control for this original OAuth family and FMG repository/role scope, or disable it. Control setup can anchor on an already completed/approved/reconcile task without changing that task. Once owner-enabled, eligible NEW task proposals are automatically queued by the server's standing delegation. Otherwise url/batch_url provide explicit manual review of up to 10 pending tasks. Never navigate these pages, collect/enter a password, submit owner approval or control configuration. Same UUID recovers response loss; expired screen needs a new UUID.",
     "inputSchema": {"type": "object", "properties": {
         "request_id": UUID, "task_id": UUID,
         "proposal_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$", "maxLength": 64},
@@ -66,10 +67,11 @@ class Approvals(ApprovalConvenience):
         """)
         self.tasks.dot_approval_receipt = self.receipt
         self.init_convenience()
+        self.control = DotControl(self)
 
     def receipt(self, task):
         row = self.store.db.execute("SELECT receipt FROM dot_task_approvals WHERE task_id=? AND receipt IS NOT NULL ORDER BY created DESC LIMIT 1", (task,)).fetchone()
-        return json.loads(row["receipt"]) if row else None
+        return json.loads(row["receipt"]) if row else self.control.receipt(task)
 
     def token(self, row):
         message = canonical(["dot-owner-approval-v1", row["id"], row["client"], row["input_hash"]])
@@ -113,12 +115,17 @@ class Approvals(ApprovalConvenience):
             if authorize() != client:
                 raise ApprovalError("connection_unavailable")
             current = self.tasks.communities.current(client, community)
+            selected_task = self.tasks.read(identifier, client)
             audience = canonical(binding(current))
             input_hash = digest(canonical(dict(parameters, audience=binding(current))).encode())
             row = self.store.db.execute("SELECT * FROM dot_task_approvals WHERE client=? AND request_id=?", (client, request)).fetchone()
             if row and row["input_hash"] != input_hash:
                 raise ApprovalError("request_conflict")
             if not row:
+                if selected_task['proposal_hash'] != parameters['proposal_hash']:
+                    raise ApprovalError('approval_binding_changed')
+                if selected_task['revision'] != parameters['revision']:
+                    raise ApprovalError('approval_state_conflict')
                 if self.store.db.execute("SELECT COUNT(*) FROM dot_task_approvals").fetchone()[0] >= 10000 or self.store.db.execute("SELECT COUNT(*) FROM dot_task_approvals WHERE client=? AND expires>?", (client, time.time())).fetchone()[0] >= 20:
                     raise ApprovalError("approval_capacity")
                 bearer = self.store.db.execute("SELECT family FROM tokens WHERE hash=? AND kind='access'", (digest(header[7:].encode()),)).fetchone()
@@ -127,7 +134,7 @@ class Approvals(ApprovalConvenience):
                              community_id=current.get("community_id", "bd"), audience=audience,
                              oauth_family=bearer["family"], created=now, expires=now + 600)
                 value["token_hash"] = digest(self.token(value).encode())
-                self.current(value)
+                self.current(value, pending=selected_task['status'] == 'awaiting_approval')
                 keys = list(value)
                 self.store.db.execute("INSERT INTO dot_task_approvals(" + ",".join(keys) + ") VALUES(" + ",".join("?" for _ in keys) + ")", [value[key] for key in keys])
                 self.store.db.commit()
@@ -139,6 +146,8 @@ class Approvals(ApprovalConvenience):
                         "status": "recorded" if row["receipt"] else "expired" if row["expires"] <= time.time() else "awaiting_owner_browser",
                         "url": self.oauth.issuer + "/approval?" + urlencode({"token": self.token(row)}),
                         "batch_url": self.oauth.issuer + "/approval?" + urlencode({"token": self.token(row), "view": "batch"}),
+                        "control_url": self.oauth.issuer + "/approval?" + urlencode({"token": self.token(row), "view": "control"}),
+                        "dot_control": self.control.status(client,current,row['oauth_family']),
                         "requires": "owner_connection_password_then_explicit_approve",
                         "receipt": json.loads(row["receipt"]) if row["receipt"] else None}
             result = {"task": self.tasks.view(task), "approval": approval, "execution_approval_performed": False}
@@ -152,7 +161,7 @@ class Approvals(ApprovalConvenience):
             raise ApprovalError("approval_unavailable")
         return row
 
-    def authenticate(self, row, password, peer, remember=False):
+    def authenticate(self, row, password, peer, remember=False, control=False):
         now, peer = time.time(), digest(peer.encode())
         self.store.db.execute("DELETE FROM dot_approval_failures WHERE updated<?", (now-600,))
         previous = self.store.db.execute("SELECT * FROM dot_approval_failures WHERE peer=?", (peer,)).fetchone()
@@ -168,8 +177,8 @@ class Approvals(ApprovalConvenience):
         actual = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1).hex()
         if not secrets.compare_digest(actual, expected):
             raise ApprovalError("owner_authentication_failed")
-        self.current(row, pending=not row["receipt"])
-        if remember:
+        self.control.current(row) if control else self.current(row, pending=not row["receipt"])
+        if remember or control:
             session = self.remember_session(row)
             self.store.db.commit()
             return session

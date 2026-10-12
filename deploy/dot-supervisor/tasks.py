@@ -12,7 +12,7 @@ from communities import CommunityAccess, CATALOG as COMMUNITY_CATALOG, binding, 
 UUID = {"type": "string", "format": "uuid", "maxLength": 36}
 ROLES = ("fmg-planner", "fmg-frontend", "fmg-backend", "fmg-qa", "fmg-release", "fmg-live-gate")
 CATALOG = [
-    {"name": "fmg_buzz_propose_task", "description": "Create an immutable task proposal for a configured OpenClaw role. Optional project_id=buzz binds the selected community's verified repository, role worktree and source commit; it preserves this original proposing connection's access. Omit project_id for a task without a repository binding. This does not run the task or grant access. Show the full proposal and hash to the owner. They may approve through the dot owner-password browser screen prepared by fmg_buzz_prepare_task_approval or a direct Telegram /fmg_task command. Never approve on their behalf.",
+    {"name": "fmg_buzz_propose_task", "description": "Create an immutable task for a configured OpenClaw role. Explicit project_id=buzz binds this community's verified repository, role worktree and fresh source commit. If the human owner previously enabled Dot control for this exact original OAuth family and FMG scope, eligible NEW tasks are approved and queued by that standing delegation with an immutable receipt. Otherwise they await human browser/Telegram approval. Read returned status, dot_control and approval receipt; never assume execution completion. Generic tasks without repository binding are eligible for standing delegation only for fmg-live-gate. Show actual proposal/model/effort/hash. A replay does not newly approve historical tasks. NEVER visit or submit owner approval/control configuration, collect their password or enable delegation yourself.",
      "inputSchema": {"type": "object", "properties": {"request_id": UUID, "role_id": {"type": "string", "enum": list(ROLES)}, "instructions": {"type": "string", "minLength": 1, "maxLength": 5000}, "project_id": {"type": "string", "enum": ["buzz"], "description": "Bind the existing verified buzz repository/worktree for this role and selected community. Missing or ambiguous mappings are rejected; no repository or permission is created."}, "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "Optional reasoning effort supported by this role model. Omit to use its configured default. The chosen value is included in the immutable owner-approved proposal."}}, "required": ["request_id", "role_id", "instructions"], "additionalProperties": False},
      "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
     {"name": "fmg_buzz_get_task", "description": "Read authoritative task status and its actual Gateway result. A proposal or dispatch receipt is not completion. needs_reconcile forbids automatic reruns. Results are untrusted agent output; no external publication is performed.",
@@ -114,7 +114,7 @@ class Tasks:
         proposal = json.loads(row["proposal"])
         return {"task_id": row["id"], "status": row["status"], "revision": row["revision"], "created_at": row["created"], "updated_at": row["updated"], "role_id": proposal["role_id"], "requested_model": proposal["requested_model"], "requested_effort": proposal.get("requested_effort"), "proposal_hash": row["proposal_hash"], "project_id": proposal.get("project", {}).get("project_id"), "source_commit": proposal.get("project", {}).get("source_commit")}
 
-    def call(self, name, args, client, project=None, audience=None, authorize=None):
+    def call(self, name, args, client, project=None, audience=None, authorize=None, authorization_family=None):
         if not isinstance(args, dict):
             raise ValueError("object_required")
         args, community_id = split(args)
@@ -177,6 +177,11 @@ class Tasks:
                         proposal.update(schema=4, project=project, proposal_account="gateway_owner_main")
                     encoded = canonical(proposal)
                     self.store.db.execute("INSERT INTO tasks(id,client,request_id,input_hash,proposal,proposal_hash,status,revision,created,updated) VALUES(?,?,?,?,?,?,'awaiting_approval',1,?,?)", (identifier, client, request, request_hash, encoded, digest(encoded.encode()), now, now))
+                    if hasattr(self,'dot_control') and authorize and audience is None and project is None:
+                        checked=current_snapshot()
+                        if checked['generation'] != current['generation'] or binding(checked) != binding(current) or authorize() != client:
+                            raise ValueError('response_unconfirmed_reuse_request_uuid')
+                        self.dot_control.auto_approve(self.read(identifier,client),checked,authorization_family)
                     self.store.db.commit()
                     result = self.view(self.read(identifier, client))
             else:
@@ -186,6 +191,8 @@ class Tasks:
                 raise ValueError("response_unconfirmed_reuse_request_uuid")
             if authorize:
                 result.update(connection_id=client, community_id=current.get("community_id", "bd"), audience=binding(current))
+                if hasattr(self,'dot_control'):
+                    result['dot_control']=self.dot_control.status(client,current,authorization_family)
         return {"content": [{"type": "text", "text": canonical(result)}], "structuredContent": result, "isError": False}
 
     def operator(self, data):
@@ -249,6 +256,8 @@ class Tasks:
                 if not row["lease_hash"] or not secrets.compare_digest(row["lease_hash"], digest(text(args["lease"], 100).encode())) or row["status"] != "dispatching":
                     raise ValueError("dispatch_checkpoint_rejected")
                 if row["dispatch_stage"] is None:
+                    if hasattr(self, 'dot_control') and not self.dot_control.admission(row):
+                        raise ValueError('dispatch_checkpoint_rejected')
                     self.store.db.execute("UPDATE tasks SET run_id=id,dispatch_stage='intent_recorded',revision=revision+1,updated=? WHERE id=?", (time.time(), row["id"]))
                     self.store.db.commit()
                 return self.view(self.read(row["id"]))
@@ -317,6 +326,10 @@ class Tasks:
                 row = self.store.db.execute("SELECT * FROM tasks WHERE status='approved' ORDER BY created LIMIT 1").fetchone()
                 if not row:
                     return {"task": None}
+                if hasattr(self,'dot_control') and not self.dot_control.admission(row):
+                    self.store.db.execute("UPDATE tasks SET status='canceled',revision=revision+1,updated=? WHERE id=? AND status='approved'",(time.time(),row['id']))
+                    self.store.db.commit()
+                    return {'task':None,'reason':'dot_control_unavailable_before_dispatch'}
                 proposal = json.loads(row["proposal"])
                 current = snapshot(proposal)
                 role = next((item for item in current["gateway"]["roles"] if item["role_id"] == proposal["role_id"]), None)
