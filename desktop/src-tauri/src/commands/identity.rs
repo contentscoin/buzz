@@ -131,12 +131,14 @@ pub fn get_media_proxy_port(state: State<'_, AppState>) -> u16 {
         .load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Sign explicit event tags; owner-to-owner device replies can retain their recipient.
 #[tauri::command]
 pub async fn sign_event(
     kind: u16,
     content: String,
     created_at: Option<u64>,
     tags: Vec<Vec<String>>,
+    allow_self_tagging: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let keys = state.signing_keys()?;
@@ -148,6 +150,9 @@ pub async fn sign_event(
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut builder = EventBuilder::new(Kind::Custom(kind), content).tags(nostr_tags);
+        if allow_self_tagging == Some(true) {
+            builder = builder.allow_self_tagging();
+        }
         if let Some(created_at) = created_at {
             builder = builder.custom_created_at(Timestamp::from(created_at));
         }

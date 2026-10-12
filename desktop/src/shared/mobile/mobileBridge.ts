@@ -265,6 +265,9 @@ async function startBridgeInternal(
     const event = await signRelayEvent({
       kind: 30078,
       content: encrypted.content,
+      // nostr EventBuilder otherwise removes p tags equal to the signer. Both
+      // paired devices intentionally use the owner key and require this tag.
+      allowSelfTagging: true,
       tags: [
         ["d", `fmg.mobile:${String(request.requestId)}:result`],
         ["t", "fmg-mobile-control"],
@@ -273,6 +276,13 @@ async function startBridgeInternal(
         ["frame", "telemetry"],
       ],
     });
+    const recipients = event.tags.filter((tag) => tag[0] === "p");
+    if (
+      event.pubkey !== owner ||
+      recipients.length !== 1 ||
+      recipients[0][1] !== owner
+    )
+      throw new Error("response_recipient_invalid");
     await scope.assertActive();
     await relayClient.publishEvent(
       event,
