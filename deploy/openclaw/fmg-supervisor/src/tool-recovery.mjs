@@ -75,22 +75,26 @@ export function toolRuntimeResult(events, transcript, entry, task, clean) {
   const messages = transcript.filter((e) => e.type === "message").map((e) => e.message);
   const finalEvent = transcript.filter((e) => e.type === "message").at(-1);
   const final = finalEvent?.message;
+  // Reasoning blocks are private metadata, never part of the exported answer.
+  // A completed turn may contain them before its single signed final text.
+  const finalText = final?.content?.at?.(-1);
   if (messages.some((m) => !m || !["user", "assistant", "toolResult", "custom"].includes(m.role)) ||
       messages.filter((m) => m.role === "user").length !== 1 ||
       final?.role !== "assistant" || final.stopReason !== "stop" || final.errorMessage ||
       final.provider !== "openai" || `${final.provider}/${final.model}` !== task.proposal.requested_model ||
-      !Array.isArray(final.content) || final.content.length !== 1 ||
-      final.content[0].type !== "text" || typeof final.content[0].text !== "string" ||
+      !Array.isArray(final.content) || final.content.length < 1 || final.content.length > 16 ||
+      final.content.slice(0, -1).some(item => item?.type !== "thinking") ||
+      finalText?.type !== "text" || typeof finalText.text !== "string" ||
       !final.diagnostics?.some((d) => d.type === "openai_responses_terminal" &&
         d.details?.eventType === "response.completed" && d.details.stopReason === "stop") ||
       !Number.isFinite(Date.parse(finalEvent.timestamp)) ||
       Date.parse(finalEvent.timestamp) < Date.parse(start.ts) ||
       Date.parse(finalEvent.timestamp) > Date.parse(end.ts)) return null;
   let signature;
-  try { signature = JSON.parse(final.content[0].textSignature); } catch { return null; }
+  try { signature = JSON.parse(finalText.textSignature); } catch { return null; }
   if (signature?.phase !== "final_answer" || typeof signature.id !== "string" || !signature.id ||
       [completed, artifacts].some((e) => !Array.isArray(e.data.assistantTexts) ||
-        e.data.assistantTexts.length !== 1 || e.data.assistantTexts[0] !== final.content[0].text)) return null;
+        e.data.assistantTexts.length !== 1 || e.data.assistantTexts[0] !== finalText.text)) return null;
   const transcriptCalls = messages.filter((m) => m.role === "assistant" && m !== final)
     .flatMap((m) => Array.isArray(m.content) && m.stopReason === "toolUse" &&
       `${m.provider}/${m.model}` === task.proposal.requested_model ?
@@ -103,7 +107,7 @@ export function toolRuntimeResult(events, transcript, entry, task, clean) {
   const receipt = { runId: task.run_id, events, transcriptHash: hash(transcript), sessionHash: hash(entry) };
   const result = { status: "succeeded", run_id: task.run_id,
     requested_model: task.proposal.requested_model, actual_model: actual,
-    reply: clean(final.content[0].text, 10000), error_code: null };
+    reply: clean(finalText.text, 10000), error_code: null };
   const endedAt = Date.parse(end.ts);
   result.completion_evidence = completionEvidence(receipt, task, result, source, endedAt);
   return { result, evidence: { source, run_id: task.run_id, ended_at: endedAt,

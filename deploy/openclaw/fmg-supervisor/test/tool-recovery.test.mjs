@@ -81,6 +81,29 @@ function facadeFixture() {
   return f;
 }
 
+test("persisted Luna final text with private reasoning metadata recovers after cache expiry", () => {
+  const f = facadeFixture();
+  f.task.proposal.requested_model = "openai/gpt-6-luna";
+  f.events.forEach(e => { e.modelId = "gpt-6-luna"; });
+  f.transcript.filter(e => e.message?.role === "assistant").forEach(e => { e.message.model = "gpt-6-luna"; });
+  const final = f.transcript.at(-1).message;
+  final.content.unshift({type:"thinking",thinking:"private metadata must never be returned"});
+  const recovered = toolRuntimeResult(f.events, f.transcript, f.entry, f.task, clean);
+  assert.equal(recovered.result.reply, "완료");
+  assert.equal(recovered.result.actual_model, "openai/gpt-6-luna");
+  assert.equal(JSON.stringify(recovered).includes("private metadata"), false);
+});
+for (const [name, mutate] of [
+  ["unsigned visible text", c => c.unshift({type:"text",text:"other"})],
+  ["unfinished tool call", c => c.unshift({type:"toolCall",id:"unfinished",name:"exec"})],
+  ["unknown block", c => c.unshift({type:"unknown"})],
+  ["reasoning after final", c => c.push({type:"thinking"})],
+  ["oversized block count", c => c.unshift(...Array.from({length:16},()=>({type:"thinking"})))],
+]) test(`persisted final metadata rejects ${name}`, () => {
+  const f=facadeFixture(); mutate(f.transcript.at(-1).message.content);
+  assert.equal(toolRuntimeResult(f.events,f.transcript,f.entry,f.task,clean),null);
+});
+
 test("closed runtime facade read binds its root transcript and nested lifecycle", () => {
   const f = facadeFixture();
   const recovered = toolRuntimeResult(f.events, f.transcript, f.entry, f.task, clean);
