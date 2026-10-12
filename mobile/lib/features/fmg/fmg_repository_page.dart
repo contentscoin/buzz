@@ -23,6 +23,7 @@ class FmgRepositoryPage extends HookConsumerWidget {
     final currentManagement = ref.watch(fmgManagementProvider);
     final tab = useState(0);
     final refresh = useState(0);
+    final offset = useState(0);
     final busy = useState(false);
     final error = useState<String?>(null);
     final target = {
@@ -30,12 +31,15 @@ class FmgRepositoryPage extends HookConsumerWidget {
       'repoAddress': repository['repoAddress'],
     };
     final future = useMemoized(
-      () => management.read(switch (tab.value) {
-        0 => 'repositories.snapshot',
-        1 => 'issues.list',
-        _ => 'reviews.list',
-      }, target),
-      [management, tab.value, refresh.value],
+      () => management.read(
+        switch (tab.value) {
+          0 => 'repositories.snapshot',
+          1 => 'issues.list',
+          _ => 'reviews.list',
+        },
+        {...target, if (tab.value != 0) 'offset': offset.value},
+      ),
+      [management, tab.value, refresh.value, offset.value],
     );
     final snapshot = useFuture(future);
     final data = snapshot.connectionState == ConnectionState.done
@@ -48,6 +52,11 @@ class FmgRepositoryPage extends HookConsumerWidget {
       Map<String, dynamic> extra = const {},
       Map<String, dynamic> initial = const {},
     ]) async {
+      final revisionKey = extra.containsKey('expectedUpdatedAt')
+          ? 'expectedUpdatedAt'
+          : extra.containsKey('expectedCommit')
+          ? 'expectedCommit'
+          : null;
       final result = await Navigator.push<Map<String, dynamic>>(
         context,
         MaterialPageRoute(
@@ -57,9 +66,17 @@ class FmgRepositoryPage extends HookConsumerWidget {
                 '${repository['repoAddress']}:$action:${extra['issueId'] ?? extra['reviewId'] ?? ''}',
             title: title,
             fields: fields,
-            initial: initial,
-            onSave: (values) =>
-                management.mutate(action, {...target, ...extra, ...values}),
+            initial: {
+              ...initial,
+              '_baseRevision': revisionKey == null ? null : extra[revisionKey],
+            },
+            onSave: (values) {
+              final revision = values.remove('_baseRevision');
+              final input = <String, dynamic>{...target, ...extra, ...values};
+              if (revisionKey != null)
+                input[revisionKey] = revision ?? extra[revisionKey];
+              return management.mutate(action, input);
+            },
           ),
         ),
       );
@@ -141,7 +158,10 @@ class FmgRepositoryPage extends HookConsumerWidget {
               ButtonSegment(value: 2, label: Text('검토')),
             ],
             selected: {tab.value},
-            onSelectionChanged: (value) => tab.value = value.single,
+            onSelectionChanged: (value) {
+              offset.value = 0;
+              tab.value = value.single;
+            },
           ),
           const SizedBox(height: Grid.sm),
           if (snapshot.connectionState == ConnectionState.waiting || busy.value)
@@ -315,6 +335,8 @@ class FmgRepositoryPage extends HookConsumerWidget {
                           ],
                         ),
                       SelectableText(issue['content'] as String),
+                      if (issue['contentTruncated'] == true)
+                        const Text('긴 내용은 일부만 표시됩니다. 전체 내용은 PC에서 확인하세요.'),
                       for (final comment in issue['comments'] as List? ?? [])
                         Padding(
                           padding: const EdgeInsets.only(top: Grid.xs),
@@ -421,6 +443,8 @@ class FmgRepositoryPage extends HookConsumerWidget {
                       SelectableText(
                         '${pr['branchName'] ?? ''} → ${pr['targetBranch'] ?? ''}\n${pr['content']}',
                       ),
+                      if (pr['contentTruncated'] == true)
+                        const Text('긴 내용은 일부만 표시됩니다. 전체 내용은 PC에서 확인하세요.'),
                       TextButton(
                         onPressed: () => form(
                           'reviews.comment',
@@ -469,6 +493,23 @@ class FmgRepositoryPage extends HookConsumerWidget {
             if (data != null && (data['reviews'] as List? ?? []).isEmpty)
               const Text('등록된 검토가 없습니다.'),
           ],
+          if (tab.value != 0 && data != null)
+            Wrap(
+              spacing: Grid.sm,
+              children: [
+                Text('전체 ${data['total'] ?? 0}개 · ${offset.value + 1}부터 조회'),
+                if (offset.value > 0)
+                  TextButton(
+                    onPressed: () => offset.value = 0,
+                    child: const Text('처음으로'),
+                  ),
+                if (data['nextOffset'] is int)
+                  TextButton(
+                    onPressed: () => offset.value = data['nextOffset'] as int,
+                    child: const Text('다음 목록'),
+                  ),
+              ],
+            ),
           const SizedBox(height: 80),
         ],
       ),

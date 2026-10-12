@@ -8,8 +8,8 @@ import {
   nip44EncryptToSelf,
   nip44DecryptFromSelf,
   signRelayEvent,
+  getRelayHttpUrl,
 } from "@/shared/api/tauri";
-import { getCachedRelayOrigin } from "@/shared/lib/mediaUrl";
 
 export type MobileScope = {
   owner: string;
@@ -93,12 +93,11 @@ async function startBridgeInternal(
     owner,
     relay,
     assertActive: async () => {
-      const identity = await getIdentity();
-      if (
-        stopped ||
-        identity.pubkey !== owner ||
-        getCachedRelayOrigin() !== relay
-      )
+      const [identity, nativeRelay] = await Promise.all([
+        getIdentity(),
+        getRelayHttpUrl(),
+      ]);
+      if (stopped || identity.pubkey !== owner || origin(nativeRelay) !== relay)
         throw new Error("scope_changed");
     },
   };

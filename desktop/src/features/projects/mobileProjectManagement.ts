@@ -77,6 +77,39 @@ function view(project: Project) {
     })),
   };
 }
+function page<T>(
+  input: Record<string, unknown>,
+  field: string,
+  records: T[],
+  project: (item: T) => unknown,
+) {
+  const offset = input.offset ?? 0;
+  if (
+    typeof offset !== "number" ||
+    !Number.isInteger(offset) ||
+    offset < 0 ||
+    offset > 100_000
+  )
+    throw new Error("invalid_request");
+  const items: unknown[] = [];
+  for (const record of records.slice(offset, offset + 20)) {
+    const item = project(record);
+    if (
+      new TextEncoder().encode(JSON.stringify([...items, item])).length > 40_000
+    ) {
+      if (!items.length) throw new Error("response_too_large");
+      break;
+    }
+    items.push(item);
+  }
+  return {
+    [field]: items,
+    offset,
+    total: records.length,
+    nextOffset:
+      offset + items.length < records.length ? offset + items.length : null,
+  };
+}
 async function publish(scope: MobileScope, event: RelayEvent) {
   await scope.assertActive();
   await relayClient.publishEvent(
@@ -291,22 +324,21 @@ export async function mobileProjectManagement(
   }
   const repo = repository(project, input);
   if (action === "issues.list")
-    return {
-      issues: (await fetchProjectIssues(repo)).slice(0, 50).map((issue) => ({
-        id: issue.id,
-        title: issue.title,
-        content: issue.content.slice(0, 4000),
-        status: issue.status,
-        updatedAt: issue.updatedAt,
-        author: issue.author,
-        assignees: issue.assignees,
-        comments: issue.comments.slice(-10).map((c) => ({
-          id: c.id,
-          content: c.content.slice(0, 2000),
-          author: c.author,
-        })),
+    return page(input, "issues", await fetchProjectIssues(repo), (issue) => ({
+      id: issue.id,
+      title: issue.title.slice(0, 256),
+      content: issue.content.slice(0, 3000),
+      contentTruncated: issue.content.length > 3000,
+      status: issue.status,
+      updatedAt: issue.updatedAt,
+      author: issue.author,
+      assignees: issue.assignees.slice(0, 50),
+      comments: issue.comments.slice(-3).map((c) => ({
+        id: c.id,
+        content: c.content.slice(0, 500),
+        author: c.author,
       })),
-    };
+    }));
   if (action === "issues.create") {
     const category = ["issue", "change-request", "improvement"].includes(
       String(input.category),
@@ -393,23 +425,25 @@ export async function mobileProjectManagement(
     return { saved: true };
   }
   if (action === "reviews.list")
-    return {
-      reviews: (await fetchProjectPullRequests(repo))
-        .slice(0, 50)
-        .map((pr) => ({
-          id: pr.id,
-          title: pr.title,
-          content: pr.content.slice(0, 4000),
-          status: pr.status,
-          author: pr.author,
-          commit: pr.commit,
-          branchName: pr.branchName,
-          targetBranch: pr.targetBranch,
-          reviewers: pr.reviewers,
-          approvalCount: pr.approvals.length,
-          canReview: canReviewProjectPullRequest(repo, pr, scope.owner),
-        })),
-    };
+    return page(
+      input,
+      "reviews",
+      await fetchProjectPullRequests(repo),
+      (pr) => ({
+        id: pr.id,
+        title: pr.title.slice(0, 256),
+        content: pr.content.slice(0, 3000),
+        contentTruncated: pr.content.length > 3000,
+        status: pr.status,
+        author: pr.author,
+        commit: pr.commit,
+        branchName: pr.branchName,
+        targetBranch: pr.targetBranch,
+        reviewers: pr.reviewers.slice(0, 50),
+        approvalCount: pr.approvals.length,
+        canReview: canReviewProjectPullRequest(repo, pr, scope.owner),
+      }),
+    );
   if (action === "reviews.create") {
     const branch = text(input, "branch");
     const targetBranch = text(input, "targetBranch");
