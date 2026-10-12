@@ -71,3 +71,24 @@ test("unconfirmed observation exports only booleans without payload/error secret
   assert.equal(Object.values(observed).every(v => typeof v === "boolean"), true);
   assert.equal(/credential|private result|unknownSecret/.test(JSON.stringify(observed)), false);
 });
+for (const [field, mutate] of [
+  ["rpc_error", (r) => { r.error = "private provider error"; }],
+  ["meta_error", (r) => { r.result.meta.error = "private provider error"; }],
+  ["aborted", (r) => { r.result.meta.aborted = true; }],
+  ["yielded", (r) => { r.result.meta.yielded = true; }],
+  ["continuation_pending", (r) => { r.result.meta.continuationPending = true; }],
+  ["replay_invalid", (r) => { r.result.meta.replayInvalid = true; }],
+  ["timeout_phase", (r) => { r.result.meta.timeoutPhase = "provider"; }],
+  ["pending_tools", (r) => { r.result.meta.pendingToolCalls = [{ secret: "private" }]; }],
+  ["blocked_liveness", (r) => { r.result.meta.livenessState = "paused"; }],
+  ["payload_error", (r) => { r.result.payloads[0].isError = true; }],
+]) {
+  test(`unconfirmed diagnostic identifies ${field} without private values`, () => {
+    const { task, receipt } = fixtures(); mutate(receipt);
+    const observation = completionObservation(receipt, task);
+    assert.equal(observation[field], true);
+    assert.equal(observation.eligible_envelope, false);
+    assert.equal(Object.values(observation).every(v => typeof v === "boolean"), true);
+    assert.equal(JSON.stringify(observation).includes("private"), false);
+  });
+}
