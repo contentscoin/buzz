@@ -39,15 +39,13 @@ export function completedEnvelope(receipt, task, durableFallback = false) {
   );
 }
 
-/** Validate the actual SDK final receipt. A normal model stop is not cancellation. */
-export function finalResult(receipt, task, clean) {
-  const terminal = receipt?.result?.meta?.agentMeta?.terminalReceipt;
+/** Validate run/session/model identity before an independent terminal observation. */
+export function boundTerminalModel(terminal, task) {
   const actual = terminal?.effective;
   const model =
     actual &&
     publicModel(`${actual.provider}/${actual.responseModel ?? actual.model}`);
   const valid =
-    completedEnvelope(receipt, task) &&
     terminal?.runId === task.run_id &&
     typeof terminal.sessionId === "string" &&
     terminal.sessionId.length > 0 &&
@@ -57,7 +55,13 @@ export function finalResult(receipt, task, clean) {
       task.proposal.requested_model &&
     model &&
     model !== "not_reported";
-  if (!valid) return null;
+  return valid ? model : null;
+}
+
+/** Validate the actual SDK final receipt. A normal model stop is not cancellation. */
+export function finalResult(receipt, task, clean) {
+  const model = boundTerminalModel(receipt?.result?.meta?.agentMeta?.terminalReceipt, task);
+  if (!completedEnvelope(receipt, task) || !model) return null;
   const result = {
     status: "succeeded",
     run_id: task.run_id,

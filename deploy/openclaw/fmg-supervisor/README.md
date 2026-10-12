@@ -399,3 +399,14 @@ approval and uncertain-result recovery. Install it with
 preserves existing guidance and Blender sections, creates private backups and
 a durable progress receipt, then installs `BUZZ_SUPERVISOR.md` before adding its
 managed pointer in `AGENTS.md`. No Gateway restart or tool grant is required.
+# 실시간 종료 기록 확인 보완 (0.12.7)
+
+SDK 응답에 같은 실행의 내부 종료 신원이 있어도 바깥쪽 stop 표시가
+빠진 경우, 별도의 `agent.wait`로 기록된 실행의 실제 종료를 확인한다.
+SDK와 wait의 run/session/turn, 요청 모델, 실제 모델, 최종 답변이 일치해야
+성공 결과를 저장한다. 내부 신원이 잘못되거나 wait를 확인할 수 없으면
+미확인 상태를 유지한다. 과거 `needs_reconcile`은 소유자의 직접 복구
+명령으로만 처리하며 모델을 다시 호출하지 않는다.
+
+미확인 결과의 진단 로그는 형식과 조건의 참/거짓만 기록한다.
+답변, provider 오류 문자열, 인증 정보는 로그에 넣지 않는다.

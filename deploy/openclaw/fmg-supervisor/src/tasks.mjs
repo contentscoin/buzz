@@ -7,7 +7,7 @@ import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { clean, gateway, reconcileTask } from "./recovery.mjs";
 import { approvedExecution, publicModel } from "./model-binding.mjs";
-import { executionResult } from "./execution-result.mjs";
+import { completionObservation, executionResult } from "./execution-result.mjs";
 import { assertProjectBinding } from "./project-binding.mjs";
 
 const endpoint = "http://fmg-dot-supervisor:8001/operator";
@@ -327,6 +327,7 @@ export async function createTaskWorker(context, settings) {
       }
     });
     if (completed) return completed;
+    context.logger.warn(`FMG completion unconfirmed ${task.task_id}: ${JSON.stringify(completionObservation(receipt, task))}`);
     const meta = receipt?.result?.meta;
     const metadata = meta?.agentMeta;
     const actual =
