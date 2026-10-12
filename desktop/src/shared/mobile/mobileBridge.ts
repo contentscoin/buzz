@@ -104,7 +104,52 @@ async function startBridgeInternal(
   let journal: Journal;
   const stored = localStorage.getItem(storageKey);
   if (stored) {
-    journal = JSON.parse(await nip44DecryptFromSelf(stored)) as Journal;
+    if (stored.length > 4_000_000) throw new Error("journal_invalid");
+    let plaintext: string;
+    if (stored.startsWith("{")) {
+      const envelope = JSON.parse(stored) as {
+        version: number;
+        chunks: string[];
+      };
+      if (
+        envelope.version !== 2 ||
+        !Array.isArray(envelope.chunks) ||
+        !envelope.chunks.length ||
+        envelope.chunks.length > 260 ||
+        envelope.chunks.some(
+          (chunk) => typeof chunk !== "string" || chunk.length > 100_000,
+        )
+      )
+        throw new Error("journal_invalid");
+      let generation: string | undefined;
+      const parts: string[] = [];
+      for (const [index, chunk] of envelope.chunks.entries()) {
+        const part = JSON.parse(await nip44DecryptFromSelf(chunk)) as {
+          generation: string;
+          index: number;
+          total: number;
+          data: string;
+        };
+        generation ??= part.generation;
+        if (
+          !uuid.test(part.generation) ||
+          part.generation !== generation ||
+          part.index !== index ||
+          part.total !== envelope.chunks.length ||
+          typeof part.data !== "string" ||
+          part.data.length > 8000
+        )
+          throw new Error("journal_invalid");
+        parts.push(part.data);
+      }
+      plaintext = parts.join("");
+    } else {
+      // Migration from the original single-frame journal.
+      plaintext = await nip44DecryptFromSelf(stored);
+    }
+    if (new TextEncoder().encode(plaintext).length > 2_000_000)
+      throw new Error("journal_invalid");
+    journal = JSON.parse(plaintext) as Journal;
     if (
       journal.version !== 1 ||
       !uuid.test(journal.deviceId) ||
@@ -121,10 +166,30 @@ async function startBridgeInternal(
         delete journal.entries[id];
     }
     const text = JSON.stringify(journal);
-    if (text.length > 2_000_000) throw new Error("journal_full");
-    const ciphertext = await nip44EncryptToSelf(text);
+    if (new TextEncoder().encode(text).length > 2_000_000)
+      throw new Error("journal_full");
+    // NIP-44 has a 65,535-byte plaintext ceiling; journal entries must not share
+    // one oversized frame. Split without breaking UTF-16 surrogate pairs.
+    const parts: string[] = [];
+    for (let start = 0; start < text.length; ) {
+      let end = Math.min(start + 8000, text.length);
+      const last = text.charCodeAt(end - 1);
+      if (end < text.length && last >= 0xd800 && last <= 0xdbff) end--;
+      parts.push(text.slice(start, end));
+      start = end;
+    }
+    const generation = crypto.randomUUID();
+    const chunks = await Promise.all(
+      parts.map((data, index) =>
+        nip44EncryptToSelf(
+          JSON.stringify({ generation, index, total: parts.length, data }),
+        ),
+      ),
+    );
     await scope.assertActive();
-    localStorage.setItem(storageKey, ciphertext);
+    // One atomic localStorage replacement; each encrypted chunk authenticates
+    // its generation, index and total, detecting swaps and incomplete writes.
+    localStorage.setItem(storageKey, JSON.stringify({ version: 2, chunks }));
   };
   // Do not expire unresolved writes. Completed outcomes survive response loss/restart for seven days.
   for (const [id, receipt] of Object.entries(journal.entries)) {
