@@ -1,7 +1,7 @@
 param(
     [string]$FlutterSdk = '',
-    [string]$Version = '1.1.0',
-    [ValidateRange(1, 2147483647)][int]$BuildNumber = 2
+    [string]$Version = '1.2.0',
+    [ValidateRange(1, 2147483647)][int]$BuildNumber = 3
 )
 $ErrorActionPreference = 'Stop'
 $fmgFlutter = if ($FlutterSdk) { Join-Path $FlutterSdk 'bin/flutter.bat' } else { 'flutter' }

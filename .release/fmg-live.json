@@ -2,13 +2,13 @@
   "schema": 2,
   "channel": "fmg-live",
   "desktop": {
-    "version": "0.5.26-fmg.23",
-    "tag": "fmg-desktop-v0.5.26-fmg.23",
+    "version": "0.5.26-fmg.24",
+    "tag": "fmg-desktop-v0.5.26-fmg.24",
     "product_name": "Buzz",
     "identifier": "xyz.block.buzz.app",
     "artifact": "windows-nsis-x86_64",
     "signing": "unsigned",
-    "update_policy": "manual-non-updating"
+    "update_policy": "signed-auto-download-user-apply"
   },
   "upstream": {
     "tag": "desktop-v0.5.25",

@@ -10,6 +10,7 @@ import 'fmg_document_page.dart';
 import 'fmg_ui_labels.dart';
 import 'fmg_agents_page.dart';
 import 'fmg_projects_page.dart';
+import 'fmg_update_card.dart';
 
 /// Adds task and result-document menus without altering channel navigation.
 class FmgWorkspacePage extends HookConsumerWidget {
@@ -18,12 +19,19 @@ class FmgWorkspacePage extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final repository = ref.watch(fmgRepositoryProvider);
     // Scope key destroys local list state when the active account changes.
-    return repository == null
-        ? const _FmgUnavailable()
-        : _FmgWorkspace(
-            key: ValueKey(repository.rpc.scope),
-            repository: repository,
-          );
+    return Column(
+      children: [
+        const SafeArea(bottom: false, child: FmgUpdateCard()),
+        Expanded(
+          child: repository == null
+              ? const _FmgUnavailable()
+              : _FmgWorkspace(
+                  key: ValueKey(repository.rpc.scope),
+                  repository: repository,
+                ),
+        ),
+      ],
+    );
   }
 }
 

@@ -7,6 +7,7 @@ import 'features/age_gate/age_signal_push_bootstrap.dart';
 import 'features/invites/invite_join_provider.dart';
 import 'shared/push/push_bridge.dart';
 import 'shared/theme/theme_provider.dart';
+import 'shared/fmg/fmg_updates.dart';
 
 void main() => runBuzzApp(const App());
 
@@ -27,7 +28,7 @@ Future<void> runBuzzApp(Widget app) async {
               (scope) => buildMobileInviteJoinRecovery(ref, scope),
         ),
       ],
-      child: AgeSignalPushBootstrap(child: app),
+      child: FmgUpdateBootstrap(child: AgeSignalPushBootstrap(child: app)),
     ),
   );
 }

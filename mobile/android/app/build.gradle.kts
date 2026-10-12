@@ -33,6 +33,9 @@ if (fmgVariantDefines.size > 1 || fmgVariantDefines.any { it !in setOf("FMG_CUST
     throw GradleException("FMG_CUSTOM must appear at most once and be true or false.")
 }
 val isFmgMobile = fmgVariantDefines.singleOrNull() == "FMG_CUSTOM=true"
+if (isFmgMobile) {
+    android.sourceSets.getByName("release").manifest.srcFile("src/fmg/AndroidManifest.xml")
+}
 val pushGatewayDefinePrefix = "BUZZ_PUSH_GATEWAY_URL="
 val pushGatewayOrigins =
     dartDefines.split(',').mapNotNull { encoded ->

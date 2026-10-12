@@ -126,6 +126,7 @@ internal object AndroidImageProcessor {
 }
 
 class MainActivity : FlutterFragmentActivity() {
+    private var fmgUpdatePlugin: FmgUpdatePlugin? = null
     private var mediaUploadChannel: MethodChannel? = null
     private var ageSignalChannel: MethodChannel? = null
     private val ageSignalRequest = AgeSignalRequest()
@@ -133,6 +134,9 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        if (packageName == "xyz.fmg.buzz.mobile") {
+            fmgUpdatePlugin = FmgUpdatePlugin(this, flutterEngine.dartExecutor.binaryMessenger)
+        }
 
         huddleMediaPlugin = HuddleMediaPlugin(
             this,
@@ -202,6 +206,8 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun onDestroy() {
+        fmgUpdatePlugin?.dispose()
+        fmgUpdatePlugin = null
         ageSignalRequest.retire()
         huddleMediaPlugin?.dispose()
         huddleMediaPlugin = null

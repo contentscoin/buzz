@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "origin": "https://buzz-dnb0.srv2006121.hstgr.cloud",
+  "desktop": {
+    "endpoint": "https://buzz-dnb0.srv2006121.hstgr.cloud/fmg-updates/windows/latest.json",
+    "public_key": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUyRTE2QjEyMDFCQ0YzRkEKUldUNjg3d0JFbXZoVWdBOEw5cHpQcGVLN2VIUmdEclAyM2drTWJJNjd0SnJ3UDBON2x5Sk9xOTcK",
+    "policy": "signed-auto-download-user-apply"
+  },
+  "android": {
+    "endpoint": "https://buzz-dnb0.srv2006121.hstgr.cloud/fmg-updates/android/latest.json",
+    "application_id": "xyz.fmg.buzz.mobile",
+    "signing_certificate_sha256": "b12c8b88ab806a09184d763424c49485164aff0e202626c643330f3f51182e93",
+    "policy": "auto-check-wifi-download-system-install-confirmation"
+  }
+}

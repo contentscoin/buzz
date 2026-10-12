@@ -151,27 +151,13 @@ jobs:
             !desktop/src-tauri/target/**/release/bundle/**
           key: ${{ steps.rust_cache_key.outputs.key }}
 
-      - name: Generate non-updating bundle config
+      - name: Generate signed FMG update bundle config
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.FMG_UPDATER_PRIVATE_KEY }}
         run: |
-          cat > desktop/src-tauri/tauri.fmg.conf.json <<'JSON'
-          {
-            "bundle": {
-              "createUpdaterArtifacts": false,
-              "externalBin": [
-                "binaries/buzz-acp",
-                "binaries/buzz-agent",
-                "binaries/buzz-dev-mcp",
-                "binaries/git-credential-nostr",
-                "binaries/buzz",
-                "binaries/git"
-              ],
-              "resources": [
-                "resources/fmg-managed-git/"
-              ]
-            }
-          }
-          JSON
+          cd desktop
+          node scripts/build-fmg-update-config.mjs
 
       - name: Build sidecars
         shell: bash
@@ -184,6 +170,8 @@ jobs:
         shell: bash
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.FMG_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.FMG_UPDATER_PRIVATE_KEY_PASSWORD }}
         run: |
           rm -rf "desktop/src-tauri/target/${TARGET}/release/bundle/nsis"
           cd desktop
@@ -211,6 +199,8 @@ jobs:
           mkdir -p dist
           OUTPUT="dist/FMG-Buzz_${VERSION}_x64-setup.exe"
           cp "$EXE" "$OUTPUT"
+          test -s "$EXE.sig"
+          cp "$EXE.sig" "$OUTPUT.sig"
           INSTALLER_SHA256=$(node --input-type=module -e "import {createHash} from 'node:crypto'; import {readFileSync} from 'node:fs'; process.stdout.write(createHash('sha256').update(readFileSync(process.argv[1])).digest('hex'))" "$OUTPUT")
           echo "installer=$OUTPUT" >> "$GITHUB_OUTPUT"
           echo "installer_sha256=$INSTALLER_SHA256" >> "$GITHUB_OUTPUT"
@@ -296,6 +286,7 @@ jobs:
           import { readFileSync, writeFileSync } from "node:fs";
           const config = JSON.parse(readFileSync(".release/fmg-live.json", "utf8"));
           const managedGit = JSON.parse(readFileSync("scripts/windows-managed-git.json", "utf8"));
+          const updates = JSON.parse(readFileSync(".release/fmg-updates.json", "utf8"));
           const [installer, installerSha256] = process.argv.slice(2);
           const { schema: releaseDescriptorSchema, ...releaseDescriptor } = config;
           writeFileSync("dist/fmg-release-receipt.json", `${JSON.stringify({
@@ -303,6 +294,7 @@ jobs:
             release_descriptor_schema: releaseDescriptorSchema,
             ...releaseDescriptor,
             managed_git: managedGit,
+            updater: updates.desktop,
             source: {
               repository: process.env.GITHUB_REPOSITORY,
               commit: process.env.GITHUB_SHA,
@@ -311,6 +303,7 @@ jobs:
             installer: {
               file: installer.split("/").at(-1),
               sha256: installerSha256,
+              signature: readFileSync(`${installer}.sig`, "utf8").trim(),
               verification: {
                 method: "nsis-silent-install",
                 app: "buzz-desktop.exe",
@@ -329,7 +322,9 @@ jobs:
           path: |
             ${{ steps.artifact.outputs.installer }}
             dist/fmg-release-receipt.json
+            dist/*.sig
             .release/fmg-live.json
+            .release/fmg-updates.json
             scripts/windows-managed-git.json
             FMG_CHANGELOG.md
           include-hidden-files: true

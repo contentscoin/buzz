@@ -292,7 +292,9 @@ export function validateFmgLiveManifest(manifest) {
     ["desktop.identifier", manifest?.desktop?.identifier, "xyz.block.buzz.app"],
     ["desktop.artifact", manifest?.desktop?.artifact, "windows-nsis-x86_64"],
     ["desktop.signing", manifest?.desktop?.signing, "unsigned"],
-    ["desktop.update_policy", manifest?.desktop?.update_policy, "manual-non-updating"],
+    ["desktop.update_policy", manifest?.desktop?.update_policy,
+      manifest?.desktop?.update_policy === "manual-non-updating"
+        ? "manual-non-updating" : "signed-auto-download-user-apply"],
     ["relay.deployment_policy", manifest?.relay?.deployment_policy, "digest-pinned"],
     [
       "agent_runtime.deployment_policy",
