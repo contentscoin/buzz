@@ -4,6 +4,7 @@ import {
   decryptObserverEvent,
 } from "@/shared/api/tauriObserver";
 import { getIdentity } from "@/shared/api/tauriIdentity";
+import { updateMobileBridgeStatus } from "./mobileBridgeStatus";
 import {
   nip44EncryptToSelf,
   nip44DecryptFromSelf,
@@ -43,6 +44,7 @@ export async function startMobileBridge(
   relayUrl: string,
   handler: MobileHandler,
   signal?: AbortSignal,
+  statusGeneration?: string,
 ): Promise<() => void> {
   if (origin(relayUrl) !== "https://fmg.communities.buzz.xyz") return () => {};
   if (!navigator.locks) throw new Error("coordination_unavailable");
@@ -73,6 +75,7 @@ export async function startMobileBridge(
             relayUrl,
             handler,
             signal,
+            statusGeneration,
           );
           const cleanup = () => {
             stop();
@@ -100,11 +103,19 @@ async function startBridgeInternal(
   relayUrl: string,
   handler: MobileHandler,
   signal?: AbortSignal,
+  statusGeneration?: string,
 ) {
   const relay = origin(relayUrl);
   if (relay !== "https://fmg.communities.buzz.xyz") return () => {};
   const storageKey = `fmg.mobile.controls.v1:${relay}:${owner}`;
   let stopped = false;
+  const diagnose = (
+    patch: Parameters<typeof updateMobileBridgeStatus>[1],
+    count?: "received" | "responded",
+  ) => {
+    if (!stopped && !signal?.aborted && statusGeneration)
+      updateMobileBridgeStatus(statusGeneration, patch, count);
+  };
   const scope: MobileScope = {
     owner,
     relay,
@@ -236,10 +247,17 @@ async function startBridgeInternal(
         generation: journal.deviceId,
         checkedAt: new Date().toISOString(),
         ok: !error,
-        result: result ?? {},
+        // A failed handler may still hold an oversized partial result. Never
+        // encrypt it into an error reply and lose the error itself to NIP-44's cap.
+        result: error ? {} : (result ?? {}),
         ...(error ? { error } : {}),
       },
     };
+    if (new TextEncoder().encode(JSON.stringify(payload)).length > 60_000) {
+      payload.payload.ok = false;
+      payload.payload.result = {};
+      payload.payload.error = "response_too_large";
+    }
     const encrypted = await buildObserverControlEvent({
       agentPubkey: owner,
       payload,
@@ -261,7 +279,9 @@ async function startBridgeInternal(
       "Mobile response timed out.",
       "Mobile response rejected.",
     );
+    diagnose({ lastError: payload.payload.error }, "responded");
   };
+  let subscriptionClosed = false;
   const unsubscribe = await relayClient.subscribeInteractive(
     {
       kinds: [30078],
@@ -323,6 +343,10 @@ async function startBridgeInternal(
           )
             return;
           await scope.assertActive();
+          diagnose(
+            { lastAction: request.action, lastError: undefined },
+            "received",
+          );
           if (request.action === "desktop.discover") {
             await reply(request, {
               deviceId: journal.deviceId,
@@ -482,18 +506,24 @@ async function startBridgeInternal(
           await reply(request, result, error);
         })
         .catch(() => {
+          diagnose({ lastError: "request_or_response_failed" });
           /* Fail closed; keep durable running receipt on uncertain completion. */
         })
         .finally(() => {
           queued--;
         });
     },
+    (readiness) => {
+      subscriptionClosed = readiness === "closed";
+    },
+    signal,
   );
-  if (signal?.aborted) {
+  if (signal?.aborted || subscriptionClosed) {
     stopped = true;
     unsubscribe();
-    throw new Error("scope_changed");
+    throw new Error(signal?.aborted ? "scope_changed" : "subscription_closed");
   }
+  diagnose({ phase: "ready" });
   return () => {
     stopped = true;
     unsubscribe();

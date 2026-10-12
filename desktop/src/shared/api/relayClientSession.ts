@@ -427,13 +427,15 @@ export class RelayClient {
   async subscribeInteractive(
     filter: RelaySubscriptionFilter,
     onEvent: (event: RelayEvent) => void,
+    onReady?: (readiness: LiveSubscriptionReadiness) => void,
+    signal?: AbortSignal,
   ) {
     return this.subscribe(
       filter,
       onEvent,
+      onReady,
       undefined,
-      undefined,
-      undefined,
+      signal,
       "interactive",
     );
   }

@@ -67,9 +67,13 @@ function project(agent: ManagedAgent, detailed = true) {
 }
 async function inventory(scope: MobileScope) {
   await scope.assertActive();
-  const agents = (await listManagedAgents()).filter(
-    (agent) => relayOrigin(agent.relayUrl) === scope.relay,
-  );
+  // Native instances are owner-global, as on Desktop. Legacy relay pins may
+  // be empty and do not define execution scope. Native commandScope and the
+  // live signer/workspace fence below bind every operation to this community.
+  const agents = (await listManagedAgents()).map((agent) => ({
+    ...agent,
+    relayUrl: scope.relay,
+  }));
   await scope.assertActive();
   return agents;
 }

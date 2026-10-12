@@ -26,6 +26,7 @@ import type { FmgTaskGraphItem } from "@/features/fmg/useFmgTaskGraph";
 import { FmgGraphTransitionDialog } from "./FmgGraphTransitionDialog";
 import { FmgComputerLauncher } from "./FmgComputerPanel";
 import { FmgTasksLauncher } from "./FmgTasksPanel";
+import { FmgMobileBridgeStatus } from "./FmgMobileBridgeStatus";
 import { useFmgWorkReports } from "@/features/fmg/useFmgWorkReports";
 import type { WorkReportStatus } from "@/features/messages/lib/workReport";
 import type { ConnectionState } from "@/shared/api/relayClientShared";
@@ -267,6 +268,11 @@ export function FmgDashboard() {
             </CardContent>
           </Card>
         </section>
+
+        <FmgMobileBridgeStatus
+          owner={activeCommunity?.pubkey}
+          relayUrl={activeCommunity?.relayUrl}
+        />
 
         <section aria-label="작업 결과" className="space-y-4">
           <SectionHeader
