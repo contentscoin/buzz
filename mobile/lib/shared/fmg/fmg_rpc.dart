@@ -11,6 +11,7 @@ import '../community/community_provider.dart';
 import '../crypto/nip44.dart';
 import '../relay/relay.dart';
 import 'fmg_variant.dart';
+import 'fmg_management.dart' show fmgDesktopActions;
 
 /// Retires encrypted requests before switching identities or communities.
 final fmgRpcProvider = Provider.autoDispose<FmgRpc?>((ref) {
@@ -61,18 +62,41 @@ class FmgRequestException implements Exception {
     'rate_limited' => '조회가 많습니다. 잠시 후 다시 조회하세요.',
     'tasks_unavailable' => '서버의 작업 조회 연결이 준비되지 않았습니다.',
     'integrity_error' || 'invalid_response' => '서버 응답 검증에 실패했습니다.',
+    'desktop_required' => 'PC의 Buzz를 켜고 FMG 커뮤니티를 선택한 뒤 다시 연결하세요.',
+    'pending_operation' => '확인이 끝나지 않은 변경이 있습니다. 이전 요청 확인을 눌러 중복 실행을 방지하세요.',
+    'needs_reconcile' => 'PC가 변경 도중 종료되어 완료 여부가 불명확합니다. 원래 요청을 확인하세요.',
+    'revision_conflict' => 'PC 또는 다른 기기에서 설정을 변경했습니다. 다시 조회한 뒤 수정하세요.',
+    'runtime_unavailable' => '선택한 실행기가 PC에 설치되거나 로그인되어 있지 않습니다.',
+    'effort_unavailable' =>
+      '이 실행기의 effort 선택지가 아직 확인되지 않았습니다. 에이전트 실행 후 다시 조회하세요.',
+    'owner_only_required' => '현재 PC 설정에서는 소유자의 요청에만 응답할 수 있습니다.',
+    'remote_lifecycle_unavailable' =>
+      '이 에이전트는 다른 실행 서버의 관리를 받습니다. 해당 서버에서 제어해야 합니다.',
+    'community_repository_required' => '현재 커뮤니티에 연결된 저장소만 제어할 수 있습니다.',
+    'operation_failed' => 'PC에서 처리를 완료하지 못했습니다. 이전 요청 확인과 PC 설정을 확인하세요.',
+    'journal_full' ||
+    'journal_unavailable' ||
+    'journal_invalid' => '변경 기록을 안전하게 보관할 수 없습니다. 저장 공간과 이전 요청을 확인하세요.',
+    'device_changed' => '이전 요청을 처리한 PC에 연결해야 합니다. 기존 PC의 Buzz를 실행하세요.',
+    'response_too_large' => '조회 내용이 너무 큽니다. 항목별 상세 화면에서 확인하세요.',
+    'confirmation_required' => '검토 화면에 표시된 현재 변경 커밋을 정확히 입력해 주세요.',
+    'parallelism_invalid' => '동시 작업 수가 실행기의 허용 범위를 벗어났습니다.',
+    'request_expired' => '기존 요청의 보관 기간이 지났습니다. 현재 상태를 확인한 뒤 새로 작업하세요.',
     _ => '서버 요청이 거부됐습니다. 연결 상태와 접근 권한을 확인하세요.',
   };
 }
 
-/// Read-only use of the same owner-signed NIP-44 broker used by Desktop.
-/// No operator token, OAuth token, pairing password or execution action is used.
+/// Gateway reads retain the existing NIP-44 broker. Explicit Desktop mode uses
+/// encrypted NIP-78 owner app data for bounded device management actions.
+/// No operator token, OAuth token or pairing password is forwarded.
 class FmgRpc {
-  FmgRpc(String nsec, this._session, this._connected)
+  FmgRpc(String nsec, this._session, this._connected, {this.desktop = false})
     : _privateKey = nostr.Nip19.decode(payload: nsec).data,
       owner = pubkeyFromNsec(nsec)! {
-    _conversation = getConversationKey(_privateKey, fmgGatewayPubkey);
+    _conversation = getConversationKey(_privateKey, peer);
   }
+  final bool desktop;
+  String get peer => desktop ? owner : fmgGatewayPubkey;
   String _privateKey;
   final String owner;
   final RelaySessionNotifier _session;
@@ -81,7 +105,7 @@ class FmgRpc {
   bool _closed = false;
   final _pending = <Completer<Map<String, dynamic>>>{};
   final _cleanups = <void Function()>{};
-  String get scope => '$fmgRelayOrigin|$owner|$fmgGatewayPubkey';
+  String get scope => '$fmgRelayOrigin|$owner|$peer';
 
   /// Rejects storage/UI work left over from a retired account generation.
   void assertActive() {
@@ -126,20 +150,44 @@ class FmgRpc {
   Future<Map<String, dynamic>> request(
     String action, [
     Map<String, dynamic> target = const {},
-  ]) async {
+  ]) => _request(action, target, const Uuid().v4());
+
+  /// Reuses a persisted operation UUID after response loss; never creates another write.
+  Future<Map<String, dynamic>> requestExisting(
+    String action,
+    Map<String, dynamic> target,
+    String requestId,
+  ) {
+    if (!isFmgUuid(requestId)) throw ArgumentError('Invalid operation UUID');
+    return _request(action, target, requestId);
+  }
+
+  Future<Map<String, dynamic>> _request(
+    String action,
+    Map<String, dynamic> target,
+    String id,
+  ) async {
     if (_closed) throw const FmgRequestException('scope_changed');
     if (owner != fmgOwnerPubkey) {
       throw const FmgRequestException('owner_mismatch');
     }
     if (!_connected()) throw const FmgRequestException('offline');
-    if (!_actions.contains(action)) {
+    if (!(desktop ? fmgDesktopActions : _actions).contains(action)) {
       throw ArgumentError('Read-only action required');
     }
-    if (target.keys.any((key) => !_targets[action]!.contains(key))) {
+    final allowed = desktop
+        ? (action == 'desktop.discover'
+              ? {'deviceId'}
+              : action == 'operations.get'
+              ? {'deviceId', 'operationId'}
+              : action == 'operations.review'
+              ? {'deviceId', 'operationId', 'confirmation'}
+              : {'deviceId', 'input', 'operationCreatedAt'})
+        : _targets[action]!;
+    if (target.keys.any((key) => !allowed.contains(key))) {
       throw ArgumentError('Read-only target fields required');
     }
     if (_pending.length >= 3) throw const FmgRequestException('rate_limited');
-    final id = const Uuid().v4();
     final done = Completer<Map<String, dynamic>>();
     // Register an error listener before subscription/publish can yield.
     unawaited(done.future.catchError((Object _) => <String, dynamic>{}));
@@ -154,11 +202,12 @@ class FmgRpc {
     try {
       unsubscribe = await _session.subscribe(
         NostrFilter(
-          kinds: const [24200],
-          authors: const [fmgGatewayPubkey],
+          kinds: [desktop ? 30078 : 24200],
+          authors: [peer],
           since: started - 1,
           limit: 10,
           tags: {
+            if (desktop) '#t': ['fmg-mobile-control'],
             '#p': [owner],
             '#frame': ['telemetry'],
           },
@@ -166,8 +215,8 @@ class FmgRpc {
         (event) {
           if (_closed ||
               done.isCompleted ||
-              event.pubkey != fmgGatewayPubkey ||
-              event.kind != 24200 ||
+              event.pubkey != peer ||
+              event.kind != (desktop ? 30078 : 24200) ||
               event.content.length > 100000 ||
               event.createdAt < started - 1 ||
               (event.createdAt - DateTime.now().millisecondsSinceEpoch ~/ 1000)
@@ -185,7 +234,9 @@ class FmgRpc {
           }
 
           if (!tag('p', owner) ||
-              !tag('agent', fmgGatewayPubkey) ||
+              (desktop && !tag('t', 'fmg-mobile-control')) ||
+              (desktop && !tag('d', 'fmg.mobile:$id:result')) ||
+              !tag('agent', peer) ||
               !tag('frame', 'telemetry')) {
             return;
           }
@@ -195,12 +246,21 @@ class FmgRpc {
             final frame = jsonDecode(
               nip44Decrypt(_conversation, event.content),
             );
-            if (frame is! Map || frame['kind'] != 'fmg_computer_result') return;
+            if (frame is! Map ||
+                frame['kind'] !=
+                    (desktop
+                        ? 'fmg_mobile_desktop_result'
+                        : 'fmg_computer_result')) {
+              return;
+            }
             final payload = frame['payload'];
             if (payload is! Map ||
                 payload['requestId'] != id ||
                 payload['action'] != action ||
-                payload['relay'] != fmgRelayOrigin) {
+                payload['relay'] != fmgRelayOrigin ||
+                (desktop &&
+                    target['deviceId'] != null &&
+                    payload['generation'] != target['deviceId'])) {
               return;
             }
             if (payload['schemaVersion'] != 1 ||
@@ -249,7 +309,9 @@ class FmgRpc {
       final content = nip44Encrypt(
         _conversation,
         jsonEncode({
-          'type': 'fmg.computer.request',
+          'type': desktop
+              ? 'fmg.mobile.desktop.request'
+              : 'fmg.computer.request',
           'schemaVersion': 1,
           'requestId': id,
           'relay': fmgRelayOrigin,
@@ -262,11 +324,13 @@ class FmgRpc {
         }),
       );
       final signed = nostr.Event.from(
-        kind: 24200,
+        kind: desktop ? 30078 : 24200,
         content: content,
         tags: [
-          ['p', fmgGatewayPubkey],
-          ['agent', fmgGatewayPubkey],
+          if (desktop) ['d', 'fmg.mobile:$id:request'],
+          if (desktop) ['t', 'fmg-mobile-control'],
+          ['p', peer],
+          ['agent', peer],
           ['frame', 'control'],
         ],
         secretKey: _privateKey,

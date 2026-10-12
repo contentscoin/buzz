@@ -8,6 +8,8 @@ import '../../shared/theme/theme.dart';
 import 'fmg_task_page.dart';
 import 'fmg_document_page.dart';
 import 'fmg_ui_labels.dart';
+import 'fmg_agents_page.dart';
+import 'fmg_projects_page.dart';
 
 /// Adds task and result-document menus without altering channel navigation.
 class FmgWorkspacePage extends HookConsumerWidget {
@@ -91,10 +93,7 @@ class _FmgWorkspace extends HookConsumerWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    'FMG 작업과 문서',
-                    style: context.textTheme.headlineSmall,
-                  ),
+                  child: Text('FMG 관리', style: context.textTheme.headlineSmall),
                 ),
                 IconButton(
                   tooltip: '새로 고침',
@@ -131,6 +130,36 @@ class _FmgWorkspace extends HookConsumerWidget {
             ),
           ),
           const SizedBox(height: Grid.xxs),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Grid.gutter),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(builder: (_) => const FmgAgentsPage()),
+                    ),
+                    icon: const Icon(Icons.smart_toy_outlined),
+                    label: const Text('에이전트 관리'),
+                  ),
+                ),
+                const SizedBox(width: Grid.xs),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const FmgProjectsPage(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.folder_outlined),
+                    label: const Text('프로젝트 관리'),
+                  ),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {

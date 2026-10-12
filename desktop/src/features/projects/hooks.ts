@@ -200,7 +200,7 @@ export async function fetchRepoState(
   return events.length > 0 ? eventToRepoState(events[0]) : null;
 }
 
-async function fetchProjectIssues(
+export async function fetchProjectIssues(
   project: Repository,
 ): Promise<ProjectIssue[]> {
   const issuePromise = relayClient.fetchEvents({
@@ -242,7 +242,7 @@ async function fetchProjectIssues(
   );
 }
 
-async function fetchProjectPullRequests(
+export async function fetchProjectPullRequests(
   project: Repository,
 ): Promise<ProjectPullRequest[]> {
   const [pullRequestEvents, updateEvents, commentEvents, statusEvents] =
@@ -287,7 +287,7 @@ async function fetchProjectPullRequests(
 // Pulse feeds filter these out via the repo-address `a` tag (see
 // features/pulse/lib/projectComments.ts). If the relay ever allowlists
 // 1111, migrate these to NIP-22 comments and drop that filter.
-async function createProjectPullRequestComment({
+export async function createProjectPullRequestComment({
   anchor,
   content,
   decision,
@@ -367,7 +367,7 @@ async function createProjectPullRequestComment({
   );
 }
 
-async function createProjectIssueComment({
+export async function createProjectIssueComment({
   content,
   mediaTags,
   mentionPubkeys = [],

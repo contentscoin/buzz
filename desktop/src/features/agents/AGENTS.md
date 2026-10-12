@@ -527,6 +527,18 @@ explicit error.
 
 ## Keep this file true
 
+## FMG mobile management
+
+`mobileAgentManagement.ts` reuses the Rust catalog, the shared instance field
+descriptors and the discovered native config surface. Mobile receives only
+safe projections; never send agent keys, env values, backend config, native
+error text or credential values. Runtime/model/provider changes use the same
+dependent clearing policy as Desktop. Effort options are catalog/native
+observations, not a separate mobile list. Native mobile updates pin signer,
+relay and `updated_at` under the record lock. Owner-key signed controls are
+device-targeted and journaled before mutations. A journal left running after
+a crash is uncertain and must not be re-executed automatically.
+
 **If you change how agent configuration is modeled, rendered, persisted,
 applied, or cleared — update this file in the same PR.** A rule that no longer
 matches the code is worse than no rule; a new pattern that isn't written down

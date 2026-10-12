@@ -683,6 +683,9 @@ export type RuntimeConfigSurface = {
 
 export type UpdateManagedAgentInput = {
   pubkey: string;
+  expectedRelayUrl?: string;
+  expectedSignerPubkey?: string;
+  expectedUpdatedAt?: string;
   name?: string;
   model?: string | null;
   provider?: string | null;

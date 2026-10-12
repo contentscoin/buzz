@@ -163,6 +163,21 @@ pub async fn update_managed_agent(
         }
 
         let record = find_managed_agent_mut(&mut records, &input.pubkey)?;
+        crate::relay::assert_expected_relay_scope(
+            input.expected_relay_url.as_deref(),
+            &crate::relay::relay_api_base_url_with_override(&state),
+        )?;
+        crate::relay::assert_expected_signer(
+            input.expected_signer_pubkey.as_deref(),
+            &state.signing_keys()?.public_key().to_hex(),
+        )?;
+        if input
+            .expected_updated_at
+            .as_ref()
+            .is_some_and(|expected| expected != &record.updated_at)
+        {
+            return Err("revision_conflict".into());
+        }
         let previous_record = record.clone();
 
         let mut name_changed = false;
