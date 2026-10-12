@@ -21,6 +21,17 @@ no task is rerun, approved or automatically rewritten by installation.
 
 ## Supervisor 0.12.5 — bounded closed-tool completion
 
+### Supervisor 0.12.6 — read the bound wait receipt before durable fallback
+
+For a live completed RPC that omits its inner terminal attestation, the worker
+reads `agent.wait` once for the already recorded run ID. It verifies the same
+requested model, terminal receipt, real end time and exact reply through the
+existing wait validator before recording success. A completed RPC can retain
+`working` and omit its outer stop metadata; this alone never proves completion.
+Bounded durable readers remain the fallback. The wait is read only and never
+dispatches or reruns the model. Historical `needs_reconcile` entries still
+require the owner's explicit recovery command.
+
 The live dispatch path also uses the existing durable read/exec validator.
 Runtime code orchestration is accepted only when every child is a closed
 read/shell call, its exact parent runtime ID and chronological lifecycle match,

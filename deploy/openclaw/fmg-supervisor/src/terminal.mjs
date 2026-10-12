@@ -33,8 +33,8 @@ export function completedEnvelope(receipt, task, durableFallback = false) {
       // A final normal stop can retain the SDK's last working observation.
       // Missing/foreign receipts still cannot use this completion path.
       (meta.livenessState !== "working" ||
-        (meta.stopReason === "stop" &&
-          (durableFallback || meta.agentMeta?.terminalReceipt?.runId === task.run_id))) &&
+        (durableFallback && (meta.stopReason == null || meta.stopReason === "stop")) ||
+        (meta.stopReason === "stop" && meta.agentMeta?.terminalReceipt?.runId === task.run_id)) &&
       !receipt.result.payloads.some((item) => item?.isError === true),
   );
 }

@@ -1,6 +1,7 @@
 import { completedEnvelope, finalResult } from "./terminal.mjs";
 import { recoverRuntime } from "./runtime-recovery.mjs";
 import { recoverToolRuntime } from "./tool-recovery.mjs";
+import { recoveredResult } from "./wait-result.mjs";
 
 /** Settle a live dispatch using its terminal receipt or matching durable bounded trace. */
 export async function executionResult(
@@ -10,6 +11,7 @@ export async function executionResult(
   canceled = false,
   readRuntime = recoverRuntime,
   readTools = recoverToolRuntime,
+  readWait,
 ) {
   const completed = finalResult(receipt, task, clean);
   if (completed) return completed;
@@ -28,7 +30,11 @@ export async function executionResult(
     return null;
   // The same strict, bounded reader used by explicit recovery. No model call,
   // retry, historic ledger mutation or interpretation of reply text as success.
-  const recovered = await readRuntime(task, clean) ?? await readTools(task, clean);
+  const observation = readWait ? await readWait(task) : null;
+  if (observation && observation.runId !== task.run_id) return null;
+  const waited = observation && recoveredResult(observation, task, clean);
+  if (waited && waited.result.status !== "succeeded") return null;
+  const recovered = waited ?? await readRuntime(task, clean) ?? await readTools(task, clean);
   if (!recovered) return null;
   const reply = clean(
     receipt.result.payloads

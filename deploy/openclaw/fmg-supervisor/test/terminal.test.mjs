@@ -155,8 +155,9 @@ test("working metadata without matching durable final proof remains unconfirmed"
   assert.equal(reads, 1);
   delete receipt.result.meta.stopReason;
   assert.equal(await executionResult(receipt, task, clean, false, async () => {
-    assert.fail("working without normal stop cannot use durable fallback");
-  }), null);
+    reads++; return null;
+  }, async () => null), null);
+  assert.equal(reads, 2);
 });
 
 function waitReceipt() {
@@ -174,6 +175,56 @@ function waitReceipt() {
     terminalReply: { disposition: "visible", text: "완료\n응답" },
   };
 }
+
+test("live completion reads same-run wait receipt when RPC omits stop metadata", async () => {
+  const receipt = final();
+  delete receipt.result.meta.stopReason;
+  delete receipt.result.meta.agentMeta.terminalReceipt;
+  receipt.result.meta.livenessState = "working";
+  let waits=0;
+  const result=await executionResult(receipt,task,clean,false,async()=>assert.fail("wait proof is sufficient"),async()=>null,async admitted=>{
+    waits++;assert.equal(admitted.run_id,run);return waitReceipt();
+  });
+  assert.equal(waits,1);
+  assert.equal(result.status,"succeeded");
+  assert.equal(result.reply,"완료\n응답");
+  assert.equal(result.completion_evidence.source,"gateway.agent.wait");
+  assert.equal(result.completion_evidence.requested_effort,"medium");
+});
+
+test("live wait supports bound Anthropic receipt without assuming OpenAI trace format", async () => {
+  const selected=structuredClone(task);selected.proposal.requested_model="anthropic/claude-opus-5-5";
+  const rpc=final();delete rpc.result.meta.agentMeta.terminalReceipt;
+  const observation=waitReceipt();observation.terminalReceipt.requested={provider:"anthropic",model:"claude-opus-5-5"};
+  observation.terminalReceipt.effective={provider:"anthropic",model:"claude-opus-5-5"};
+  const result=await executionResult(rpc,selected,clean,false,async()=>null,async()=>null,async()=>observation);
+  assert.equal(result.actual_model,"anthropic/claude-opus-5-5");
+});
+
+for(const [name,change] of [
+  ["foreign run",o=>o.runId="other"],
+  ["foreign bound receipt",o=>o.terminalReceipt.runId="other"],
+  ["different requested model",o=>o.terminalReceipt.requested.model="other"],
+  ["different reply",o=>o.terminalReply.text="other"],
+  ["missing receipt",o=>delete o.terminalReceipt],
+  ["missing reply",o=>delete o.terminalReply],
+  ["pending error",o=>o.pendingError=true],
+  ["yielded",o=>o.yielded=true],
+  ["paused",o=>o.livenessState="paused"],
+  ["future end",o=>o.endedAt=Date.now()+60000],
+]) test(`live wait rejects ${name}`,async()=>{
+  const rpc=final();delete rpc.result.meta.agentMeta.terminalReceipt;
+  const observation=waitReceipt();change(observation);
+  assert.equal(await executionResult(rpc,task,clean,false,async()=>null,async()=>null,async()=>observation),null);
+});
+
+test("live wait cannot process canceled or historical uncertain runs",async()=>{
+  const rpc=final();delete rpc.result.meta.agentMeta.terminalReceipt;
+  for(const [state,canceled] of [["needs_reconcile",false],["dispatching",true]]){
+    const selected={...task,status:state};
+    assert.equal(await executionResult(rpc,selected,clean,canceled,async()=>null,async()=>null,async()=>assert.fail("human recovery remains required")),null);
+  }
+});
 
 test("owner recovery validates the same completed tool run without rerunning", () => {
   const result = recoveredResult(waitReceipt(), task, clean);

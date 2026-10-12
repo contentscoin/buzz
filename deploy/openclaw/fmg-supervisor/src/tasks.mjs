@@ -319,7 +319,13 @@ export async function createTaskWorker(context, settings) {
       activeController = undefined;
       activeTask = undefined;
     }
-    const completed = await executionResult(receipt, task, clean, canceled);
+    const completed = await executionResult(receipt, task, clean, canceled, undefined, undefined, async (admitted) => {
+      try {
+        return await gateway(context.config, "agent.wait", { runId: admitted.run_id, timeoutMs: 1000 });
+      } catch {
+        return null; // A failed read is not completion; bounded durable validation follows.
+      }
+    });
     if (completed) return completed;
     const meta = receipt?.result?.meta;
     const metadata = meta?.agentMeta;
