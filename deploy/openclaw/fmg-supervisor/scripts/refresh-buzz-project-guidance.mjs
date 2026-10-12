@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, mkdir, realpath, rename } from "node:fs/promises";
+import { open, mkdir, realpath, rename, lstat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { buzzProjectGuidance } from "./buzz-project-guidance.mjs";
 
@@ -9,7 +9,8 @@ if (process.getuid?.() !== 1000 || !/^fmg-(planner|frontend|backend|qa|release)$
   throw new Error("guidance_arguments_invalid");
 const workspace = `/data/.openclaw/workspaces/${role}`;
 const worktree = `${workspace}/projects/buzz`, branch = `fmg-buzz/${role}`;
-const path = `${workspace}/AGENTS.md`, backup = `${workspace}/.fmg-project-backups/${request}`;
+const path = `${workspace}/AGENTS.md`, backupRoot = `${workspace}/.fmg-buzz-guidance-backups`;
+const backup = `${backupRoot}/${request}`;
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 async function read(path) {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -36,12 +37,17 @@ if (config.agents?.entries?.[role]?.workspace !== workspace || manifest.status !
   !manifest.roles.some(r => r.role_id === role && r.stage === "guide_installed" && r.worktree === worktree && r.branch === branch))
   throw new Error("prepared_workspace_changed");
 const before = await read(path), updated = buzzProjectGuidance(before.toString("utf8"), role, worktree, branch);
-await mkdir(backup, { recursive: true, mode: 0o700 });
+await mkdir(backupRoot, { recursive: true, mode: 0o700 });
+const backupStat = await lstat(backupRoot);
+if (!backupStat.isDirectory() || backupStat.isSymbolicLink() || backupStat.uid !== 1000 ||
+  (backupStat.mode & 0o077) !== 0 || await realpath(backupRoot) !== backupRoot)
+  throw new Error("backup_directory_invalid");
+await mkdir(backup, { mode: 0o700 });
 if (await realpath(backup) !== backup) throw new Error("backup_path_changed");
 await write(`${backup}/AGENTS.md`, before);
 await write(`${backup}/prepared.json`, JSON.stringify({ request, role, before_sha256: hash(before), planned_sha256: hash(updated), stage: "backup_saved" }));
 await syncDirectory(backup);
-await syncDirectory(`${workspace}/.fmg-project-backups`);
+await syncDirectory(backupRoot);
 const temporary = `${path}.${request}.tmp`;
 await write(temporary, updated);
 if (hash(await read(path)) !== hash(before)) throw new Error("guidance_changed_concurrently");
