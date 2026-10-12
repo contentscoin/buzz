@@ -46,14 +46,23 @@ final fmgRpcProvider = Provider.autoDispose<FmgRpc?>((ref) {
 
 /// Bounded broker failure codes mapped to Korean messages without raw secrets.
 class FmgRequestException implements Exception {
-  const FmgRequestException(this.code);
+  const FmgRequestException(this.code, {this.detail});
   final String code;
+
+  /// Bounded local response-path code; never contains raw transport errors.
+  final String? detail;
   @override
   String toString() => switch (code) {
     'offline' => '서버에 연결되지 않았습니다. 연결 후 새로 고침하세요.',
     'timeout' => '서버 응답 시간이 초과됐습니다. 다시 조회하세요.',
     'desktop_timeout' =>
-      'PC의 모바일 제어 응답이 없습니다. PC에서 같은 계정의 FMG를 선택하고 업데이트를 적용했는지 확인하세요.',
+      'PC 응답을 확인하지 못했습니다. ${switch (detail) {
+        'stored_response_missing' => '같은 요청 ID의 저장된 응답도 아직 없습니다.',
+        'response_lookup_failed' => '저장된 응답 조회도 실패했습니다. 커뮤니티 연결을 확인하세요.',
+        'signature_rejected' => '도착한 응답이 서명 검증을 통과하지 못했습니다.',
+        'device_mismatch' => '응답의 PC 연결 ID가 현재 대상과 다릅니다.',
+        _ => 'PC의 FMG 작업 센터에서 요청 수신·응답 전송 숫자를 확인하세요.',
+      }}',
     'device_changed' => '이전 PC 연결이 변경됐습니다. 기존 요청 확인을 마친 뒤 새 PC를 연결하세요.',
     'publish_failed' => '릴레이가 요청을 수락하지 않았습니다. 커뮤니티 연결을 확인하세요.',
     'publish_timeout' => '릴레이의 요청 수신을 확인하지 못했습니다. 변경 요청은 이전 요청 확인으로 조회하세요.',
@@ -197,114 +206,170 @@ class FmgRpc {
     unawaited(done.future.catchError((Object _) => <String, dynamic>{}));
     _pending.add(done);
     void Function()? unsubscribe;
+    Timer? responseLookup;
+    String? responseDetail;
     final discovery = desktop && action == 'desktop.discover';
     final timer = Timer(Duration(seconds: discovery ? 15 : 60), () {
       if (!done.isCompleted) {
         done.completeError(
-          FmgRequestException(desktop ? 'desktop_timeout' : 'timeout'),
+          FmgRequestException(
+            desktop ? 'desktop_timeout' : 'timeout',
+            detail: desktop ? responseDetail : null,
+          ),
         );
       }
     });
     final started = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // Exact request UUID prevents a replay; the 90-second bound matches the
+    // signed-event and payload freshness checks while tolerating device clocks.
+    final oldestResponse = started - (desktop ? 90 : 1);
+    final responseFilter = NostrFilter(
+      kinds: [desktop ? 30078 : 24200],
+      authors: [peer],
+      since: oldestResponse,
+      limit: desktop ? 1 : 10,
+      tags: {
+        if (desktop) '#d': ['fmg.mobile:$id:result'],
+        if (desktop) '#t': ['fmg-mobile-control'],
+        '#p': [owner],
+        if (!desktop) '#frame': ['telemetry'],
+      },
+    );
+    void onResponse(NostrEvent event) {
+      if (_closed ||
+          done.isCompleted ||
+          event.pubkey != peer ||
+          event.kind != (desktop ? 30078 : 24200) ||
+          event.content.length > 100000 ||
+          event.createdAt < oldestResponse ||
+          (event.createdAt - DateTime.now().millisecondsSinceEpoch ~/ 1000)
+                  .abs() >
+              90) {
+        return;
+      }
+      bool tag(String key, String value) {
+        final tags = event.tags
+            .where((t) => t.isNotEmpty && t.first == key)
+            .toList();
+        return tags.length == 1 &&
+            tags.single.length >= 2 &&
+            tags.single[1] == value;
+      }
+
+      if (!tag('p', owner) ||
+          (desktop && !tag('t', 'fmg-mobile-control')) ||
+          (desktop && !tag('d', 'fmg.mobile:$id:result')) ||
+          !tag('agent', peer) ||
+          !tag('frame', 'telemetry')) {
+        return;
+      }
+      var signatureVerified = false;
+      try {
+        // The relay session does not verify incoming signatures itself.
+        nostr.Event.fromMap(event.toJson(), verify: true);
+        signatureVerified = true;
+        final frame = jsonDecode(nip44Decrypt(_conversation, event.content));
+        if (frame is! Map ||
+            frame['kind'] !=
+                (desktop
+                    ? 'fmg_mobile_desktop_result'
+                    : 'fmg_computer_result')) {
+          if (!desktop) return;
+          throw const FmgRequestException('invalid_response');
+        }
+        final payload = frame['payload'];
+        if (payload is! Map ||
+            payload['requestId'] != id ||
+            payload['action'] != action ||
+            payload['relay'] != fmgRelayOrigin) {
+          if (!desktop) return;
+          throw const FmgRequestException('invalid_response');
+        }
+        if (desktop &&
+            target['deviceId'] != null &&
+            payload['generation'] != target['deviceId']) {
+          responseDetail = 'device_mismatch';
+          return;
+        }
+        if (payload['schemaVersion'] != 1 ||
+            payload['ok'] is! bool ||
+            !isFmgUuid(payload['generation']) ||
+            payload['checkedAt'] is! String ||
+            DateTime.tryParse(payload['checkedAt']) == null) {
+          throw const FmgRequestException('invalid_response');
+        }
+        if (DateTime.now()
+                .difference(DateTime.parse(payload['checkedAt']))
+                .inSeconds
+                .abs() >
+            90) {
+          throw const FmgRequestException('invalid_response');
+        }
+        if (payload['ok'] != true) {
+          final code = payload['error'];
+          done.completeError(
+            FmgRequestException(
+              code is String && RegExp(r'^[a-z_]{1,64}$').hasMatch(code)
+                  ? code
+                  : 'invalid_response',
+            ),
+          );
+        } else if (payload['result'] is Map<String, dynamic>) {
+          done.complete(payload['result'] as Map<String, dynamic>);
+        } else {
+          done.completeError(const FmgRequestException('invalid_response'));
+        }
+      } catch (error) {
+        // Invalid signatures/unrelated ciphertext are ignored, not accepted.
+        if (!done.isCompleted) {
+          if (signatureVerified && desktop) {
+            done.completeError(
+              error is FmgRequestException
+                  ? error
+                  : const FmgRequestException('invalid_response'),
+            );
+          } else if (error is FmgRequestException) {
+            done.completeError(error);
+          } else if (desktop) {
+            // Do not let an unverified event terminate an authorized request.
+            responseDetail = 'signature_rejected';
+          }
+        }
+      }
+    }
+
+    var lookups = 0;
+    Future<void> lookupResponse() async {
+      if (_closed || done.isCompleted || !_connected()) return;
+      lookups++;
+      try {
+        // Recover a persisted response without publishing the request again.
+        final events = await _session.queryRelay([
+          responseFilter,
+        ], timeout: const Duration(seconds: 3));
+        if (_closed || done.isCompleted) return;
+        if (events.isEmpty) responseDetail ??= 'stored_response_missing';
+        for (final event in events.take(1)) {
+          if (_closed || done.isCompleted) break;
+          onResponse(event);
+        }
+      } catch (_) {
+        if (!_closed && !done.isCompleted) {
+          responseDetail ??= 'response_lookup_failed';
+        }
+      } finally {
+        if (!_closed && !done.isCompleted && lookups < 2) {
+          responseLookup = Timer(const Duration(seconds: 2), () {
+            unawaited(lookupResponse());
+          });
+        }
+      }
+    }
+
     try {
       unsubscribe = await _session.subscribe(
-        NostrFilter(
-          kinds: [desktop ? 30078 : 24200],
-          authors: [peer],
-          since: started - 1,
-          limit: 10,
-          tags: {
-            if (desktop) '#t': ['fmg-mobile-control'],
-            '#p': [owner],
-            '#frame': ['telemetry'],
-          },
-        ),
-        (event) {
-          if (_closed ||
-              done.isCompleted ||
-              event.pubkey != peer ||
-              event.kind != (desktop ? 30078 : 24200) ||
-              event.content.length > 100000 ||
-              event.createdAt < started - 1 ||
-              (event.createdAt - DateTime.now().millisecondsSinceEpoch ~/ 1000)
-                      .abs() >
-                  90) {
-            return;
-          }
-          bool tag(String key, String value) {
-            final tags = event.tags
-                .where((t) => t.isNotEmpty && t.first == key)
-                .toList();
-            return tags.length == 1 &&
-                tags.single.length >= 2 &&
-                tags.single[1] == value;
-          }
-
-          if (!tag('p', owner) ||
-              (desktop && !tag('t', 'fmg-mobile-control')) ||
-              (desktop && !tag('d', 'fmg.mobile:$id:result')) ||
-              !tag('agent', peer) ||
-              !tag('frame', 'telemetry')) {
-            return;
-          }
-          try {
-            // The relay session does not verify incoming signatures itself.
-            nostr.Event.fromMap(event.toJson(), verify: true);
-            final frame = jsonDecode(
-              nip44Decrypt(_conversation, event.content),
-            );
-            if (frame is! Map ||
-                frame['kind'] !=
-                    (desktop
-                        ? 'fmg_mobile_desktop_result'
-                        : 'fmg_computer_result')) {
-              return;
-            }
-            final payload = frame['payload'];
-            if (payload is! Map ||
-                payload['requestId'] != id ||
-                payload['action'] != action ||
-                payload['relay'] != fmgRelayOrigin ||
-                (desktop &&
-                    target['deviceId'] != null &&
-                    payload['generation'] != target['deviceId'])) {
-              return;
-            }
-            if (payload['schemaVersion'] != 1 ||
-                payload['ok'] is! bool ||
-                !isFmgUuid(payload['generation']) ||
-                payload['checkedAt'] is! String ||
-                DateTime.tryParse(payload['checkedAt']) == null) {
-              throw const FmgRequestException('invalid_response');
-            }
-            if (DateTime.now()
-                    .difference(DateTime.parse(payload['checkedAt']))
-                    .inSeconds
-                    .abs() >
-                90) {
-              throw const FmgRequestException('invalid_response');
-            }
-            if (payload['ok'] != true) {
-              final code = payload['error'];
-              done.completeError(
-                FmgRequestException(
-                  code is String && RegExp(r'^[a-z_]{1,64}$').hasMatch(code)
-                      ? code
-                      : 'invalid_response',
-                ),
-              );
-            } else if (payload['result'] is Map<String, dynamic>) {
-              done.complete(payload['result'] as Map<String, dynamic>);
-            } else {
-              done.completeError(const FmgRequestException('invalid_response'));
-            }
-          } catch (error) {
-            // Invalid signatures/unrelated ciphertext are ignored, not accepted.
-            if (error is FmgRequestException && !done.isCompleted) {
-              done.completeError(error);
-            }
-          }
-        },
+        responseFilter,
+        onResponse,
         onClosed: (_) {
           if (!done.isCompleted) {
             done.completeError(const FmgRequestException('offline'));
@@ -351,11 +416,17 @@ class FmgRpc {
             }
             throw const FmgRequestException('publish_failed');
           });
+      if (desktop) {
+        responseLookup = Timer(const Duration(seconds: 4), () {
+          unawaited(lookupResponse());
+        });
+      }
       final results = await Future.wait([done.future, send], eagerError: true);
       if (_closed) throw const FmgRequestException('scope_changed');
       return results.first as Map<String, dynamic>;
     } finally {
       timer.cancel();
+      responseLookup?.cancel();
       _pending.remove(done);
       if (!done.isCompleted) {
         done.completeError(const FmgRequestException('scope_changed'));
