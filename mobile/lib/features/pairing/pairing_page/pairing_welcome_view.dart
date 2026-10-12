@@ -57,7 +57,7 @@ class _PairingWelcomeView extends StatelessWidget {
                 ),
                 const SizedBox(height: Grid.sm),
                 Text(
-                  'Welcome to Buzz',
+                  isFmgMobile ? 'FMG Buzz에 연결' : 'Welcome to Buzz',
                   textAlign: TextAlign.center,
                   style: context.textTheme.headlineSmall?.copyWith(
                     color: _onboardingInk,
@@ -67,7 +67,9 @@ class _PairingWelcomeView extends StatelessWidget {
                 ),
                 const SizedBox(height: Grid.xxs),
                 Text(
-                  'Scan the QR code from your desktop app\nor paste a pairing code to connect.',
+                  isFmgMobile
+                      ? '기존 계정의 데스크톱 Buzz에서 FMG 커뮤니티를 선택하고\n기기 페어링 QR을 스캔하세요. 같은 계정과 대화를 이어 씁니다.\n공식 앱의 데이터와 보내지 않은 초안은 그대로 유지됩니다.'
+                      : 'Scan the QR code from your desktop app\nor paste a pairing code to connect.',
                   textAlign: TextAlign.center,
                   style: context.textTheme.bodyMedium?.copyWith(
                     color: _onboardingMutedInk,
@@ -93,7 +95,11 @@ class _PairingWelcomeView extends StatelessWidget {
                                     semanticLabel: 'Opening scanner',
                                   ),
                                 )
-                              : const Text('Scan a QR code'),
+                              : Text(
+                                  isFmgMobile
+                                      ? '기존 계정 QR 스캔'
+                                      : 'Scan a QR code',
+                                ),
                         ),
                         const SizedBox(height: Grid.xxs),
                         TextButton(

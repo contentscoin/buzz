@@ -23,6 +23,16 @@ val uploadSigningValues =
 val missingUploadSigningValues = uploadSigningValues.filterValues { it.isNullOrBlank() }.keys
 val hasUploadSigning = missingUploadSigningValues.isEmpty()
 val dartDefines = providers.gradleProperty("dart-defines").orNull.orEmpty()
+// One compile-time switch controls both native identity and Dart menus. Ordinary
+// Buzz builds retain their original identity; FMG updates have a stable sandbox.
+val fmgVariantDefines = dartDefines.split(',').mapNotNull { encoded ->
+    runCatching { String(Base64.getDecoder().decode(encoded)) }.getOrNull()
+        ?.takeIf { it.startsWith("FMG_CUSTOM=") }
+}
+if (fmgVariantDefines.size > 1 || fmgVariantDefines.any { it !in setOf("FMG_CUSTOM=true", "FMG_CUSTOM=false") }) {
+    throw GradleException("FMG_CUSTOM must appear at most once and be true or false.")
+}
+val isFmgMobile = fmgVariantDefines.singleOrNull() == "FMG_CUSTOM=true"
 val pushGatewayDefinePrefix = "BUZZ_PUSH_GATEWAY_URL="
 val pushGatewayOrigins =
     dartDefines.split(',').mapNotNull { encoded ->
@@ -151,7 +161,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "xyz.block.buzz.mobile"
+        applicationId = if (isFmgMobile) "xyz.fmg.buzz.mobile" else "xyz.block.buzz.mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -159,7 +169,17 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        resValue("string", "app_name", "Buzz")
+        resValue("string", "app_name", if (isFmgMobile) "FMG Buzz" else "Buzz")
+        manifestPlaceholders["buzzLinkScheme"] = if (isFmgMobile) "fmgbuzz" else "buzz"
+        manifestPlaceholders["buzzLauncherIcon"] = if (isFmgMobile) "@drawable/ic_fmg_launcher" else "@mipmap/ic_launcher"
+        if (isFmgMobile) {
+            // This installable FMG artifact targets ARM64. Do not package other
+            // plugins' 32-bit libraries without a matching Flutter engine.
+            ndk {
+                abiFilters.clear()
+                abiFilters += "arm64-v8a"
+            }
+        }
     }
 
     signingConfigs {
@@ -177,14 +197,14 @@ android {
         debug {
             // Only debug builds take the worktree identity; release/profile
             // keep the production applicationId and label.
-            if (debugIdSuffix != null) {
+            if (debugIdSuffix != null && !isFmgMobile) {
                 applicationIdSuffix = debugIdSuffix
             }
             val resolvedAppName =
                 debugAppName
                     ?: worktreeAppName
                     ?: worktreeLabel?.let { "Buzz ($it)" }
-            if (resolvedAppName != null) {
+            if (resolvedAppName != null && !isFmgMobile) {
                 resValue("string", "app_name", resolvedAppName)
             }
         }

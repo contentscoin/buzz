@@ -17,6 +17,8 @@ import 'features/channels/channel_management_provider.dart';
 import 'features/channels/channels_provider.dart';
 import 'features/channels/unread_badge/unread_badge_provider.dart';
 import 'features/home/home_page.dart';
+import 'features/fmg/fmg_workspace_page.dart';
+import 'shared/fmg/fmg_variant.dart';
 import 'features/invites/invite_create_page.dart';
 import 'features/invites/invite_join_provider.dart';
 import 'features/pairing/pairing_page.dart';
@@ -415,6 +417,9 @@ class App extends HookConsumerWidget {
             child: HomePage(
               settingsPageBuilder: _buildSettingsPage,
               hasUnreadInbox: hasUnreadInbox,
+              fmgPageBuilder: isFmgMobile
+                  ? (_) => const FmgWorkspacePage()
+                  : null,
             ),
           ),
           _ => const DeepLinkDispatcher(

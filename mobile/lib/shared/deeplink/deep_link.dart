@@ -8,6 +8,10 @@
 library;
 
 import '../relay/relay_validation.dart';
+import '../fmg/fmg_variant.dart';
+
+Uri _normalizeFmgLink(Uri uri) =>
+    isFmgMobile && uri.scheme == 'fmgbuzz' ? uri.replace(scheme: 'buzz') : uri;
 
 /// A parsed deep link supported by the app.
 sealed class BuzzDeepLink {
@@ -148,6 +152,7 @@ String buildMessageLink({
 /// parameters and fragments are rejected so malformed or ambiguous links never
 /// become navigation targets.
 ChannelDeepLink? parseChannelDeepLink(Uri uri) {
+  uri = _normalizeFmgLink(uri);
   if (uri.scheme != 'buzz' || uri.host != 'channel') return null;
   if (uri.hasQuery ||
       uri.hasFragment ||
@@ -174,6 +179,7 @@ ChannelDeepLink? parseChannelDeepLink(Uri uri) {
 /// shape: no path, fragment, credentials, duplicate or unknown parameters; a
 /// UUID channel; and 64-character hexadecimal message/thread event IDs.
 MessageDeepLink? parseMessageDeepLink(Uri uri) {
+  uri = _normalizeFmgLink(uri);
   if (uri.scheme != 'buzz' || uri.host != 'message') return null;
   if (uri.path.isNotEmpty ||
       uri.hasFragment ||
@@ -223,6 +229,7 @@ MessageDeepLink? parseMessageDeepLink(Uri uri) {
 /// non-invite paths so scanners do not accidentally treat arbitrary URLs as
 /// community admission links.
 InviteDeepLink? parseInviteDeepLink(Uri uri) {
+  uri = _normalizeFmgLink(uri);
   if (uri.hasFragment || uri.userInfo.isNotEmpty) return null;
 
   if (uri.scheme == 'buzz') {
@@ -313,6 +320,7 @@ class EntityDeepLink extends BuzzDeepLink {
 
 /// Parse canonical `buzz://repo|pr|issue` permalinks for inline presentation.
 EntityDeepLink? parseEntityDeepLink(Uri uri) {
+  uri = _normalizeFmgLink(uri);
   if (uri.scheme != 'buzz' || !{'repo', 'pr', 'issue'}.contains(uri.host)) {
     return null;
   }

@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../shared/security/sensitive_action_authorizer.dart';
 import '../../shared/theme/theme.dart';
+import '../../shared/fmg/fmg_variant.dart';
 import '../../shared/widgets/buzz_loading_indicator.dart';
 import '../../shared/widgets/ios_glass_navigation_button.dart';
 import '../../shared/widgets/tappable_flapping_bee.dart';

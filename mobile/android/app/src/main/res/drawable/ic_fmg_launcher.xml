@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#173E61" android:pathData="M0,0H108V108H0Z" />
+    <!-- A distinct F mark, kept inside the Android mask safe area. -->
+    <path android:fillColor="#D7E95A" android:pathData="M32,27H77V39H46V48H71V60H46V81H32Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M66,72H78V84H66Z" />
+</vector>

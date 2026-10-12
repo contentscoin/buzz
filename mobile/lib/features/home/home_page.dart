@@ -18,11 +18,13 @@ class HomePage extends HookConsumerWidget {
   const HomePage({
     required this.settingsPageBuilder,
     required this.hasUnreadInbox,
+    this.fmgPageBuilder,
     super.key,
   });
 
   final WidgetBuilder settingsPageBuilder;
   final bool hasUnreadInbox;
+  final WidgetBuilder? fmgPageBuilder;
 
   static const double _tabBarHeight = mobileTabBarHeight;
   static const double _tabBarRadius = _tabBarHeight / 2;
@@ -63,6 +65,15 @@ class HomePage extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final destinations = [
+      ..._destinations,
+      if (fmgPageBuilder != null)
+        const _HomeDestination(
+          icon: Icons.assignment_outlined,
+          selectedIcon: Icons.assignment,
+          label: 'FMG',
+        ),
+    ];
     final tabIndex = useState(0);
     final visitedTabs = useRef(<int>{0});
     final tabContentTransitionDirection = useRef(1.0);
@@ -84,7 +95,7 @@ class HomePage extends HookConsumerWidget {
     final systemBottomInset = MediaQuery.paddingOf(context).bottom;
     final navigationBarWidth = _floatingTabBarWidth(
       MediaQuery.sizeOf(context).width,
-      _destinations.length,
+      destinations.length,
     );
 
     final pages = [
@@ -105,6 +116,11 @@ class HomePage extends HookConsumerWidget {
         SearchPage(tabReselection: searchReselection)
       else
         const SizedBox.shrink(),
+      if (fmgPageBuilder != null)
+        if (visitedTabs.value.contains(3))
+          fmgPageBuilder!(context)
+        else
+          const SizedBox.shrink(),
     ];
 
     final settingsTransitionGradient = tabIndex.value == 0
@@ -214,7 +230,7 @@ class HomePage extends HookConsumerWidget {
                   unawaited(tabContentTransitionController.forward(from: 0));
                 }
               },
-              destinations: _destinations,
+              destinations: destinations,
             ),
           ),
           builder: (context, progress, child) {
