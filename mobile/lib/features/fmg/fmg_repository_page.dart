@@ -73,8 +73,9 @@ class FmgRepositoryPage extends HookConsumerWidget {
             onSave: (values) {
               final revision = values.remove('_baseRevision');
               final input = <String, dynamic>{...target, ...extra, ...values};
-              if (revisionKey != null)
+              if (revisionKey != null) {
                 input[revisionKey] = revision ?? extra[revisionKey];
+              }
               return management.mutate(action, input);
             },
           ),
